@@ -47,7 +47,7 @@ async def get_synergies(
     partners = await get_card_synergies(driver, card_id, max_hops, color)
     return SynergyResponse(
         card_id=card_id,
-        partners=[SynergyPartner(**{k: p.get(k) for k in SynergyPartner.model_fields}) for p in partners],
+        partners=[SynergyPartner(**{k: (p.get(k) or SynergyPartner.model_fields[k].default) for k in SynergyPartner.model_fields}) for p in partners],
         total=len(partners),
     )
 

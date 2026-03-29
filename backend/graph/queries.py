@@ -40,19 +40,20 @@ async def get_card_synergies(
 ) -> list[dict]:
     """Find synergy partners for a card."""
     color_clause = ""
-    params: dict = {"id": card_id, "hops": max_hops}
+    query_params: dict = {"id": card_id}
     if color_filter:
         color_clause = "AND (partner)-[:HAS_COLOR]->(:Color {name: $color})"
-        params["color"] = color_filter
+        query_params["color"] = color_filter
 
+    # Build query with hop count baked into the string (not a parameter)
     query = f"""
-        MATCH (c:Card {{id: $id}})-[r:SYNERGY|MECHANICAL_SYNERGY*1..{max_hops}]-(partner:Card)
+        MATCH (c:Card {{id: $id}})-[:SYNERGY|MECHANICAL_SYNERGY*1..{max_hops}]-(partner:Card)
         WHERE partner.id <> $id {color_clause}
-        RETURN DISTINCT partner, labels(partner) AS labels
+        RETURN DISTINCT partner
         LIMIT 50
     """
     async with driver.session() as session:
-        result = await session.run(query, **params)
+        result = await session.run(query, **query_params)
         records = [record async for record in result]
         return [dict(r["partner"]) for r in records]
 

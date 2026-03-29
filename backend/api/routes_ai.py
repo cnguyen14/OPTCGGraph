@@ -78,9 +78,30 @@ async def chat_sync(req: ChatRequest, driver: AsyncDriver = Depends(_get_driver)
 
     session.save_messages(result["messages"])
 
+    # Build tool call summaries for frontend display
+    tool_summaries = []
+    for tc in result["tool_calls"]:
+        name = tc["name"]
+        inp = tc.get("input", {})
+        if name == "get_card":
+            tool_summaries.append(f"Looked up card {inp.get('card_id', '?')}")
+        elif name == "find_synergies":
+            tool_summaries.append(f"Found synergies for {inp.get('card_id', '?')}")
+        elif name == "find_counters":
+            tool_summaries.append(f"Found counters for {inp.get('target_card_id', '?')}")
+        elif name == "query_neo4j":
+            tool_summaries.append("Queried knowledge graph")
+        elif name == "build_deck_shell":
+            tool_summaries.append(f"Built deck for leader {inp.get('leader_id', '?')}")
+        elif name == "get_mana_curve":
+            tool_summaries.append("Analyzed mana curve")
+        else:
+            tool_summaries.append(f"Used {name}")
+
     return {
         "text": result["text"],
         "session_id": session.id,
         "tool_calls_count": len(result["tool_calls"]),
+        "tool_summaries": tool_summaries,
         "ui_updates": result["ui_updates"],
     }
