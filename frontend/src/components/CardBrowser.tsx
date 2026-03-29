@@ -328,11 +328,14 @@ export default function CardBrowser({ onCardSelect }: CardBrowserProps) {
                         {card.cost}
                       </span>
                     )}
-                    <span
-                      className="w-2 h-2 rounded-full inline-block"
-                      style={{ backgroundColor: COLOR_MAP[card.color] ?? '#6b7280' }}
-                      title={card.color}
-                    />
+                    {(card.colors?.length ? card.colors : card.color ? [card.color] : []).map((c) => (
+                      <span
+                        key={c}
+                        className="w-2 h-2 rounded-full inline-block"
+                        style={{ backgroundColor: COLOR_MAP[c] ?? '#6b7280' }}
+                        title={c}
+                      />
+                    ))}
                   </div>
                 </div>
               </div>
@@ -387,12 +390,16 @@ export default function CardBrowser({ onCardSelect }: CardBrowserProps) {
                     <td className="py-1.5 px-2 text-gray-300">{card.cost ?? '-'}</td>
                     <td className="py-1.5 px-2 text-gray-300">{card.power ?? '-'}</td>
                     <td className="py-1.5 px-2">
-                      <span className="flex items-center gap-1.5">
-                        <span
-                          className="w-2.5 h-2.5 rounded-full inline-block"
-                          style={{ backgroundColor: COLOR_MAP[card.color] ?? '#6b7280' }}
-                        />
-                        {card.color}
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {(card.colors?.length ? card.colors : card.color ? [card.color] : []).map((c) => (
+                          <span key={c} className="flex items-center gap-1">
+                            <span
+                              className="w-2.5 h-2.5 rounded-full inline-block"
+                              style={{ backgroundColor: COLOR_MAP[c] ?? '#6b7280' }}
+                            />
+                            <span className="text-gray-300">{c}</span>
+                          </span>
+                        ))}
                       </span>
                     </td>
                     <td className="py-1.5 px-2 text-gray-300">
