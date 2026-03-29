@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import GraphExplorer from './components/GraphExplorer';
+import CardBrowser from './components/CardBrowser';
 import DeckBuilder from './components/DeckBuilder';
 import AIChat from './components/AIChat';
 import CardDetail from './components/CardDetail';
 import type { Card } from './types';
 
-type Tab = 'graph' | 'deck' | 'chat';
+type Tab = 'graph' | 'cards' | 'deck' | 'chat';
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('graph');
@@ -14,6 +15,7 @@ function App() {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'graph', label: 'Graph Explorer' },
+    { key: 'cards', label: 'Cards' },
     { key: 'deck', label: 'Deck Builder' },
     { key: 'chat', label: 'AI Chat' },
   ];
@@ -47,6 +49,9 @@ function App() {
       <main className="flex-1 overflow-hidden">
         {activeTab === 'graph' && (
           <GraphExplorer onCardSelect={setSelectedCard} />
+        )}
+        {activeTab === 'cards' && (
+          <CardBrowser onCardSelect={setSelectedCard} />
         )}
         {activeTab === 'deck' && (
           <DeckBuilder onCardSelect={setSelectedCard} />

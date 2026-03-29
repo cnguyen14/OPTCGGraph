@@ -1,3 +1,5 @@
+import type { CardSearchParams, CardSearchResponse, Facets } from '../types';
+
 const BASE_URL = '/api';
 
 export async function fetchCard(cardId: string) {
@@ -18,9 +20,24 @@ export async function fetchDeckCandidates(leaderId: string, limit = 50) {
   return resp.json();
 }
 
-export async function searchCards(params: Record<string, string>) {
-  const query = new URLSearchParams(params);
+export async function searchCards(params: CardSearchParams): Promise<CardSearchResponse> {
+  const query = new URLSearchParams();
+  if (params.keyword) query.set('keyword', params.keyword);
+  if (params.color) query.set('color', params.color);
+  if (params.card_type) query.set('card_type', params.card_type);
+  if (params.family) query.set('family', params.family);
+  if (params.cost_min !== undefined) query.set('cost_min', String(params.cost_min));
+  if (params.cost_max !== undefined) query.set('cost_max', String(params.cost_max));
+  if (params.sort_by) query.set('sort_by', params.sort_by);
+  if (params.sort_order) query.set('sort_order', params.sort_order);
+  if (params.offset !== undefined) query.set('offset', String(params.offset));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
   const resp = await fetch(`${BASE_URL}/graph/search?${query}`);
+  return resp.json();
+}
+
+export async function fetchFacets(): Promise<Facets> {
+  const resp = await fetch(`${BASE_URL}/graph/facets`);
   return resp.json();
 }
 
