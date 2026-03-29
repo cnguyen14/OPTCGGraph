@@ -42,3 +42,5 @@ docker-data/
 
 # Crawl cache (raw API responses)
 .crawl-cache/
+.playwright-mcp/
+.claude/worktrees/
