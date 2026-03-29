@@ -10,6 +10,7 @@ from backend.api.routes_graph import router as graph_router
 from backend.api.routes_data import router as data_router
 from backend.api.routes_settings import router as settings_router
 from backend.api.routes_ai import router as ai_router
+from backend.api.routes_deck import router as deck_router
 
 
 @asynccontextmanager
@@ -43,6 +44,7 @@ app.include_router(graph_router)
 app.include_router(data_router)
 app.include_router(settings_router)
 app.include_router(ai_router)
+app.include_router(deck_router)
 
 
 @app.get("/")
