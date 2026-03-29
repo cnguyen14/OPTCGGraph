@@ -165,6 +165,7 @@ async def search_cards(
                  collect(DISTINCT fam.name) AS families,
                  s.name AS set_name,
                  collect(DISTINCT kw.name) AS keywords
+            RETURN c, colors, families, set_name, keywords
             ORDER BY {sort_field} {order}
             SKIP $offset LIMIT $limit
             """,
