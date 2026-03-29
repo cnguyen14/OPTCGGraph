@@ -61,8 +61,8 @@ async def load_cards(driver: AsyncDriver, cards: list[dict]) -> int:
                 **_card_params(card),
             )
 
-            # Color edges (handle multi-color: "Red/Green" → 2 edges)
-            for color in _split_field(card.get("color", "")):
+            # Color edges (handle multi-color: "Red Black" → 2 edges)
+            for color in _split_colors(card.get("color", "")):
                 await session.run(
                     """
                     MERGE (color:Color {name: $color})
@@ -160,3 +160,27 @@ def _split_field(value: str, sep: str = "/") -> list[str]:
     if not value or value == "-":
         return []
     return [v.strip() for v in value.split(sep) if v.strip()]
+
+
+KNOWN_COLORS = {"Red", "Green", "Blue", "Purple", "Black", "Yellow"}
+
+
+def _split_colors(value: str) -> list[str]:
+    """Split color string into individual color names.
+
+    Handles: "Red" → ["Red"], "Red Black" → ["Red", "Black"],
+    "Blue/Green" → ["Blue", "Green"], "Blue Purple" → ["Blue", "Purple"]
+    """
+    if not value or value == "-":
+        return []
+    # First try "/" separator (apitcg format)
+    if "/" in value:
+        return [v.strip() for v in value.split("/") if v.strip()]
+    # Then try splitting by known color names (optcgapi space-separated format)
+    colors = []
+    remaining = value.strip()
+    for color in sorted(KNOWN_COLORS, key=len, reverse=True):
+        if color in remaining:
+            colors.append(color)
+            remaining = remaining.replace(color, "", 1).strip()
+    return colors if colors else [value]
