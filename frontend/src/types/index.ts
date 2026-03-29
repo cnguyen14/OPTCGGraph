@@ -91,3 +91,29 @@ export interface AgentState {
     tier: 1 | 2 | 3;
   };
 }
+
+export interface CardSearchParams {
+  keyword?: string;
+  color?: string;
+  card_type?: string;
+  family?: string;
+  cost_min?: number;
+  cost_max?: number;
+  sort_by?: 'name' | 'cost' | 'power' | 'market_price';
+  sort_order?: 'asc' | 'desc';
+  offset?: number;
+  limit?: number;
+}
+
+export interface CardSearchResponse {
+  cards: Card[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface Facets {
+  colors: string[];
+  card_types: string[];
+  families: string[];
+}

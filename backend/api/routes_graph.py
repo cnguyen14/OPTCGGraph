@@ -7,8 +7,10 @@ from backend.api.models import (
     CardResponse,
     CurveResponse,
     CurveEntry,
+    FacetsResponse,
     HubCard,
     NetworkResponse,
+    SearchResponse,
     StatsResponse,
     SynergyPartner,
     SynergyResponse,
@@ -18,6 +20,7 @@ from backend.graph.queries import (
     get_card_by_id,
     get_card_synergies,
     get_card_network,
+    get_facets,
     search_cards,
     get_db_stats,
 )
@@ -185,18 +188,51 @@ async def get_hubs(
         return [HubCard(**dict(r)) async for r in result]
 
 
-@router.get("/search")
+@router.get("/facets", response_model=FacetsResponse)
+async def facets(driver: AsyncDriver = Depends(_get_driver)):
+    """Get available filter values for card search."""
+    return await get_facets(driver)
+
+
+@router.get("/search", response_model=SearchResponse)
 async def search(
     keyword: str | None = None,
+    cost_min: int | None = None,
     cost_max: int | None = None,
     color: str | None = None,
     card_type: str | None = None,
     family: str | None = None,
+    sort_by: str = Query("name"),
+    sort_order: str = Query("asc"),
+    offset: int = Query(0, ge=0),
     limit: int = Query(25, ge=1, le=100),
     driver: AsyncDriver = Depends(_get_driver),
 ):
-    """Search cards with filters."""
-    return await search_cards(driver, keyword, cost_max, color, card_type, family, limit)
+    """Search cards with filters, pagination, and sorting."""
+    valid_sort_fields = ["name", "cost", "power", "market_price"]
+    if sort_by not in valid_sort_fields:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid sort_by: {sort_by}. Must be one of {valid_sort_fields}",
+        )
+    if sort_order not in ("asc", "desc"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid sort_order: {sort_order}. Must be 'asc' or 'desc'",
+        )
+    return await search_cards(
+        driver,
+        keyword=keyword,
+        cost_min=cost_min,
+        cost_max=cost_max,
+        color=color,
+        card_type=card_type,
+        family=family,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        offset=offset,
+        limit=limit,
+    )
 
 
 @router.get("/stats", response_model=StatsResponse)

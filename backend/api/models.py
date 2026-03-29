@@ -88,6 +88,19 @@ class SearchParams(BaseModel):
     limit: int = 25
 
 
+class SearchResponse(BaseModel):
+    cards: list[CardResponse] = Field(default_factory=list)
+    total: int = 0
+    offset: int = 0
+    limit: int = 25
+
+
+class FacetsResponse(BaseModel):
+    colors: list[str] = Field(default_factory=list)
+    card_types: list[str] = Field(default_factory=list)
+    families: list[str] = Field(default_factory=list)
+
+
 class StatsResponse(BaseModel):
     cards: int = 0
     colors: int = 0

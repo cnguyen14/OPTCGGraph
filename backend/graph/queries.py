@@ -99,19 +99,35 @@ async def get_card_network(driver: AsyncDriver, card_id: str, hops: int = 2) -> 
 async def search_cards(
     driver: AsyncDriver,
     keyword: str | None = None,
+    cost_min: int | None = None,
     cost_max: int | None = None,
     color: str | None = None,
     card_type: str | None = None,
     family: str | None = None,
+    sort_by: str = "name",
+    sort_order: str = "asc",
+    offset: int = 0,
     limit: int = 25,
-) -> list[dict]:
-    """Search cards with filters."""
-    conditions = []
-    params: dict = {"limit": limit}
+) -> dict:
+    """Search cards with filters, pagination, and sorting."""
+    sort_allowlist = {
+        "name": "c.name",
+        "cost": "c.cost",
+        "power": "c.power",
+        "market_price": "c.market_price",
+    }
+    sort_field = sort_allowlist.get(sort_by, "c.name")
+    order = "DESC" if sort_order == "desc" else "ASC"
+
+    conditions: list[str] = []
+    params: dict = {"limit": limit, "offset": offset}
 
     if keyword:
         conditions.append("(c.ability CONTAINS $keyword OR c.name CONTAINS $keyword)")
         params["keyword"] = keyword
+    if cost_min is not None:
+        conditions.append("c.cost >= $cost_min")
+        params["cost_min"] = cost_min
     if cost_max is not None:
         conditions.append("c.cost <= $cost_max")
         params["cost_max"] = cost_max
@@ -128,11 +144,59 @@ async def search_cards(
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
 
     async with driver.session() as session:
-        result = await session.run(
-            f"MATCH (c:Card) {where} RETURN c LIMIT $limit",
+        # Count query
+        count_result = await session.run(
+            f"MATCH (c:Card) {where} RETURN count(c) AS total",
             **params,
         )
-        return [dict(record["c"]) async for record in result]
+        count_record = await count_result.single()
+        total = count_record["total"] if count_record else 0
+
+        # Data query with joins
+        data_result = await session.run(
+            f"""
+            MATCH (c:Card) {where}
+            OPTIONAL MATCH (c)-[:HAS_COLOR]->(clr:Color)
+            OPTIONAL MATCH (c)-[:BELONGS_TO]->(fam:Family)
+            OPTIONAL MATCH (c)-[:FROM_SET]->(s:Set)
+            OPTIONAL MATCH (c)-[:HAS_KEYWORD]->(kw:Keyword)
+            WITH c,
+                 collect(DISTINCT clr.name) AS colors,
+                 collect(DISTINCT fam.name) AS families,
+                 s.name AS set_name,
+                 collect(DISTINCT kw.name) AS keywords
+            ORDER BY {sort_field} {order}
+            SKIP $offset LIMIT $limit
+            """,
+            **params,
+        )
+        cards = []
+        async for record in data_result:
+            card_node = record["c"]
+            cards.append({
+                **dict(card_node),
+                "colors": record["colors"],
+                "families": record["families"],
+                "set_name": record["set_name"],
+                "keywords": record["keywords"],
+            })
+
+        return {"cards": cards, "total": total, "offset": offset, "limit": limit}
+
+
+async def get_facets(driver: AsyncDriver) -> dict:
+    """Get available filter values for card search."""
+    async with driver.session() as session:
+        colors_result = await session.run("MATCH (c:Color) RETURN c.name AS name ORDER BY c.name")
+        colors = [r["name"] async for r in colors_result]
+
+        types_result = await session.run("MATCH (c:Card) RETURN DISTINCT c.card_type AS name ORDER BY name")
+        card_types = [r["name"] async for r in types_result]
+
+        families_result = await session.run("MATCH (f:Family) RETURN f.name AS name ORDER BY f.name")
+        families = [r["name"] async for r in families_result]
+
+        return {"colors": colors, "card_types": card_types, "families": families}
 
 
 async def get_db_stats(driver: AsyncDriver) -> dict:
