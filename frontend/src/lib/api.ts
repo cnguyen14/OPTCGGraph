@@ -63,6 +63,29 @@ export async function fetchCurve(color?: string, family?: string) {
   return resp.json();
 }
 
+export interface DeckSynergyEdge {
+  source: string;
+  target: string;
+  type: string;
+  weight: number | null;
+  shared_families?: string[];
+  shared_keywords?: string[];
+  cost_diff?: number;
+}
+
+export interface DeckSynergyResponse {
+  edges: DeckSynergyEdge[];
+}
+
+export async function fetchDeckSynergies(cardIds: string[]): Promise<DeckSynergyResponse> {
+  const resp = await fetch(`${BASE_URL}/graph/deck/synergies`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ card_ids: cardIds }),
+  });
+  return resp.json();
+}
+
 export async function chatSync(message: string, sessionId?: string, leaderId?: string) {
   const resp = await fetch(`${BASE_URL}/ai/chat/sync`, {
     method: 'POST',

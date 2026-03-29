@@ -49,6 +49,11 @@ export interface GraphEdge {
   weight?: number;
 }
 
+export interface DeckEntry {
+  card: Card;
+  quantity: number;
+}
+
 export interface DeckState {
   leader: Card | null;
   cards: Card[];

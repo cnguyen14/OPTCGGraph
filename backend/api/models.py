@@ -116,6 +116,24 @@ class StatsResponse(BaseModel):
     keywords: int = 0
 
 
+class DeckSynergyEdge(BaseModel):
+    source: str
+    target: str
+    type: str
+    weight: int | None = None
+    shared_families: list[str] | None = None
+    shared_keywords: list[str] | None = None
+    cost_diff: int | None = None
+
+
+class DeckSynergyRequest(BaseModel):
+    card_ids: list[str] = Field(..., min_length=1, max_length=60)
+
+
+class DeckSynergyResponse(BaseModel):
+    edges: list[DeckSynergyEdge] = Field(default_factory=list)
+
+
 class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None

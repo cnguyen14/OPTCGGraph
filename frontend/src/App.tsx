@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import GraphExplorer from './components/GraphExplorer';
 import CardBrowser from './components/CardBrowser';
-import DeckBuilder from './components/DeckBuilder';
+import DeckBuilder from './components/deck-builder/DeckBuilder';
 import AIChat from './components/AIChat';
 import CardDetail from './components/CardDetail';
 import type { Card } from './types';

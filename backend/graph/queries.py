@@ -217,6 +217,50 @@ async def get_facets(driver: AsyncDriver) -> dict:
         return {"colors": colors, "card_types": card_types, "families": families, "sets": sets, "rarities": rarities}
 
 
+async def get_deck_synergies(driver: AsyncDriver, card_ids: list[str]) -> dict:
+    """Find all SYNERGY and MECHANICAL_SYNERGY edges between a set of cards.
+
+    Returns nodes (cards) and edges (synergy relationships) for visualization.
+    """
+    if not card_ids:
+        return {"nodes": [], "edges": []}
+
+    async with driver.session() as session:
+        # Get all synergy edges between cards in the deck
+        result = await session.run(
+            """
+            MATCH (a:Card)-[r:SYNERGY|MECHANICAL_SYNERGY|CURVES_INTO]-(b:Card)
+            WHERE a.id IN $ids AND b.id IN $ids AND a.id < b.id
+            OPTIONAL MATCH (a)-[:HAS_COLOR]->(ca:Color)
+            OPTIONAL MATCH (b)-[:HAS_COLOR]->(cb:Color)
+            RETURN a.id AS source, b.id AS target,
+                   type(r) AS rel_type,
+                   r.weight AS weight,
+                   r.shared_families AS shared_families,
+                   r.shared_keywords AS shared_keywords,
+                   r.cost_diff AS cost_diff
+            """,
+            ids=card_ids,
+        )
+        edges = []
+        async for r in result:
+            edge: dict = {
+                "source": r["source"],
+                "target": r["target"],
+                "type": r["rel_type"],
+                "weight": r["weight"],
+            }
+            if r["shared_families"]:
+                edge["shared_families"] = r["shared_families"]
+            if r["shared_keywords"]:
+                edge["shared_keywords"] = r["shared_keywords"]
+            if r["cost_diff"] is not None:
+                edge["cost_diff"] = r["cost_diff"]
+            edges.append(edge)
+
+        return {"edges": edges}
+
+
 async def get_db_stats(driver: AsyncDriver) -> dict:
     """Get database statistics."""
     async with driver.session() as session:
