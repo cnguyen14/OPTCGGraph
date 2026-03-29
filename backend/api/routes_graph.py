@@ -7,6 +7,8 @@ from backend.api.models import (
     CardResponse,
     CurveResponse,
     CurveEntry,
+    DeckSynergyRequest,
+    DeckSynergyResponse,
     FacetsResponse,
     HubCard,
     NetworkResponse,
@@ -20,6 +22,7 @@ from backend.graph.queries import (
     get_card_by_id,
     get_card_synergies,
     get_card_network,
+    get_deck_synergies,
     get_facets,
     search_cards,
     get_db_stats,
@@ -96,6 +99,16 @@ async def get_deck_candidates(
             }
             for r in records
         ]
+
+
+@router.post("/deck/synergies", response_model=DeckSynergyResponse)
+async def deck_synergies(
+    request: DeckSynergyRequest,
+    driver: AsyncDriver = Depends(_get_driver),
+):
+    """Find all synergy edges between cards in a deck for map visualization."""
+    result = await get_deck_synergies(driver, request.card_ids)
+    return result
 
 
 @router.get("/query/counters")
