@@ -113,9 +113,14 @@ export interface CardSearchResponse {
   limit: number;
 }
 
+export interface SetFacet {
+  id: string;
+  name: string;
+}
+
 export interface Facets {
   colors: string[];
   card_types: string[];
   families: string[];
-  sets: string[];
+  sets: SetFacet[];
 }

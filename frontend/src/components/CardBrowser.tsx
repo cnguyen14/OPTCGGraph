@@ -193,7 +193,7 @@ export default function CardBrowser({ onCardSelect }: CardBrowserProps) {
           >
             <option value="">All Sets</option>
             {facets.sets.map((s) => (
-              <option key={s} value={s}>{s}</option>
+              <option key={s.id} value={s.name}>{s.id} - {s.name}</option>
             ))}
           </select>
 

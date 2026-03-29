@@ -201,8 +201,8 @@ async def get_facets(driver: AsyncDriver) -> dict:
         families_result = await session.run("MATCH (f:Family) RETURN f.name AS name ORDER BY f.name")
         families = [r["name"] async for r in families_result]
 
-        sets_result = await session.run("MATCH (s:Set) RETURN DISTINCT s.name AS name ORDER BY name")
-        sets = [r["name"] async for r in sets_result]
+        sets_result = await session.run("MATCH (s:Set) RETURN DISTINCT s.id AS id, s.name AS name ORDER BY s.id")
+        sets = [{"id": r["id"], "name": r["name"]} async for r in sets_result]
 
         return {"colors": colors, "card_types": card_types, "families": families, "sets": sets}
 

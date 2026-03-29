@@ -95,11 +95,16 @@ class SearchResponse(BaseModel):
     limit: int = 25
 
 
+class SetFacet(BaseModel):
+    id: str
+    name: str
+
+
 class FacetsResponse(BaseModel):
     colors: list[str] = Field(default_factory=list)
     card_types: list[str] = Field(default_factory=list)
     families: list[str] = Field(default_factory=list)
-    sets: list[str] = Field(default_factory=list)
+    sets: list[SetFacet] = Field(default_factory=list)
 
 
 class StatsResponse(BaseModel):
