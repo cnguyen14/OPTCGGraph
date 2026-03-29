@@ -124,7 +124,7 @@ async def search_cards(
     params: dict = {"limit": limit, "offset": offset}
 
     if keyword:
-        conditions.append("(c.ability CONTAINS $keyword OR c.name CONTAINS $keyword)")
+        conditions.append("(c.id CONTAINS $keyword OR c.name CONTAINS $keyword OR c.ability CONTAINS $keyword)")
         params["keyword"] = keyword
     if cost_min is not None:
         conditions.append("c.cost >= $cost_min")
