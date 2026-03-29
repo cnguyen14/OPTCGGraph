@@ -36,7 +36,7 @@ async def build_synergy_edges(driver: AsyncDriver) -> int:
 
 
 async def build_mechanical_synergy_edges(driver: AsyncDriver) -> int:
-    """Build MECHANICAL_SYNERGY edges: cards sharing ≥2 parsed keywords."""
+    """Build MECHANICAL_SYNERGY edges: cards sharing ≥2 parsed keywords within same color."""
     async with driver.session() as session:
         await session.run("MATCH ()-[r:MECHANICAL_SYNERGY]->() DELETE r")
 
@@ -48,6 +48,8 @@ async def build_mechanical_synergy_edges(driver: AsyncDriver) -> int:
               AND b.card_type IN ['CHARACTER', 'LEADER', 'EVENT', 'STAGE']
             WITH a, b, collect(DISTINCT k.name) AS shared_keywords
             WHERE size(shared_keywords) >= 2
+            MATCH (a)-[:HAS_COLOR]->(ca:Color)<-[:HAS_COLOR]-(b)
+            WITH a, b, shared_keywords
             MERGE (a)-[r:MECHANICAL_SYNERGY]->(b)
             SET r.weight = size(shared_keywords),
                 r.shared_keywords = shared_keywords

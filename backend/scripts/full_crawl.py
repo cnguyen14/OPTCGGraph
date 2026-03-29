@@ -46,6 +46,12 @@ async def main():
     logger.info("--- Step 3: Loading into Neo4j ---")
     driver = await get_driver()
 
+    # Clear existing data for clean rebuild
+    logger.info("Clearing existing graph data...")
+    async with driver.session() as session:
+        await session.run("MATCH (n) DETACH DELETE n")
+    logger.info("Graph cleared.")
+
     logger.info("Creating indexes...")
     await create_indexes(driver)
 

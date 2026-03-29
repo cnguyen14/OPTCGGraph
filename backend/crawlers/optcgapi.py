@@ -8,6 +8,7 @@ from pathlib import Path
 import httpx
 
 from backend.config import OPTCGAPI_BASE_URL, OPTCGAPI_DELAY, CRAWL_CACHE_DIR
+from backend.crawlers.families import parse_families
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ def _normalize(raw: dict) -> dict:
         "rarity": raw.get("rarity", ""),
         "attribute": raw.get("attribute", ""),
         "color": raw.get("card_color", ""),
-        "family": (raw.get("sub_types", "") or "").replace(" ", "/") if raw.get("sub_types") else "",
+        "family": "/".join(parse_families(raw.get("sub_types", "") or "")),
         "ability": raw.get("card_text", ""),
         "trigger_effect": "",
         "image_small": raw.get("card_image", ""),

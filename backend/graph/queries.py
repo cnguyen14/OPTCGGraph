@@ -38,17 +38,24 @@ async def get_card_by_id(driver: AsyncDriver, card_id: str) -> dict | None:
 async def get_card_synergies(
     driver: AsyncDriver, card_id: str, max_hops: int = 1, color_filter: str | None = None
 ) -> list[dict]:
-    """Find synergy partners for a card."""
+    """Find synergy partners for a card.
+
+    For LEADERs: shows only CHARACTER/EVENT/STAGE that could go in a deck.
+    For non-LEADERs: shows all synergy partners except other LEADERs.
+    Only uses SYNERGY edges (family+color based), not MECHANICAL_SYNERGY.
+    """
     color_clause = ""
     query_params: dict = {"id": card_id}
     if color_filter:
         color_clause = "AND (partner)-[:HAS_COLOR]->(:Color {name: $color})"
         query_params["color"] = color_filter
 
-    # Build query with hop count baked into the string (not a parameter)
+    # Only use SYNERGY edges (family+color), exclude LEADER↔LEADER
     query = f"""
-        MATCH (c:Card {{id: $id}})-[:SYNERGY|MECHANICAL_SYNERGY*1..{max_hops}]-(partner:Card)
-        WHERE partner.id <> $id {color_clause}
+        MATCH (c:Card {{id: $id}})-[:SYNERGY*1..{max_hops}]-(partner:Card)
+        WHERE partner.id <> $id
+          AND partner.card_type IN ['CHARACTER', 'EVENT', 'STAGE']
+          {color_clause}
         RETURN DISTINCT partner
         LIMIT 50
     """
