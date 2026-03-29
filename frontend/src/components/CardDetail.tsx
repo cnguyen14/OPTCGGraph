@@ -9,7 +9,11 @@ export default function CardDetail({ card, onClose }: Props) {
   if (!card) return null;
 
   return (
-    <div className="fixed right-0 top-0 h-full w-96 bg-gray-900 text-white shadow-2xl overflow-y-auto z-50 p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+    <div
+      className="relative w-full max-w-md max-h-[90vh] bg-gray-900 text-white shadow-2xl overflow-y-auto rounded-xl p-6"
+      onClick={(e) => e.stopPropagation()}
+    >
       <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white text-xl">
         &times;
       </button>
@@ -88,6 +92,7 @@ export default function CardDetail({ card, onClose }: Props) {
           {card.inventory_price && <p className="text-sm">Inventory: <span className="text-yellow-400">${card.inventory_price.toFixed(2)}</span></p>}
         </div>
       )}
+    </div>
     </div>
   );
 }
