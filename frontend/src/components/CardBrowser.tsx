@@ -13,6 +13,22 @@ const COLOR_MAP: Record<string, string> = {
   Yellow: '#eab308',
 };
 
+const BASE_COLORS = Object.keys(COLOR_MAP);
+
+function splitColors(colors: string[]): string[] {
+  const result: string[] = [];
+  for (const c of colors) {
+    if (COLOR_MAP[c]) {
+      result.push(c);
+    } else {
+      for (const base of BASE_COLORS) {
+        if (c.includes(base) && !result.includes(base)) result.push(base);
+      }
+    }
+  }
+  return result.length ? result : colors;
+}
+
 interface CardBrowserProps {
   onCardSelect: (card: Card) => void;
 }
@@ -311,7 +327,7 @@ export default function CardBrowser({ onCardSelect }: CardBrowserProps) {
                 ) : (
                   <div
                     className="w-full aspect-[3/4] flex items-center justify-center p-2"
-                    style={{ backgroundColor: COLOR_MAP[card.color] ?? '#374151' }}
+                    style={{ backgroundColor: COLOR_MAP[splitColors(card.colors?.length ? card.colors : card.color ? [card.color] : [])[0]] ?? '#374151' }}
                   >
                     <span className="text-white text-xs text-center font-medium leading-tight">
                       {card.name}
@@ -328,7 +344,7 @@ export default function CardBrowser({ onCardSelect }: CardBrowserProps) {
                         {card.cost}
                       </span>
                     )}
-                    {(card.colors?.length ? card.colors : card.color ? [card.color] : []).map((c) => (
+                    {splitColors(card.colors?.length ? card.colors : card.color ? [card.color] : []).map((c) => (
                       <span
                         key={c}
                         className="w-2 h-2 rounded-full inline-block"
@@ -376,7 +392,7 @@ export default function CardBrowser({ onCardSelect }: CardBrowserProps) {
                       ) : (
                         <div
                           className="w-10 h-14 rounded flex items-center justify-center"
-                          style={{ backgroundColor: COLOR_MAP[card.color] ?? '#374151' }}
+                          style={{ backgroundColor: COLOR_MAP[splitColors(card.colors?.length ? card.colors : card.color ? [card.color] : [])[0]] ?? '#374151' }}
                         >
                           <span className="text-white text-[8px] text-center leading-tight">
                             {card.code}
@@ -391,7 +407,7 @@ export default function CardBrowser({ onCardSelect }: CardBrowserProps) {
                     <td className="py-1.5 px-2 text-gray-300">{card.power ?? '-'}</td>
                     <td className="py-1.5 px-2">
                       <span className="flex items-center gap-1.5 flex-wrap">
-                        {(card.colors?.length ? card.colors : card.color ? [card.color] : []).map((c) => (
+                        {splitColors(card.colors?.length ? card.colors : card.color ? [card.color] : []).map((c) => (
                           <span key={c} className="flex items-center gap-1">
                             <span
                               className="w-2.5 h-2.5 rounded-full inline-block"
