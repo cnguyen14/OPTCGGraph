@@ -105,6 +105,7 @@ class FacetsResponse(BaseModel):
     card_types: list[str] = Field(default_factory=list)
     families: list[str] = Field(default_factory=list)
     sets: list[SetFacet] = Field(default_factory=list)
+    rarities: list[str] = Field(default_factory=list)
 
 
 class StatsResponse(BaseModel):

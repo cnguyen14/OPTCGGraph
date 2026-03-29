@@ -27,6 +27,7 @@ export async function searchCards(params: CardSearchParams): Promise<CardSearchR
   if (params.card_type) query.set('card_type', params.card_type);
   if (params.family) query.set('family', params.family);
   if (params.set_name) query.set('set_name', params.set_name);
+  if (params.rarity) query.set('rarity', params.rarity);
   if (params.cost_min !== undefined) query.set('cost_min', String(params.cost_min));
   if (params.cost_max !== undefined) query.set('cost_max', String(params.cost_max));
   if (params.sort_by) query.set('sort_by', params.sort_by);

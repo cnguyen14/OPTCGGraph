@@ -105,6 +105,7 @@ async def search_cards(
     card_type: str | None = None,
     family: str | None = None,
     set_name: str | None = None,
+    rarity: str | None = None,
     sort_by: str = "name",
     sort_order: str = "asc",
     offset: int = 0,
@@ -144,6 +145,9 @@ async def search_cards(
     if set_name:
         conditions.append("(c)-[:FROM_SET]->(:Set {name: $set_name})")
         params["set_name"] = set_name
+    if rarity:
+        conditions.append("c.rarity = $rarity")
+        params["rarity"] = rarity
 
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
 
@@ -204,7 +208,13 @@ async def get_facets(driver: AsyncDriver) -> dict:
         sets_result = await session.run("MATCH (s:Set) RETURN DISTINCT s.id AS id, s.name AS name ORDER BY s.id")
         sets = [{"id": r["id"], "name": r["name"]} async for r in sets_result]
 
-        return {"colors": colors, "card_types": card_types, "families": families, "sets": sets}
+        rarities_result = await session.run(
+            "MATCH (c:Card) WHERE c.rarity IS NOT NULL AND c.rarity <> '' "
+            "RETURN DISTINCT c.rarity AS name ORDER BY name"
+        )
+        rarities = [r["name"] async for r in rarities_result]
+
+        return {"colors": colors, "card_types": card_types, "families": families, "sets": sets, "rarities": rarities}
 
 
 async def get_db_stats(driver: AsyncDriver) -> dict:

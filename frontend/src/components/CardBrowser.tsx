@@ -51,6 +51,7 @@ export default function CardBrowser({ onCardSelect }: CardBrowserProps) {
   const [cardType, setCardType] = useState('');
   const [family, setFamily] = useState('');
   const [setName, setSetName] = useState('');
+  const [rarity, setRarity] = useState('');
   const [costMin, setCostMin] = useState<string>('');
   const [costMax, setCostMax] = useState<string>('');
 
@@ -59,7 +60,7 @@ export default function CardBrowser({ onCardSelect }: CardBrowserProps) {
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
 
   // Facets
-  const [facets, setFacets] = useState<Facets>({ colors: [], card_types: [], families: [], sets: [] });
+  const [facets, setFacets] = useState<Facets>({ colors: [], card_types: [], families: [], sets: [], rarities: [] });
 
   // Debounce timer ref
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -97,6 +98,7 @@ export default function CardBrowser({ onCardSelect }: CardBrowserProps) {
       card_type: cardType || undefined,
       family: family || undefined,
       set_name: setName || undefined,
+      rarity: rarity || undefined,
       cost_min: costMin !== '' ? Number(costMin) : undefined,
       cost_max: costMax !== '' ? Number(costMax) : undefined,
       sort_by: sortBy,
@@ -124,7 +126,7 @@ export default function CardBrowser({ onCardSelect }: CardBrowserProps) {
     return () => {
       cancelled = true;
     };
-  }, [debouncedKeyword, color, cardType, family, setName, costMin, costMax, sortBy, sortOrder, page]);
+  }, [debouncedKeyword, color, cardType, family, setName, rarity, costMin, costMax, sortBy, sortOrder, page]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const showStart = total > 0 ? page * PAGE_SIZE + 1 : 0;
@@ -137,6 +139,7 @@ export default function CardBrowser({ onCardSelect }: CardBrowserProps) {
     setCardType('');
     setFamily('');
     setSetName('');
+    setRarity('');
     setCostMin('');
     setCostMax('');
     setSortBy('name');
@@ -198,6 +201,18 @@ export default function CardBrowser({ onCardSelect }: CardBrowserProps) {
             <option value="">All Families</option>
             {facets.families.map((f) => (
               <option key={f} value={f}>{f}</option>
+            ))}
+          </select>
+
+          {/* Rarity */}
+          <select
+            value={rarity}
+            onChange={(e) => { setRarity(e.target.value); setPage(0); }}
+            className={inputClass}
+          >
+            <option value="">All Rarities</option>
+            {facets.rarities.map((r) => (
+              <option key={r} value={r}>{r}</option>
             ))}
           </select>
 
