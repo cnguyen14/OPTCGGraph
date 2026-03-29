@@ -104,6 +104,7 @@ async def search_cards(
     color: str | None = None,
     card_type: str | None = None,
     family: str | None = None,
+    set_name: str | None = None,
     sort_by: str = "name",
     sort_order: str = "asc",
     offset: int = 0,
@@ -140,6 +141,9 @@ async def search_cards(
     if family:
         conditions.append("(c)-[:BELONGS_TO]->(:Family {name: $family})")
         params["family"] = family
+    if set_name:
+        conditions.append("(c)-[:FROM_SET]->(:Set {name: $set_name})")
+        params["set_name"] = set_name
 
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
 
@@ -197,7 +201,10 @@ async def get_facets(driver: AsyncDriver) -> dict:
         families_result = await session.run("MATCH (f:Family) RETURN f.name AS name ORDER BY f.name")
         families = [r["name"] async for r in families_result]
 
-        return {"colors": colors, "card_types": card_types, "families": families}
+        sets_result = await session.run("MATCH (s:Set) RETURN DISTINCT s.name AS name ORDER BY name")
+        sets = [r["name"] async for r in sets_result]
+
+        return {"colors": colors, "card_types": card_types, "families": families, "sets": sets}
 
 
 async def get_db_stats(driver: AsyncDriver) -> dict:

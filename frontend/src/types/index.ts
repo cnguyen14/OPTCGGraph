@@ -97,6 +97,7 @@ export interface CardSearchParams {
   color?: string;
   card_type?: string;
   family?: string;
+  set_name?: string;
   cost_min?: number;
   cost_max?: number;
   sort_by?: 'name' | 'cost' | 'power' | 'market_price';
@@ -116,4 +117,5 @@ export interface Facets {
   colors: string[];
   card_types: string[];
   families: string[];
+  sets: string[];
 }
