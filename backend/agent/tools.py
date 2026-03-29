@@ -62,7 +62,7 @@ AGENT_TOOLS = [
     },
     {
         "name": "build_deck_shell",
-        "description": "Generate an initial 50-card deck skeleton for a Leader. Returns cards organized by role.",
+        "description": "Build a legal, competitive 50-card deck for a Leader. Enforces all OPTCG rules (50 cards, max 4 copies, color match, no LEADERs in deck). Returns validated deck with cost curve, role coverage, and quality report. ALWAYS use this tool when asked to build a deck.",
         "parameters": {
             "type": "object",
             "properties": {

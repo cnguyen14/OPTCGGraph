@@ -37,8 +37,8 @@ async def run_agent(
 
     system = build_system_prompt(current_deck, selected_leader)
 
-    # Use tools based on provider tier
-    tools = AGENT_TOOLS if provider.tier >= 2 else []
+    # Use tools based on provider tier (Tier 1-2 get tools, Tier 3 chat-only)
+    tools = AGENT_TOOLS if provider.tier <= 2 else []
 
     all_tool_calls: list[dict] = []
     ui_updates: list[dict] = []

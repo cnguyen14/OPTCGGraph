@@ -140,59 +140,12 @@ async def _get_mana_curve(driver: AsyncDriver, params: dict) -> dict:
 
 
 async def _build_deck_shell(driver: AsyncDriver, params: dict) -> dict:
-    leader_id = params["leader_id"]
-    budget_max = params.get("budget_max")
-    strategy = params.get("strategy", "midrange")
+    """Build a legal, competitive deck using the DeckBuildingEngine."""
+    from backend.ai.deck_builder import build_deck
 
-    # Get leader info
-    leader = await get_card_by_id(driver, leader_id)
-    if leader is None:
-        return {"error": f"Leader {leader_id} not found"}
-
-    # Find deck candidates via LED_BY + SYNERGY
-    async with driver.session() as session:
-        result = await session.run(
-            """
-            MATCH (card:Card)-[r:LED_BY]->(leader:Card {id: $leader_id})
-            WHERE card.card_type IN ['CHARACTER', 'EVENT', 'STAGE']
-            OPTIONAL MATCH (card)-[:HAS_KEYWORD]->(k:Keyword)
-            WITH card, r.synergy_score AS score, collect(DISTINCT k.name) AS keywords
-            RETURN card, score, keywords
-            ORDER BY score DESC, card.cost ASC
-            LIMIT 80
-            """,
-            leader_id=leader_id,
-        )
-        candidates = [
-            {**dict(r["card"]), "synergy_score": r["score"], "keywords": r["keywords"]}
-            async for r in result
-        ]
-
-    if not candidates:
-        return {"error": f"No candidates found for leader {leader_id}"}
-
-    # Simple deck building: pick top candidates to fill 50 cards
-    deck: list[dict] = []
-    total_price = 0.0
-
-    # Categorize by role
-    for card in candidates:
-        if len(deck) >= 50:
-            break
-        price = card.get("market_price") or 0
-        if budget_max and total_price + price > budget_max:
-            continue
-        deck.append(card)
-        total_price += price
-
-    # Build curve stats
-    curve = Counter(c.get("cost", 0) for c in deck if c.get("cost") is not None)
-
-    return {
-        "leader": leader,
-        "cards": deck,
-        "total_cards": len(deck),
-        "total_price": round(total_price, 2),
-        "curve": dict(sorted(curve.items())),
-        "strategy": strategy,
-    }
+    return await build_deck(
+        driver=driver,
+        leader_id=params["leader_id"],
+        strategy=params.get("strategy", "midrange"),
+        budget_max=params.get("budget_max"),
+    )
