@@ -27,6 +27,14 @@ async def chat(req: ChatRequest, driver: AsyncDriver = Depends(_get_driver)):
     if req.leader_id:
         session.selected_leader = req.leader_id
 
+    # Sync frontend deck state into session
+    if req.deck_card_ids:
+        session.current_deck = {
+            "leader": req.leader_id,
+            "cards": req.deck_card_ids,
+            "total_cost": len(req.deck_card_ids),
+        }
+
     # Get provider from session config
     config = session.model_config
     provider = get_provider(config["provider"], config["model"])

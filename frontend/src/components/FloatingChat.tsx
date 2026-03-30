@@ -1,12 +1,17 @@
 import { useState, useRef, useEffect } from 'react';
 import Markdown from 'react-markdown';
-import { chatSync } from '../lib/api';
 
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   toolSummaries?: string[];
+}
+
+interface ToolStep {
+  tool: string;
+  label: string;
+  status: 'running' | 'done';
 }
 
 interface Props {
@@ -17,17 +22,35 @@ interface Props {
   onUiUpdate?: (update: { action: string; payload: Record<string, unknown> }) => void;
 }
 
+const TOOL_LABELS: Record<string, string> = {
+  get_card: 'Looking up card details',
+  find_synergies: 'Finding synergies',
+  find_counters: 'Finding counters',
+  query_neo4j: 'Querying knowledge graph',
+  build_deck_shell: 'Building deck',
+  validate_deck: 'Validating deck',
+  suggest_deck_fixes: 'Generating suggestions',
+  get_mana_curve: 'Analyzing mana curve',
+  update_ui_state: 'Updating interface',
+};
+
+function humanize(tool: string): string {
+  return TOOL_LABELS[tool] ?? `Using ${tool}`;
+}
+
 export default function FloatingChat({ sessionId, onSessionId, leaderId, deckCardIds, onUiUpdate }: Props) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [steps, setSteps] = useState<ToolStep[]>([]);
+  const [streamingText, setStreamingText] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
+  }, [messages, loading, steps, streamingText]);
 
   useEffect(() => {
     if (open) setUnread(0);
@@ -39,30 +62,83 @@ export default function FloatingChat({ sessionId, onSessionId, leaderId, deckCar
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setLoading(true);
+    setSteps([]);
+    setStreamingText('');
 
     try {
-      const result = await chatSync(input, sessionId || undefined, leaderId || undefined, deckCardIds);
-      if (result.session_id) onSessionId(result.session_id);
+      const resp = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: input,
+          session_id: sessionId,
+          leader_id: leaderId,
+          deck_card_ids: deckCardIds,
+        }),
+      });
+
+      // Read session ID from header
+      const newSessionId = resp.headers.get('X-Session-ID');
+      if (newSessionId) onSessionId(newSessionId);
+
+      const reader = resp.body!.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      const toolSummaries: string[] = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        for (const line of chunk.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+
+            switch (event.type) {
+              case 'STEP_STARTED':
+                setSteps(prev => [...prev, { tool: event.tool, label: humanize(event.tool), status: 'running' }]);
+                break;
+
+              case 'STEP_FINISHED':
+                setSteps(prev => prev.map(s =>
+                  s.tool === event.tool && s.status === 'running' ? { ...s, status: 'done' } : s
+                ));
+                toolSummaries.push(humanize(event.tool));
+                break;
+
+              case 'TextMessageContent':
+                fullText += event.delta ?? '';
+                setStreamingText(fullText);
+                break;
+
+              case 'STATE_SNAPSHOT':
+                onUiUpdate?.(event);
+                break;
+            }
+          } catch {
+            // Skip malformed lines
+          }
+        }
+      }
 
       const assistantMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: result.text || 'No response',
-        toolSummaries: result.tool_summaries || [],
+        content: fullText || 'No response',
+        toolSummaries,
       };
       setMessages(prev => [...prev, assistantMsg]);
       if (!open) setUnread(prev => prev + 1);
-
-      // Process AG-UI updates
-      for (const update of (result.ui_updates || [])) {
-        onUiUpdate?.(update);
-      }
     } catch {
       setMessages(prev => [...prev, {
         id: crypto.randomUUID(), role: 'assistant', content: 'Something went wrong. Please try again.',
       }]);
     } finally {
       setLoading(false);
+      setSteps([]);
+      setStreamingText('');
     }
   };
 
@@ -82,7 +158,7 @@ export default function FloatingChat({ sessionId, onSessionId, leaderId, deckCar
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
-            {messages.length === 0 && (
+            {messages.length === 0 && !loading && (
               <div className="text-center mt-8 space-y-3">
                 <p className="text-gray-600 text-xs">Try:</p>
                 {['Build a Red Zoro deck', 'Validate my current deck', 'Tell me about OP01-025'].map(s => (
@@ -121,15 +197,47 @@ export default function FloatingChat({ sessionId, onSessionId, leaderId, deckCar
               </div>
             ))}
 
+            {/* Live status during streaming */}
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-gray-800/70 rounded-lg px-3 py-2.5 text-xs text-gray-400 flex items-center gap-2">
-                  <span className="flex gap-0.5">
-                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </span>
-                  Thinking...
+                <div className="max-w-[90%] space-y-2">
+                  {/* Tool steps — realtime */}
+                  {steps.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {steps.map((step, i) => (
+                        <span key={i} className="inline-flex items-center gap-1.5 bg-gray-800 text-gray-400 rounded-full px-2 py-0.5 text-[10px]">
+                          {step.status === 'running' ? (
+                            <svg className="w-2.5 h-2.5 text-yellow-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                            </svg>
+                          ) : (
+                            <span className="w-2 h-2 bg-green-500 rounded-full" />
+                          )}
+                          {step.label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Streaming text preview */}
+                  {streamingText ? (
+                    <div className="bg-gray-800/70 rounded-lg px-3 py-2.5 text-xs text-gray-200 prose prose-invert prose-xs max-w-none
+                      prose-headings:text-white prose-headings:font-semibold prose-headings:mt-3 prose-headings:mb-1
+                      prose-h2:text-sm prose-h3:text-xs prose-p:my-1.5 prose-li:my-0.5 prose-strong:text-white">
+                      <Markdown>{streamingText}</Markdown>
+                      <span className="inline-block w-1.5 h-3 bg-blue-400 animate-pulse ml-0.5" />
+                    </div>
+                  ) : (
+                    <div className="bg-gray-800/70 rounded-lg px-3 py-2.5 text-xs text-gray-400 flex items-center gap-2">
+                      <span className="flex gap-0.5">
+                        <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </span>
+                      {steps.length === 0 ? 'Analyzing...' : 'Generating response...'}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
