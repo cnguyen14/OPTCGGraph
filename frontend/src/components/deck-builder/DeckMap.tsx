@@ -50,9 +50,11 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [loading, setLoading] = useState(false);
   const [edges, setEdges] = useState<DeckSynergyEdge[]>([]);
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [hoverCard, setHoverCard] = useState<{ node: MapNode; x: number; y: number } | null>(null);
   const [connCounts, setConnCounts] = useState<Map<string, number>>(new Map());
+  const [showAllEdges, setShowAllEdges] = useState(false);
+  const selectedRef = useRef<string | null>(null);
+  const highlightRef = useRef<((id: string | null) => void) | null>(null);
 
   // Fetch synergy edges when deck changes
   useEffect(() => {
@@ -462,11 +464,14 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
       });
     }
 
+    // Store highlight function in ref so toggle can call it
+    highlightRef.current = highlight;
+
     // Click handlers
     node.on('click', (event, d) => {
       event.stopPropagation();
-      const newSelected = selectedNode === d.id ? null : d.id;
-      setSelectedNode(newSelected);
+      const newSelected = selectedRef.current === d.id ? null : d.id;
+      selectedRef.current = newSelected;
       highlight(newSelected);
     });
 
@@ -496,7 +501,7 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
     });
 
     svg.on('click', () => {
-      setSelectedNode(null);
+      selectedRef.current = null;
       highlight(null);
     });
 
@@ -518,7 +523,26 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
     return () => {
       simulation.stop();
     };
-  }, [leader, entries, edges, selectedNode]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leader, entries, edges]);
+
+  // Toggle all edges on/off
+  useEffect(() => {
+    if (!svgRef.current) return;
+    const svg = d3.select(svgRef.current);
+    if (showAllEdges) {
+      svg.selectAll<SVGLineElement, MapLink>('line')
+        .attr('stroke-opacity', 0.35)
+        .attr('stroke-width', 1.5);
+    } else {
+      // If no node selected, hide all; if selected, re-highlight
+      if (selectedRef.current && highlightRef.current) {
+        highlightRef.current(selectedRef.current);
+      } else {
+        svg.selectAll<SVGLineElement, MapLink>('line').attr('stroke-opacity', 0);
+      }
+    }
+  }, [showAllEdges]);
 
   const totalCards = Array.from(entries.values()).reduce((s, e) => s + e.quantity, 0);
   const connectedIds = new Set(edges.flatMap((e) => [e.source, e.target]));
@@ -550,6 +574,16 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
           </span>
         )}
         <div className="flex items-center gap-3 ml-auto">
+          {/* Toggle connections */}
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <span className="text-gray-500">Connections</span>
+            <button
+              onClick={() => setShowAllEdges(prev => !prev)}
+              className={`relative w-8 h-4 rounded-full transition-colors ${showAllEdges ? 'bg-blue-600' : 'bg-gray-700'}`}
+            >
+              <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${showAllEdges ? 'translate-x-4' : 'translate-x-0.5'}`} />
+            </button>
+          </label>
           <span className="flex items-center gap-1">
             <span className="w-3 h-0.5 inline-block rounded" style={{ backgroundColor: EDGE_COLORS.SYNERGY }} />
             <span className="text-gray-500">Family</span>
@@ -579,24 +613,31 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
       {/* D3 SVG */}
       <svg ref={svgRef} className="flex-1 w-full bg-gray-950" />
 
-      {/* Hover Tooltip */}
+      {/* Hover Tooltip — large preview */}
       {hoverCard && (
         <div
-          className="absolute z-20 pointer-events-none bg-gray-800 border border-gray-600 rounded-lg shadow-xl p-3 w-56"
+          className="absolute z-20 pointer-events-none bg-gray-800/95 border border-gray-600 rounded-xl shadow-2xl p-4 w-72 backdrop-blur-sm"
           style={{ left: hoverCard.x, top: hoverCard.y }}
         >
-          <div className="flex gap-2">
+          <div className="flex gap-3">
             {hoverCard.node.image_small && (
-              <img src={hoverCard.node.image_small} alt="" className="w-14 h-20 rounded object-cover shrink-0" />
+              <img src={hoverCard.node.image_small} alt="" className="w-24 h-[134px] rounded-lg object-cover shrink-0" />
             )}
-            <div className="min-w-0">
-              <p className="text-white text-xs font-semibold truncate">{hoverCard.node.name}</p>
-              <p className="text-gray-400 text-[10px]">{hoverCard.node.id} &middot; {hoverCard.node.card_type}</p>
-              <div className="flex gap-2 mt-1 text-[10px]">
-                {hoverCard.node.cost !== null && <span className="text-blue-300">Cost {hoverCard.node.cost}</span>}
-                <span className="text-gray-400">{hoverCard.node.quantity}x</span>
+            <div className="min-w-0 flex flex-col justify-between py-0.5">
+              <div>
+                <p className="text-white text-sm font-bold leading-tight">{hoverCard.node.name}</p>
+                <p className="text-gray-400 text-xs mt-1">{hoverCard.node.id}</p>
+                <p className="text-gray-500 text-xs">{hoverCard.node.card_type}</p>
               </div>
-              <p className="text-gray-500 text-[10px] mt-0.5">{(connCounts.get(hoverCard.node.id) ?? 0)} connections</p>
+              <div className="space-y-1 mt-2">
+                <div className="flex gap-3 text-xs">
+                  {hoverCard.node.cost !== null && (
+                    <span className="bg-gray-700 rounded px-1.5 py-0.5 text-blue-300">Cost {hoverCard.node.cost}</span>
+                  )}
+                  <span className="bg-gray-700 rounded px-1.5 py-0.5 text-gray-300">{hoverCard.node.quantity}x</span>
+                </div>
+                <p className="text-gray-400 text-xs">{(connCounts.get(hoverCard.node.id) ?? 0)} synergy connections</p>
+              </div>
             </div>
           </div>
         </div>
