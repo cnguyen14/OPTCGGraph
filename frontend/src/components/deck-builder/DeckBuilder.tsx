@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useDeckState } from '../../hooks/useDeckState';
+import type { DeckStateReturn } from '../../hooks/useDeckState';
 import type { Card } from '../../types';
 import LeaderPickerModal from './LeaderPickerModal';
 import CardPool from './CardPool';
@@ -10,9 +10,10 @@ type ViewMode = 'build' | 'map';
 
 interface Props {
   onCardSelect: (card: Card) => void;
+  deckState: DeckStateReturn;
 }
 
-export default function DeckBuilder({ onCardSelect }: Props) {
+export default function DeckBuilder({ onCardSelect, deckState }: Props) {
   const {
     leader,
     entries,
@@ -27,7 +28,7 @@ export default function DeckBuilder({ onCardSelect }: Props) {
     selectLeader,
     clearLeader,
     bulkReplace,
-  } = useDeckState();
+  } = deckState;
 
   const [showLeaderPicker, setShowLeaderPicker] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('build');

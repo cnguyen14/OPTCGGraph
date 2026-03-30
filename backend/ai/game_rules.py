@@ -106,7 +106,20 @@ def build_system_prompt(current_deck: dict | None = None, selected_leader: str |
         parts.append(f"\n## Current Context\nSelected Leader: {selected_leader}")
 
     if current_deck and current_deck.get("cards"):
-        card_list = ", ".join(current_deck["cards"][:20])
-        parts.append(f"Current deck ({len(current_deck['cards'])} cards): {card_list}")
+        cards = current_deck["cards"]
+        # Count card IDs for readable format
+        from collections import Counter
+        card_counts = Counter(cards)
+        deck_summary = ", ".join(f"{cnt}x {cid}" for cid, cnt in card_counts.most_common())
+        parts.append(
+            f"\n## User's Current Deck ({len(cards)}/50 cards)\n"
+            f"Leader: {current_deck.get('leader', 'Not set')}\n"
+            f"Cards: {deck_summary}\n"
+            f"\nYou can see the user's current deck above. When they ask to validate, "
+            f"use the validate_deck tool with this leader and these card IDs. "
+            f"When they ask about their deck, reference these actual cards."
+        )
+    else:
+        parts.append("\n## User's Current Deck\nNo deck currently built. The user has not added any cards yet.")
 
     return "\n".join(parts)

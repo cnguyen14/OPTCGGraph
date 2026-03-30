@@ -106,11 +106,21 @@ export async function suggestFixes(leaderId: string, cardIds: string[]) {
   return resp.json();
 }
 
-export async function chatSync(message: string, sessionId?: string, leaderId?: string) {
+export async function chatSync(
+  message: string,
+  sessionId?: string,
+  leaderId?: string,
+  deckCardIds?: string[],
+) {
   const resp = await fetch(`${BASE_URL}/ai/chat/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, session_id: sessionId, leader_id: leaderId }),
+    body: JSON.stringify({
+      message,
+      session_id: sessionId,
+      leader_id: leaderId,
+      deck_card_ids: deckCardIds,
+    }),
   });
   return resp.json();
 }

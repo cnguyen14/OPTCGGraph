@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useDeckState } from './hooks/useDeckState';
 import GraphExplorer from './components/GraphExplorer';
 import CardBrowser from './components/CardBrowser';
 import DeckBuilder from './components/deck-builder/DeckBuilder';
@@ -13,21 +14,22 @@ function App() {
   const [selectedCard, setSelectedCard] = useState<Card | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
 
-  const tabs: { key: Tab; label: string }[] = [
-    { key: 'graph', label: 'Graph Explorer' },
-    { key: 'cards', label: 'Cards' },
-    { key: 'deck', label: 'Deck Builder' },
-  ];
+  // Deck state lifted to App so FloatingChat can access it
+  const deckState = useDeckState();
+
+  // Build deck card IDs for chat context
+  const deckCardIds: string[] = [];
+  deckState.entries.forEach((entry) => {
+    for (let i = 0; i < entry.quantity; i++) {
+      deckCardIds.push(entry.card.id);
+    }
+  });
 
   const handleUiUpdate = (update: { action: string; payload: Record<string, unknown> }) => {
-    if (update.action === 'show_card_detail' && update.payload?.card_id) {
-      // Could fetch card and show detail, for now just log
-      console.log('UI Update:', update);
-    }
     if (update.action === 'update_deck_list') {
-      // Navigate to deck builder tab so user sees changes
       setActiveTab('deck');
     }
+    console.log('AG-UI update:', update);
   };
 
   return (
@@ -39,7 +41,11 @@ function App() {
           <span className="text-xs text-gray-500 bg-gray-800 rounded px-2 py-0.5">v0.1</span>
         </div>
         <nav className="flex gap-1">
-          {tabs.map(tab => (
+          {[
+            { key: 'graph' as Tab, label: 'Graph Explorer' },
+            { key: 'cards' as Tab, label: 'Cards' },
+            { key: 'deck' as Tab, label: 'Deck Builder' },
+          ].map(tab => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
@@ -64,17 +70,19 @@ function App() {
           <CardBrowser onCardSelect={setSelectedCard} />
         )}
         {activeTab === 'deck' && (
-          <DeckBuilder onCardSelect={setSelectedCard} />
+          <DeckBuilder onCardSelect={setSelectedCard} deckState={deckState} />
         )}
       </main>
 
       {/* Card Detail Slide-over */}
       <CardDetail card={selectedCard} onClose={() => setSelectedCard(null)} />
 
-      {/* Floating AI Chat — always visible */}
+      {/* Floating AI Chat — always visible, aware of deck state */}
       <FloatingChat
         sessionId={sessionId}
         onSessionId={setSessionId}
+        leaderId={deckState.leader?.id}
+        deckCardIds={deckCardIds.length > 0 ? deckCardIds : undefined}
         onUiUpdate={handleUiUpdate}
       />
     </div>

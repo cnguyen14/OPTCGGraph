@@ -13,10 +13,11 @@ interface Props {
   sessionId: string | null;
   onSessionId: (id: string) => void;
   leaderId?: string | null;
+  deckCardIds?: string[];
   onUiUpdate?: (update: { action: string; payload: Record<string, unknown> }) => void;
 }
 
-export default function FloatingChat({ sessionId, onSessionId, leaderId, onUiUpdate }: Props) {
+export default function FloatingChat({ sessionId, onSessionId, leaderId, deckCardIds, onUiUpdate }: Props) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -40,7 +41,7 @@ export default function FloatingChat({ sessionId, onSessionId, leaderId, onUiUpd
     setLoading(true);
 
     try {
-      const result = await chatSync(input, sessionId || undefined, leaderId || undefined);
+      const result = await chatSync(input, sessionId || undefined, leaderId || undefined, deckCardIds);
       if (result.session_id) onSessionId(result.session_id);
 
       const assistantMsg: ChatMessage = {

@@ -186,3 +186,5 @@ export function useDeckState() {
     bulkReplace,
   };
 }
+
+export type DeckStateReturn = ReturnType<typeof useDeckState>;
