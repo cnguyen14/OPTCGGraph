@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import type { Card, DeckEntry } from '../../types';
 import { fetchDeckSynergies } from '../../lib/api';
+import { renderAbility } from '../../lib/renderAbility';
 import type { DeckSynergyEdge } from '../../lib/api';
 
 const COLOR_MAP: Record<string, string> = {
@@ -737,7 +738,9 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
 
             {/* Ability */}
             {n.ability && (
-              <p className="text-gray-400 text-[10px] mt-2 pt-2 border-t border-gray-700 line-clamp-3 leading-relaxed">{n.ability}</p>
+              <div className="text-gray-400 text-[10px] mt-2 pt-2 border-t border-gray-700 leading-relaxed">
+                {renderAbility(n.ability, true)}
+              </div>
             )}
 
             {/* Footer */}
