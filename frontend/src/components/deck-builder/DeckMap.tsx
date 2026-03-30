@@ -24,8 +24,16 @@ interface MapNode extends d3.SimulationNodeDatum {
   name: string;
   card_type: string;
   cost: number | null;
+  power: number | null;
+  counter: number | null;
   color: string;
+  colors: string[];
+  families: string[];
+  keywords: string[];
+  ability: string;
   image_small: string;
+  rarity: string;
+  market_price: number | null;
   quantity: number;
   isLeader: boolean;
   x?: number;
@@ -91,33 +99,35 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
     // Build nodes
     const nodes: MapNode[] = [];
 
-    if (leader) {
-      const colors = leader.colors?.length ? leader.colors : leader.color ? [leader.color] : [];
-      nodes.push({
-        id: leader.id,
-        name: leader.name,
-        card_type: leader.card_type,
-        cost: leader.cost,
-        color: colors[0] || '',
-        image_small: leader.image_small,
-        quantity: 1,
-        isLeader: true,
-      });
-    }
-
-    for (const [, { card, quantity }] of entries) {
-      if (leader && card.id === leader.id) continue;
+    function buildNode(card: Card, qty: number, isLeader: boolean): MapNode {
       const colors = card.colors?.length ? card.colors : card.color ? [card.color] : [];
-      nodes.push({
+      return {
         id: card.id,
         name: card.name,
         card_type: card.card_type,
         cost: card.cost,
+        power: card.power ?? null,
+        counter: card.counter ?? null,
         color: colors[0] || '',
+        colors,
+        families: card.families ?? [],
+        keywords: card.keywords ?? [],
+        ability: card.ability ?? '',
         image_small: card.image_small,
-        quantity,
-        isLeader: false,
-      });
+        rarity: card.rarity ?? '',
+        market_price: card.market_price ?? null,
+        quantity: qty,
+        isLeader,
+      };
+    }
+
+    if (leader) {
+      nodes.push(buildNode(leader, 1, true));
+    }
+
+    for (const [, { card, quantity }] of entries) {
+      if (leader && card.id === leader.id) continue;
+      nodes.push(buildNode(card, quantity, false));
     }
 
     if (nodes.length === 0) return;
@@ -613,35 +623,66 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
       {/* D3 SVG */}
       <svg ref={svgRef} className="flex-1 w-full bg-gray-950" />
 
-      {/* Hover Tooltip — large preview */}
-      {hoverCard && (
-        <div
-          className="absolute z-20 pointer-events-none bg-gray-800/95 border border-gray-600 rounded-xl shadow-2xl p-4 w-72 backdrop-blur-sm"
-          style={{ left: hoverCard.x, top: hoverCard.y }}
-        >
-          <div className="flex gap-3">
-            {hoverCard.node.image_small && (
-              <img src={hoverCard.node.image_small} alt="" className="w-24 h-[134px] rounded-lg object-cover shrink-0" />
-            )}
-            <div className="min-w-0 flex flex-col justify-between py-0.5">
-              <div>
-                <p className="text-white text-sm font-bold leading-tight">{hoverCard.node.name}</p>
-                <p className="text-gray-400 text-xs mt-1">{hoverCard.node.id}</p>
-                <p className="text-gray-500 text-xs">{hoverCard.node.card_type}</p>
-              </div>
-              <div className="space-y-1 mt-2">
-                <div className="flex gap-3 text-xs">
-                  {hoverCard.node.cost !== null && (
-                    <span className="bg-gray-700 rounded px-1.5 py-0.5 text-blue-300">Cost {hoverCard.node.cost}</span>
-                  )}
-                  <span className="bg-gray-700 rounded px-1.5 py-0.5 text-gray-300">{hoverCard.node.quantity}x</span>
+      {/* Hover Tooltip — full card preview */}
+      {hoverCard && (() => {
+        const n = hoverCard.node;
+        return (
+          <div
+            className="absolute z-20 pointer-events-none bg-gray-800/95 border border-gray-600 rounded-xl shadow-2xl p-4 w-80 backdrop-blur-sm"
+            style={{ left: hoverCard.x, top: hoverCard.y }}
+          >
+            <div className="flex gap-3">
+              {n.image_small && (
+                <img src={n.image_small} alt="" className="w-24 h-[134px] rounded-lg object-cover shrink-0" />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-white text-sm font-bold leading-tight">{n.name}</p>
+                <p className="text-gray-400 text-[11px] mt-0.5">{n.id} &middot; {n.rarity} &middot; {n.card_type}</p>
+
+                {/* Stats row */}
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {n.cost !== null && <span className="bg-blue-900/60 text-blue-300 rounded px-1.5 py-0.5 text-[10px]">Cost {n.cost}</span>}
+                  {n.power !== null && <span className="bg-red-900/60 text-red-300 rounded px-1.5 py-0.5 text-[10px]">{n.power} PWR</span>}
+                  {n.counter !== null && n.counter > 0 && <span className="bg-green-900/60 text-green-300 rounded px-1.5 py-0.5 text-[10px]">+{n.counter} CTR</span>}
+                  <span className="bg-gray-700 text-gray-300 rounded px-1.5 py-0.5 text-[10px]">{n.quantity}x</span>
                 </div>
-                <p className="text-gray-400 text-xs">{(connCounts.get(hoverCard.node.id) ?? 0)} synergy connections</p>
+
+                {/* Colors & Families */}
+                {n.colors.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {n.colors.map(c => (
+                      <span key={c} className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: (COLOR_MAP[c] ?? '#374151') + '30', color: COLOR_MAP[c] ?? '#9ca3af' }}>{c}</span>
+                    ))}
+                  </div>
+                )}
+                {n.families.length > 0 && (
+                  <p className="text-gray-500 text-[10px] mt-1 truncate">{n.families.join(', ')}</p>
+                )}
               </div>
             </div>
+
+            {/* Keywords */}
+            {n.keywords.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t border-gray-700">
+                {n.keywords.map(kw => (
+                  <span key={kw} className="bg-purple-900/40 text-purple-300 rounded px-1.5 py-0.5 text-[10px]">{kw}</span>
+                ))}
+              </div>
+            )}
+
+            {/* Ability */}
+            {n.ability && (
+              <p className="text-gray-400 text-[10px] mt-2 pt-2 border-t border-gray-700 line-clamp-3 leading-relaxed">{n.ability}</p>
+            )}
+
+            {/* Footer */}
+            <div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-700 text-[10px]">
+              <span className="text-gray-500">{connCounts.get(n.id) ?? 0} connections</span>
+              {n.market_price !== null && <span className="text-green-400">${n.market_price.toFixed(2)}</span>}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Help text */}
       <div className="absolute bottom-3 left-3 text-[10px] text-gray-600 bg-gray-900/80 rounded px-2 py-1">
