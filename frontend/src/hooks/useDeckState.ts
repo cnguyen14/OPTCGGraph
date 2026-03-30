@@ -170,6 +170,37 @@ export function useDeckState() {
     });
   }, []);
 
+  const loadDeckFromIds = useCallback(async (leaderId: string, cardIds: string[]) => {
+    // Fetch leader
+    try {
+      const leaderCard = await fetchCard(leaderId);
+      setLeader(leaderCard);
+    } catch { /* ignore */ }
+
+    // Count card IDs
+    const counts = new Map<string, number>();
+    for (const id of cardIds) {
+      counts.set(id, (counts.get(id) || 0) + 1);
+    }
+
+    // Fetch unique cards and build entries
+    const newEntries = new Map<string, DeckEntry>();
+    const uniqueIds = [...counts.keys()];
+
+    // Fetch in batches to avoid too many concurrent requests
+    for (let i = 0; i < uniqueIds.length; i += 10) {
+      const batch = uniqueIds.slice(i, i + 10);
+      const cards = await Promise.all(batch.map(id => fetchCard(id).catch(() => null)));
+      for (const card of cards) {
+        if (card) {
+          newEntries.set(card.id, { card, quantity: counts.get(card.id) || 1 });
+        }
+      }
+    }
+
+    setEntries(newEntries);
+  }, []);
+
   return {
     leader,
     entries,
@@ -184,6 +215,7 @@ export function useDeckState() {
     selectLeader,
     clearLeader,
     bulkReplace,
+    loadDeckFromIds,
   };
 }
 

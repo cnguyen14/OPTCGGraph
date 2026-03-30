@@ -77,6 +77,17 @@ async def run_agent(
             if tool_name == "update_ui_state":
                 ui_updates.append(result)
 
+            # Auto-emit deck update when build_deck_shell succeeds
+            if tool_name == "build_deck_shell" and isinstance(result, dict) and result.get("cards"):
+                ui_updates.append({
+                    "action": "update_deck_list",
+                    "payload": {
+                        "leader_id": result.get("leader", {}).get("id"),
+                        "cards": [c["id"] for c in result["cards"]],
+                    },
+                    "status": "emitted",
+                })
+
             tool_results.append({
                 "type": "tool_result",
                 "tool_use_id": tool_id,

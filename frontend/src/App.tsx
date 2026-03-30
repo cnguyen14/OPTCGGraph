@@ -26,10 +26,13 @@ function App() {
   });
 
   const handleUiUpdate = (update: { action: string; payload: Record<string, unknown> }) => {
-    if (update.action === 'update_deck_list') {
-      setActiveTab('deck');
+    if (update.action === 'update_deck_list' && update.payload) {
+      const { leader_id, cards } = update.payload as { leader_id?: string; cards?: string[] };
+      if (leader_id && cards && cards.length > 0) {
+        deckState.loadDeckFromIds(leader_id, cards);
+        setActiveTab('deck');
+      }
     }
-    console.log('AG-UI update:', update);
   };
 
   return (
