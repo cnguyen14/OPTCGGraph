@@ -28,6 +28,10 @@ async def execute_tool(tool_name: str, tool_input: dict, driver: AsyncDriver) ->
             return await _build_deck_shell(driver, tool_input)
         elif tool_name == "update_ui_state":
             return {"action": tool_input.get("action"), "payload": tool_input.get("payload"), "status": "emitted"}
+        elif tool_name == "validate_deck":
+            return await _validate_deck(driver, tool_input)
+        elif tool_name == "suggest_deck_fixes":
+            return await _suggest_deck_fixes(driver, tool_input)
         else:
             return {"error": f"Unknown tool: {tool_name}"}
     except Exception as e:
@@ -149,3 +153,28 @@ async def _build_deck_shell(driver: AsyncDriver, params: dict) -> dict:
         strategy=params.get("strategy", "midrange"),
         budget_max=params.get("budget_max"),
     )
+
+
+async def _validate_deck(driver: AsyncDriver, params: dict) -> dict:
+    """Validate a deck against OPTCG rules."""
+    from backend.ai.deck_validator import validate_deck
+
+    leader = await get_card_by_id(driver, params["leader_id"])
+    if leader is None:
+        return {"error": f"Leader {params['leader_id']} not found"}
+
+    cards = []
+    for cid in params.get("card_ids", []):
+        card = await get_card_by_id(driver, cid)
+        if card:
+            cards.append(card)
+
+    report = validate_deck(leader, cards)
+    return report.to_dict()
+
+
+async def _suggest_deck_fixes(driver: AsyncDriver, params: dict) -> dict:
+    """Get smart replacement suggestions for deck issues."""
+    from backend.ai.deck_suggestions import suggest_fixes
+
+    return await suggest_fixes(driver, params["leader_id"], params.get("card_ids", []))

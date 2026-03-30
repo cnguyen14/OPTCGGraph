@@ -2,11 +2,11 @@ import { useState } from 'react';
 import GraphExplorer from './components/GraphExplorer';
 import CardBrowser from './components/CardBrowser';
 import DeckBuilder from './components/deck-builder/DeckBuilder';
-import AIChat from './components/AIChat';
 import CardDetail from './components/CardDetail';
+import FloatingChat from './components/FloatingChat';
 import type { Card } from './types';
 
-type Tab = 'graph' | 'cards' | 'deck' | 'chat';
+type Tab = 'graph' | 'cards' | 'deck';
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('graph');
@@ -17,8 +17,18 @@ function App() {
     { key: 'graph', label: 'Graph Explorer' },
     { key: 'cards', label: 'Cards' },
     { key: 'deck', label: 'Deck Builder' },
-    { key: 'chat', label: 'AI Chat' },
   ];
+
+  const handleUiUpdate = (update: { action: string; payload: Record<string, unknown> }) => {
+    if (update.action === 'show_card_detail' && update.payload?.card_id) {
+      // Could fetch card and show detail, for now just log
+      console.log('UI Update:', update);
+    }
+    if (update.action === 'update_deck_list') {
+      // Navigate to deck builder tab so user sees changes
+      setActiveTab('deck');
+    }
+  };
 
   return (
     <div className="h-screen flex flex-col bg-gray-950 text-white">
@@ -56,15 +66,17 @@ function App() {
         {activeTab === 'deck' && (
           <DeckBuilder onCardSelect={setSelectedCard} />
         )}
-        {activeTab === 'chat' && (
-          <div className="h-full p-4">
-            <AIChat sessionId={sessionId} onSessionId={setSessionId} />
-          </div>
-        )}
       </main>
 
       {/* Card Detail Slide-over */}
       <CardDetail card={selectedCard} onClose={() => setSelectedCard(null)} />
+
+      {/* Floating AI Chat — always visible */}
+      <FloatingChat
+        sessionId={sessionId}
+        onSessionId={setSessionId}
+        onUiUpdate={handleUiUpdate}
+      />
     </div>
   );
 }

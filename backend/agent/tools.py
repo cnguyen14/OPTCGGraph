@@ -92,4 +92,28 @@ AGENT_TOOLS = [
             "required": ["action", "payload"],
         },
     },
+    {
+        "name": "validate_deck",
+        "description": "Validate a deck against official OPTCG rules and competitive quality standards. Returns PASS/FAIL/WARNING for each check. Use this after building a deck to check for issues.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "leader_id": {"type": "string", "description": "Leader card ID"},
+                "card_ids": {"type": "array", "items": {"type": "string"}, "description": "List of 50 card IDs in the deck"},
+            },
+            "required": ["leader_id", "card_ids"],
+        },
+    },
+    {
+        "name": "suggest_deck_fixes",
+        "description": "Get smart replacement suggestions for deck validation issues. For each FAIL/WARNING, suggests which card to remove and what to add instead. Use after validate_deck shows problems.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "leader_id": {"type": "string", "description": "Leader card ID"},
+                "card_ids": {"type": "array", "items": {"type": "string"}, "description": "List of card IDs in the deck"},
+            },
+            "required": ["leader_id", "card_ids"],
+        },
+    },
 ]
