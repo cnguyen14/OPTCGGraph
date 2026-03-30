@@ -654,9 +654,9 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
             <span className="text-gray-500">Connections</span>
             <button
               onClick={() => setShowAllEdges(prev => !prev)}
-              className={`relative w-8 h-4 rounded-full transition-colors ${showAllEdges ? 'bg-blue-600' : 'bg-gray-700'}`}
+              className={`relative inline-flex items-center w-9 h-5 rounded-full transition-colors ${showAllEdges ? 'bg-blue-600' : 'bg-gray-700'}`}
             >
-              <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${showAllEdges ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              <span className={`inline-block w-3.5 h-3.5 rounded-full bg-white shadow transition-transform ${showAllEdges ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
             </button>
           </label>
           <span className="flex items-center gap-1">
