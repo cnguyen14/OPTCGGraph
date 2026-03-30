@@ -175,6 +175,14 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
     merge.append('feMergeNode').attr('in', 'blur');
     merge.append('feMergeNode').attr('in', 'SourceGraphic');
 
+    // Particle glow filter (brighter, larger blur)
+    const particleGlow = defs.append('filter').attr('id', 'particle-glow');
+    particleGlow.append('feGaussianBlur').attr('stdDeviation', '4').attr('result', 'blur');
+    const pMerge = particleGlow.append('feMerge');
+    pMerge.append('feMergeNode').attr('in', 'blur');
+    pMerge.append('feMergeNode').attr('in', 'blur');
+    pMerge.append('feMergeNode').attr('in', 'SourceGraphic');
+
     // Card image patterns
     nodes.forEach((n) => {
       if (n.image_small) {
@@ -290,6 +298,54 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
       .attr('stroke-width', (d) => Math.max(1, (d.weight ?? 1) * 0.8))
       .attr('stroke-opacity', 0)  // Hidden by default — shown on click
       .style('transition', 'stroke-opacity 0.3s, stroke-width 0.3s');
+
+    // Energy particle layer
+    const particleLayer = g.append('g').attr('class', 'particles');
+
+    function animateParticles(activeLinks: MapLink[]) {
+      particleLayer.selectAll('*').remove();
+      if (activeLinks.length === 0) return;
+
+      for (const l of activeLinks) {
+        const src = l.source as MapNode;
+        const tgt = l.target as MapNode;
+        if (src.x == null || tgt.x == null || src.y == null || tgt.y == null) continue;
+
+        const color = EDGE_COLORS[l.type] ?? '#475569';
+        // 2 particles per edge at different offsets
+        for (let p = 0; p < 2; p++) {
+          const particle = particleLayer.append('circle')
+            .attr('r', 2.5)
+            .attr('fill', color)
+            .attr('opacity', 0.9)
+            .attr('filter', 'url(#particle-glow)');
+
+          const duration = 2000 + Math.random() * 1500;
+          const delay = p * (duration / 2);
+
+          function pulse() {
+            particle
+              .attr('cx', src.x!).attr('cy', src.y!)
+              .attr('opacity', 0)
+              .transition()
+              .delay(delay)
+              .duration(200)
+              .attr('opacity', 0.9)
+              .attr('r', 3)
+              .transition()
+              .duration(duration)
+              .ease(d3.easeCubicInOut)
+              .attr('cx', tgt.x!).attr('cy', tgt.y!)
+              .attr('r', 1.5)
+              .transition()
+              .duration(200)
+              .attr('opacity', 0)
+              .on('end', pulse);
+          }
+          pulse();
+        }
+      }
+    }
 
     // Edge labels
     const linkLabel = g
@@ -436,11 +492,12 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
     // Highlighting logic
     function highlight(nodeId: string | null) {
       if (!nodeId) {
-        // Reset: all nodes bright, all edges hidden
+        // Reset: all nodes bright, all edges hidden, stop particles
         node.select('.card-rect').attr('opacity', 1).attr('filter', null);
         node.selectAll('text').attr('opacity', 1);
         link.attr('stroke-opacity', 0);
         linkLabel.attr('opacity', 0);
+        animateParticles([]);
         return;
       }
 
@@ -472,6 +529,14 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
         const tgt = typeof d.target === 'object' ? (d.target as MapNode).id : String(d.target);
         d3.select(this).attr('opacity', (src === nodeId || tgt === nodeId) ? 1 : 0);
       });
+
+      // Animate energy particles on active edges
+      const activeLinks = links.filter(l => {
+        const src = typeof l.source === 'object' ? (l.source as MapNode).id : String(l.source);
+        const tgt = typeof l.target === 'object' ? (l.target as MapNode).id : String(l.target);
+        return src === nodeId || tgt === nodeId;
+      });
+      animateParticles(activeLinks);
     }
 
     // Store highlight function in ref so toggle can call it
