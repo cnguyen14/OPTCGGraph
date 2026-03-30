@@ -551,14 +551,21 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
       highlight(newSelected);
     });
 
-    // Hover tooltip
+    // Hover tooltip — smart positioning to avoid overflow
     node.on('mouseenter', (event, d) => {
       const rect = svgRef.current!.getBoundingClientRect();
-      setHoverCard({
-        node: d,
-        x: event.clientX - rect.left + 15,
-        y: event.clientY - rect.top - 10,
-      });
+      const tooltipW = 320;
+      const tooltipH = 420;
+      let tx = event.clientX - rect.left + 15;
+      let ty = event.clientY - rect.top - 10;
+      // Flip left if overflowing right
+      if (tx + tooltipW > rect.width) tx = event.clientX - rect.left - tooltipW - 15;
+      // Flip above if overflowing bottom
+      if (ty + tooltipH > rect.height) ty = event.clientY - rect.top - tooltipH;
+      // Clamp to container
+      if (tx < 0) tx = 8;
+      if (ty < 0) ty = 8;
+      setHoverCard({ node: d, x: tx, y: ty });
     });
 
     node.on('mouseleave', () => {
