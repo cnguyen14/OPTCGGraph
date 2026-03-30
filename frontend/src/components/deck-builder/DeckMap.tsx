@@ -186,7 +186,51 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
         .on('zoom', (event) => g.attr('transform', event.transform as unknown as string)),
     );
 
-    // Force simulation
+    // Mind Map radial layout: Leader at center, cards in cost-tier rings
+    const cx = width / 2;
+    const cy = height / 2;
+
+    // Group cards by cost tier
+    const tiers: Record<string, MapNode[]> = { leader: [], low: [], mid: [], high: [], ultra: [] };
+    for (const n of nodes) {
+      if (n.isLeader) { tiers.leader.push(n); continue; }
+      const cost = n.cost ?? 0;
+      if (cost <= 2) tiers.low.push(n);
+      else if (cost <= 5) tiers.mid.push(n);
+      else if (cost <= 9) tiers.high.push(n);
+      else tiers.ultra.push(n);
+    }
+
+    // Sort each tier by connections (most connected first) for better visual
+    for (const tier of Object.values(tiers)) {
+      tier.sort((a, b) => (connectionCount.get(b.id) ?? 0) - (connectionCount.get(a.id) ?? 0));
+    }
+
+    // Place nodes in concentric rings
+    const ringRadii = { leader: 0, low: 160, mid: 300, high: 430, ultra: 530 };
+    for (const [tierName, tierNodes] of Object.entries(tiers)) {
+      const radius = ringRadii[tierName as keyof typeof ringRadii] ?? 300;
+      const count = tierNodes.length;
+      if (count === 0) continue;
+      if (tierName === 'leader') {
+        tierNodes[0].fx = cx;
+        tierNodes[0].fy = cy;
+        tierNodes[0].x = cx;
+        tierNodes[0].y = cy;
+        continue;
+      }
+      // Distribute evenly around the ring, with a slight offset per tier
+      const offset = tierName === 'mid' ? Math.PI / (count + 1) * 0.5 : 0;
+      for (let i = 0; i < count; i++) {
+        const angle = (2 * Math.PI * i) / count - Math.PI / 2 + offset;
+        tierNodes[i].fx = cx + radius * Math.cos(angle);
+        tierNodes[i].fy = cy + radius * Math.sin(angle);
+        tierNodes[i].x = tierNodes[i].fx;
+        tierNodes[i].y = tierNodes[i].fy;
+      }
+    }
+
+    // Gentle force simulation — nodes are pinned (fx/fy) but edges still animate
     const simulation = d3
       .forceSimulation(nodes)
       .force(
@@ -194,11 +238,32 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
         d3
           .forceLink<MapNode, MapLink>(links)
           .id((d) => d.id)
-          .distance(140),
+          .distance(100),
       )
-      .force('charge', d3.forceManyBody().strength(-350))
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius((d) => ((d as MapNode).isLeader ? 40 : 28)));
+      .alpha(0.05)  // Very low alpha — layout is pre-computed
+      .alphaDecay(0.1);
+
+    // Draw tier ring guides
+    const tierLabels = [
+      { r: ringRadii.low, label: 'Cost 0-2', count: tiers.low.length },
+      { r: ringRadii.mid, label: 'Cost 3-5', count: tiers.mid.length },
+      { r: ringRadii.high, label: 'Cost 6-9', count: tiers.high.length },
+      { r: ringRadii.ultra, label: 'Cost 10+', count: tiers.ultra.length },
+    ];
+    for (const { r, label, count } of tierLabels) {
+      if (count === 0) continue;
+      g.append('circle')
+        .attr('cx', cx).attr('cy', cy).attr('r', r)
+        .attr('fill', 'none')
+        .attr('stroke', '#1e293b')
+        .attr('stroke-width', 1)
+        .attr('stroke-dasharray', '4,4');
+      g.append('text')
+        .attr('x', cx + r + 5).attr('y', cy - 5)
+        .attr('font-size', '9px')
+        .attr('fill', '#334155')
+        .text(`${label} (${count})`);
+    }
 
     // Draw edges
     const link = g
@@ -244,8 +309,9 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
           })
           .on('end', (event, d) => {
             if (!event.active) simulation.alphaTarget(0);
-            d.fx = null;
-            d.fy = null;
+            // Keep position where user dropped it
+            d.fx = event.x;
+            d.fy = event.y;
           }),
       );
 
