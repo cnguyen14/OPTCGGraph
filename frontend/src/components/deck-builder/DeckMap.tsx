@@ -51,6 +51,8 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
   const [loading, setLoading] = useState(false);
   const [edges, setEdges] = useState<DeckSynergyEdge[]>([]);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [hoverCard, setHoverCard] = useState<{ node: MapNode; x: number; y: number } | null>(null);
+  const [connCounts, setConnCounts] = useState<Map<string, number>>(new Map());
 
   // Fetch synergy edges when deck changes
   useEffect(() => {
@@ -149,6 +151,7 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
     // Count connections per node
     const connectionCount = new Map<string, number>();
     nodes.forEach((n) => connectionCount.set(n.id, neighbors.get(n.id)?.size ?? 0));
+    setConnCounts(connectionCount);
 
     // SVG setup
     const defs = svg.append('defs');
@@ -273,8 +276,8 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
       .join('line')
       .attr('stroke', (d) => EDGE_COLORS[d.type] ?? '#475569')
       .attr('stroke-width', (d) => Math.max(1, (d.weight ?? 1) * 0.8))
-      .attr('stroke-opacity', 0.4)
-      .style('transition', 'stroke-opacity 0.2s, stroke-width 0.2s');
+      .attr('stroke-opacity', 0)  // Hidden by default — shown on click
+      .style('transition', 'stroke-opacity 0.3s, stroke-width 0.3s');
 
     // Edge labels
     const linkLabel = g
@@ -421,10 +424,10 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
     // Highlighting logic
     function highlight(nodeId: string | null) {
       if (!nodeId) {
-        // Reset all
-        node.select('.card-rect').attr('opacity', 1);
+        // Reset: all nodes bright, all edges hidden
+        node.select('.card-rect').attr('opacity', 1).attr('filter', null);
         node.selectAll('text').attr('opacity', 1);
-        link.attr('stroke-opacity', 0.4).attr('stroke-width', (d) => Math.max(1, (d.weight ?? 1) * 0.8));
+        link.attr('stroke-opacity', 0);
         linkLabel.attr('opacity', 0);
         return;
       }
@@ -433,32 +436,29 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
 
       node.each(function (d) {
         const el = d3.select(this);
-        if (d.id === nodeId) {
-          el.select('.card-rect').attr('opacity', 1);
-          el.selectAll('text').attr('opacity', 1);
-        } else if (connected.has(d.id)) {
-          el.select('.card-rect').attr('opacity', 1);
-          el.selectAll('text').attr('opacity', 1);
-        } else {
-          el.select('.card-rect').attr('opacity', 0.15);
-          el.selectAll('text').attr('opacity', 0.15);
-        }
+        const isSelected = d.id === nodeId;
+        const isConnected = connected.has(d.id);
+        const active = isSelected || isConnected;
+
+        el.select('.card-rect')
+          .attr('opacity', active ? 1 : 0.1)
+          .attr('filter', isSelected ? 'url(#glow-map)' : null);
+        el.selectAll('text').attr('opacity', active ? 1 : 0.1);
       });
 
       link.each(function (d) {
         const src = typeof d.source === 'object' ? (d.source as MapNode).id : String(d.source);
         const tgt = typeof d.target === 'object' ? (d.target as MapNode).id : String(d.target);
-        const isConnected = src === nodeId || tgt === nodeId;
+        const isActive = src === nodeId || tgt === nodeId;
         d3.select(this)
-          .attr('stroke-opacity', isConnected ? 0.9 : 0.05)
-          .attr('stroke-width', isConnected ? 3 : 1);
+          .attr('stroke-opacity', isActive ? 0.85 : 0)
+          .attr('stroke-width', isActive ? 2.5 : 1);
       });
 
       linkLabel.each(function (d) {
         const src = typeof d.source === 'object' ? (d.source as MapNode).id : String(d.source);
         const tgt = typeof d.target === 'object' ? (d.target as MapNode).id : String(d.target);
-        const isConnected = src === nodeId || tgt === nodeId;
-        d3.select(this).attr('opacity', isConnected ? 1 : 0);
+        d3.select(this).attr('opacity', (src === nodeId || tgt === nodeId) ? 1 : 0);
       });
     }
 
@@ -468,6 +468,20 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
       const newSelected = selectedNode === d.id ? null : d.id;
       setSelectedNode(newSelected);
       highlight(newSelected);
+    });
+
+    // Hover tooltip
+    node.on('mouseenter', (event, d) => {
+      const rect = svgRef.current!.getBoundingClientRect();
+      setHoverCard({
+        node: d,
+        x: event.clientX - rect.left + 15,
+        y: event.clientY - rect.top - 10,
+      });
+    });
+
+    node.on('mouseleave', () => {
+      setHoverCard(null);
     });
 
     node.on('dblclick', (event, d) => {
@@ -564,6 +578,29 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
 
       {/* D3 SVG */}
       <svg ref={svgRef} className="flex-1 w-full bg-gray-950" />
+
+      {/* Hover Tooltip */}
+      {hoverCard && (
+        <div
+          className="absolute z-20 pointer-events-none bg-gray-800 border border-gray-600 rounded-lg shadow-xl p-3 w-56"
+          style={{ left: hoverCard.x, top: hoverCard.y }}
+        >
+          <div className="flex gap-2">
+            {hoverCard.node.image_small && (
+              <img src={hoverCard.node.image_small} alt="" className="w-14 h-20 rounded object-cover shrink-0" />
+            )}
+            <div className="min-w-0">
+              <p className="text-white text-xs font-semibold truncate">{hoverCard.node.name}</p>
+              <p className="text-gray-400 text-[10px]">{hoverCard.node.id} &middot; {hoverCard.node.card_type}</p>
+              <div className="flex gap-2 mt-1 text-[10px]">
+                {hoverCard.node.cost !== null && <span className="text-blue-300">Cost {hoverCard.node.cost}</span>}
+                <span className="text-gray-400">{hoverCard.node.quantity}x</span>
+              </div>
+              <p className="text-gray-500 text-[10px] mt-0.5">{(connCounts.get(hoverCard.node.id) ?? 0)} connections</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Help text */}
       <div className="absolute bottom-3 left-3 text-[10px] text-gray-600 bg-gray-900/80 rounded px-2 py-1">
