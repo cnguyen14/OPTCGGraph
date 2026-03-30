@@ -59,7 +59,7 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [loading, setLoading] = useState(false);
   const [edges, setEdges] = useState<DeckSynergyEdge[]>([]);
-  const [hoverCard, setHoverCard] = useState<{ node: MapNode; x: number; y: number } | null>(null);
+  const [hoverCard, setHoverCard] = useState<{ node: MapNode; x: number; y: number; flipUp?: boolean } | null>(null);
   const [connCounts, setConnCounts] = useState<Map<string, number>>(new Map());
   const [showAllEdges, setShowAllEdges] = useState(false);
   const selectedRef = useRef<string | null>(null);
@@ -551,28 +551,30 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
       highlight(newSelected);
     });
 
-    // Hover tooltip — smart positioning to stay near cursor
+    // Hover tooltip — anchored to node position, flips if near edge
     node.on('mouseenter', (event, d) => {
       const rect = svgRef.current!.getBoundingClientRect();
       const tooltipW = 320;
-      const tooltipH = 400;
       const cursorX = event.clientX - rect.left;
       const cursorY = event.clientY - rect.top;
+      const spaceBelow = rect.height - cursorY;
+      const spaceRight = rect.width - cursorX;
 
-      // Default: right-below cursor
-      let tx = cursorX + 15;
-      let ty = cursorY + 15;
+      // Horizontal: prefer right of cursor, flip left if no space
+      const tx = spaceRight > tooltipW + 20 ? cursorX + 15 : Math.max(4, cursorX - tooltipW - 15);
 
-      // Flip left if overflowing right
-      if (tx + tooltipW > rect.width) tx = cursorX - tooltipW - 15;
-      // Flip above if overflowing bottom — anchor bottom edge to cursor
-      if (ty + tooltipH > rect.height) ty = cursorY - tooltipH - 15;
-
-      // Clamp
-      if (tx < 4) tx = 4;
+      // Vertical: prefer below cursor; if <200px space below, show above cursor
+      let ty: number;
+      if (spaceBelow < 200) {
+        // Place above: bottom of tooltip aligns ~30px above cursor
+        ty = cursorY - 50;
+        // Use CSS transform to anchor from bottom (set in style below)
+      } else {
+        ty = cursorY + 15;
+      }
       if (ty < 4) ty = 4;
 
-      setHoverCard({ node: d, x: tx, y: ty });
+      setHoverCard({ node: d, x: tx, y: ty, flipUp: spaceBelow < 200 });
     });
 
     node.on('mouseleave', () => {
@@ -709,7 +711,7 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
         return (
           <div
             className="absolute z-20 pointer-events-none bg-gray-800/95 border border-gray-600 rounded-xl shadow-2xl p-4 w-80 backdrop-blur-sm"
-            style={{ left: hoverCard.x, top: hoverCard.y }}
+            style={{ left: hoverCard.x, top: hoverCard.y, transform: hoverCard.flipUp ? 'translateY(-100%)' : undefined }}
           >
             <div className="flex gap-3">
               {n.image_small && (
