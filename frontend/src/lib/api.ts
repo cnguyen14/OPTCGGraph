@@ -86,6 +86,26 @@ export async function fetchDeckSynergies(cardIds: string[]): Promise<DeckSynergy
   return resp.json();
 }
 
+export async function validateDeck(leaderId: string, cardIds: string[]) {
+  const resp = await fetch(`${BASE_URL}/deck/validate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ leader_id: leaderId, card_ids: cardIds }),
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+export async function suggestFixes(leaderId: string, cardIds: string[]) {
+  const resp = await fetch(`${BASE_URL}/deck/suggest-fixes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ leader_id: leaderId, card_ids: cardIds }),
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
 export async function chatSync(message: string, sessionId?: string, leaderId?: string) {
   const resp = await fetch(`${BASE_URL}/ai/chat/sync`, {
     method: 'POST',

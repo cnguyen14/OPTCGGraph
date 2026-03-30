@@ -7,6 +7,7 @@ from neo4j import AsyncDriver
 from backend.graph.connection import get_driver
 from backend.graph.queries import get_card_by_id
 from backend.ai.deck_validator import validate_deck
+from backend.ai.deck_suggestions import suggest_fixes
 
 router = APIRouter(prefix="/api/deck", tags=["deck"])
 
@@ -49,3 +50,13 @@ async def validate(req: DeckValidateRequest, driver: AsyncDriver = Depends(_get_
 
     report = validate_deck(leader, cards)
     return report.to_dict()
+
+
+@router.post("/suggest-fixes")
+async def suggest(req: DeckValidateRequest, driver: AsyncDriver = Depends(_get_driver)):
+    """Generate smart replacement suggestions for deck validation issues.
+
+    Returns suggestions ranked by priority (rule fixes first, then quality improvements).
+    Each suggestion includes a card to remove, a card to add, and reasoning.
+    """
+    return await suggest_fixes(driver, req.leader_id, req.card_ids)

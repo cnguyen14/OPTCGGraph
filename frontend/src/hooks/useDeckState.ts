@@ -141,6 +141,35 @@ export function useDeckState() {
     setLeader(null);
   }, []);
 
+  const bulkReplace = useCallback((removes: string[], adds: Card[]) => {
+    setEntries((prev) => {
+      const next = new Map(prev);
+      // Remove one copy of each remove ID
+      for (const rid of removes) {
+        const existing = next.get(rid);
+        if (existing) {
+          if (existing.quantity <= 1) {
+            next.delete(rid);
+          } else {
+            next.set(rid, { ...existing, quantity: existing.quantity - 1 });
+          }
+        }
+      }
+      // Add one copy of each add card
+      for (const card of adds) {
+        const existing = next.get(card.id);
+        if (existing) {
+          if (existing.quantity < MAX_COPIES) {
+            next.set(card.id, { ...existing, quantity: existing.quantity + 1 });
+          }
+        } else {
+          next.set(card.id, { card, quantity: 1 });
+        }
+      }
+      return next;
+    });
+  }, []);
+
   return {
     leader,
     entries,
@@ -154,5 +183,6 @@ export function useDeckState() {
     getQuantity,
     selectLeader,
     clearLeader,
+    bulkReplace,
   };
 }

@@ -1,15 +1,19 @@
+import { useState } from 'react';
 import type { Card, DeckEntry } from '../../types';
 import CostCurve from './CostCurve';
 import DeckCardList from './DeckCardList';
+import DeckValidationModal from './DeckValidationModal';
 
 interface Props {
   entries: Map<string, DeckEntry>;
   totalCards: number;
   totalPrice: number;
   costCurve: Record<number, number>;
+  leader: Card | null;
   onAdd: (card: Card) => void;
   onRemove: (cardId: string) => void;
   onCardSelect: (card: Card) => void;
+  onBulkReplace: (removes: string[], adds: Card[]) => void;
 }
 
 export default function DeckPanel({
@@ -17,10 +21,14 @@ export default function DeckPanel({
   totalCards,
   totalPrice,
   costCurve,
+  leader,
   onAdd,
   onRemove,
   onCardSelect,
+  onBulkReplace,
 }: Props) {
+  const [showValidation, setShowValidation] = useState(false);
+
   // Type distribution
   const typeCount: Record<string, number> = {};
   for (const { card, quantity } of entries.values()) {
@@ -34,9 +42,19 @@ export default function DeckPanel({
       <div className="px-4 pt-3 pb-2 border-b border-gray-800/50">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-white font-semibold text-sm">Deck</h3>
-          <span className="text-xs text-gray-500">
-            {totalCards}/50 cards &middot; ${totalPrice.toFixed(2)}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500">
+              {totalCards}/50 &middot; ${totalPrice.toFixed(2)}
+            </span>
+            {leader && totalCards >= 10 && (
+              <button
+                onClick={() => setShowValidation(true)}
+                className="px-2.5 py-1 text-[11px] font-medium bg-green-600 hover:bg-green-500 text-white rounded transition-colors"
+              >
+                Validate
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Progress bar */}
@@ -78,6 +96,17 @@ export default function DeckPanel({
           onCardSelect={onCardSelect}
         />
       </div>
+
+      {/* Validation Modal */}
+      {leader && showValidation && (
+        <DeckValidationModal
+          open={showValidation}
+          leader={leader}
+          entries={entries}
+          onApply={(removes, adds) => onBulkReplace(removes, adds)}
+          onClose={() => setShowValidation(false)}
+        />
+      )}
     </div>
   );
 }

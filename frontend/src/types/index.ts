@@ -131,3 +131,43 @@ export interface Facets {
   sets: SetFacet[];
   rarities: string[];
 }
+
+// Validation types
+export interface CheckResult {
+  name: string;
+  status: 'PASS' | 'FAIL' | 'WARNING';
+  message: string;
+  details: Record<string, unknown>;
+}
+
+export interface ValidationReport {
+  leader_id: string;
+  leader_name: string;
+  deck_size: number;
+  is_legal: boolean;
+  summary: string;
+  stats: { pass: number; fail: number; warning: number };
+  checks: CheckResult[];
+}
+
+export interface SuggestionCard {
+  id: string;
+  name: string;
+  reason?: string;
+  cost?: number | null;
+  counter?: number | null;
+  benefit?: string;
+}
+
+export interface Suggestion {
+  type: 'rule_fix' | 'quality_improvement';
+  check_name: string;
+  remove: SuggestionCard;
+  add: SuggestionCard;
+  priority: 'high' | 'medium' | 'low';
+}
+
+export interface SuggestFixesResponse {
+  suggestions: Suggestion[];
+  validation: ValidationReport;
+}

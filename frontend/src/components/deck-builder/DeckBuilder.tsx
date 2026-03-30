@@ -26,6 +26,7 @@ export default function DeckBuilder({ onCardSelect }: Props) {
     getQuantity,
     selectLeader,
     clearLeader,
+    bulkReplace,
   } = useDeckState();
 
   const [showLeaderPicker, setShowLeaderPicker] = useState(false);
@@ -160,9 +161,11 @@ export default function DeckBuilder({ onCardSelect }: Props) {
             totalCards={totalCards}
             totalPrice={totalPrice}
             costCurve={costCurve}
+            leader={leader}
             onAdd={addCard}
             onRemove={removeCard}
             onCardSelect={onCardSelect}
+            onBulkReplace={bulkReplace}
           />
         </div>
       ) : (
