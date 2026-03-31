@@ -138,3 +138,183 @@ export async function switchModel(provider: string, model: string) {
   });
   return resp.json();
 }
+
+// === Meta / Tournament API ===
+
+import type {
+  Tournament,
+  MetaDeckSummary,
+  MetaDeckDetail,
+  MetaOverview,
+  SwapSuggestion,
+  SimulationResult,
+  SavedDeck,
+  SavedDeckListItem,
+} from '../types';
+
+export async function fetchTournaments(limit = 50): Promise<Tournament[]> {
+  const resp = await fetch(`${BASE_URL}/meta/tournaments?limit=${limit}`);
+  return resp.json();
+}
+
+export interface MetaDeckFilters {
+  leader?: string;
+  archetype?: string;
+  tournament_id?: string;
+  max_placement?: number;
+  limit?: number;
+  offset?: number;
+}
+
+export async function fetchMetaDecks(filters: MetaDeckFilters = {}): Promise<MetaDeckSummary[]> {
+  const params = new URLSearchParams();
+  if (filters.leader) params.set('leader', filters.leader);
+  if (filters.archetype) params.set('archetype', filters.archetype);
+  if (filters.tournament_id) params.set('tournament_id', filters.tournament_id);
+  if (filters.max_placement) params.set('max_placement', String(filters.max_placement));
+  if (filters.limit) params.set('limit', String(filters.limit));
+  if (filters.offset) params.set('offset', String(filters.offset));
+  const resp = await fetch(`${BASE_URL}/meta/decks?${params}`);
+  return resp.json();
+}
+
+export async function fetchMetaDeckDetail(deckId: string): Promise<MetaDeckDetail> {
+  const resp = await fetch(`${BASE_URL}/meta/decks/${deckId}`);
+  return resp.json();
+}
+
+export async function fetchMetaOverview(): Promise<MetaOverview> {
+  const resp = await fetch(`${BASE_URL}/meta/overview`);
+  return resp.json();
+}
+
+export async function suggestSwap(
+  deckCardIds: string[],
+  incomingCardId: string,
+  leaderId?: string,
+): Promise<SwapSuggestion | null> {
+  const resp = await fetch(`${BASE_URL}/meta/suggest-swap`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      deck_card_ids: deckCardIds,
+      incoming_card_id: incomingCardId,
+      leader_id: leaderId,
+    }),
+  });
+  if (!resp.ok) return null;
+  return resp.json();
+}
+
+// === Simulator API ===
+
+export async function startBattle(
+  deck1LeaderId: string,
+  deck1CardIds: string[],
+  deck2LeaderId: string,
+  deck2CardIds: string[],
+  numGames: number = 10,
+  agentType: string = 'heuristic',
+  llmModel?: string,
+): Promise<{ sim_id: string }> {
+  const resp = await fetch(`${BASE_URL}/simulator/battle`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      deck1_leader_id: deck1LeaderId,
+      deck1_card_ids: deck1CardIds,
+      deck2_leader_id: deck2LeaderId,
+      deck2_card_ids: deck2CardIds,
+      num_games: numGames,
+      agent_type: agentType,
+      ...(llmModel ? { llm_model: llmModel } : {}),
+    }),
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+export async function fetchSimulationResult(simId: string): Promise<SimulationResult> {
+  const resp = await fetch(`${BASE_URL}/simulator/result/${simId}`);
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+// === Saved Decks API ===
+
+const CLIENT_ID_KEY = 'optcg-client-id';
+
+function getClientId(): string {
+  let id = localStorage.getItem(CLIENT_ID_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(CLIENT_ID_KEY, id);
+  }
+  return id;
+}
+
+function clientHeaders(): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    'X-Client-Id': getClientId(),
+  };
+}
+
+export async function saveDeck(req: {
+  name: string;
+  description?: string;
+  leader_id: string | null;
+  entries: { card_id: string; quantity: number }[];
+  deck_notes?: string;
+}): Promise<SavedDeck> {
+  const resp = await fetch(`${BASE_URL}/deck/saved`, {
+    method: 'POST',
+    headers: clientHeaders(),
+    body: JSON.stringify(req),
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+export async function updateDeck(
+  id: string,
+  req: {
+    name: string;
+    description?: string;
+    leader_id: string | null;
+    entries: { card_id: string; quantity: number }[];
+    deck_notes?: string;
+  },
+): Promise<SavedDeck> {
+  const resp = await fetch(`${BASE_URL}/deck/saved?id=${id}`, {
+    method: 'POST',
+    headers: clientHeaders(),
+    body: JSON.stringify(req),
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+export async function listSavedDecks(): Promise<SavedDeckListItem[]> {
+  const resp = await fetch(`${BASE_URL}/deck/saved`, {
+    headers: { 'X-Client-Id': getClientId() },
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+export async function loadSavedDeck(id: string): Promise<SavedDeck> {
+  const resp = await fetch(`${BASE_URL}/deck/saved/${id}`, {
+    headers: { 'X-Client-Id': getClientId() },
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+export async function deleteSavedDeck(id: string): Promise<void> {
+  const resp = await fetch(`${BASE_URL}/deck/saved/${id}`, {
+    method: 'DELETE',
+    headers: { 'X-Client-Id': getClientId() },
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+}

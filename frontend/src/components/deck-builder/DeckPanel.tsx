@@ -10,6 +10,7 @@ interface Props {
   totalPrice: number;
   costCurve: Record<number, number>;
   leader: Card | null;
+  highlightedCardIds?: string[] | null;
   onAdd: (card: Card) => void;
   onRemove: (cardId: string) => void;
   onCardSelect: (card: Card) => void;
@@ -22,6 +23,7 @@ export default function DeckPanel({
   totalPrice,
   costCurve,
   leader,
+  highlightedCardIds,
   onAdd,
   onRemove,
   onCardSelect,
@@ -91,6 +93,7 @@ export default function DeckPanel({
       <div className="flex-1 overflow-hidden flex flex-col px-3 pb-3">
         <DeckCardList
           entries={entries}
+          highlightedCardIds={highlightedCardIds}
           onAdd={onAdd}
           onRemove={onRemove}
           onCardSelect={onCardSelect}

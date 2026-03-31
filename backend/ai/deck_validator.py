@@ -13,10 +13,10 @@ VALID_COLORS = {"Red", "Green", "Blue", "Purple", "Black", "Yellow"}
 
 # Pro deck building benchmarks (from tournament winner analysis)
 COST_CURVE_TARGETS = {
-    "low": {"range": (0, 2), "target": (8, 12), "label": "Low (0-2)"},
-    "mid": {"range": (3, 5), "target": (15, 20), "label": "Mid (3-5)"},
-    "high": {"range": (6, 9), "target": (8, 12), "label": "High (6-9)"},
-    "ultra": {"range": (10, 99), "target": (0, 2), "label": "Ultra (10+)"},
+    "low": {"range": (0, 2), "target": (10, 20), "label": "Low (0-2)"},
+    "mid": {"range": (3, 5), "target": (14, 22), "label": "Mid (3-5)"},
+    "high": {"range": (6, 9), "target": (6, 14), "label": "High (6-9)"},
+    "ultra": {"range": (10, 99), "target": (0, 4), "label": "Ultra (10+)"},
 }
 
 # Type ratio targets (from tournament data: 77% char, 20% event, 3% stage)

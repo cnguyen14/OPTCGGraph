@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { searchCards, fetchFacets, fetchDeckCandidates } from '../../lib/api';
 import type { Card, CardSearchParams, Facets } from '../../types';
+import CardTooltip, { useCardTooltip } from './CardTooltip';
 
 const PAGE_SIZE = 24;
 
@@ -39,6 +40,7 @@ interface Props {
 }
 
 export default function CardPool({ leader, getQuantity, onAddCard, onCardSelect }: Props) {
+  const { tooltip, show: showTooltip, hide: hideTooltip } = useCardTooltip();
   const [mode, setMode] = useState<PoolMode>('suggested');
   const [cards, setCards] = useState<Card[]>([]);
   const [total, setTotal] = useState(0);
@@ -307,6 +309,8 @@ export default function CardPool({ leader, getQuantity, onAddCard, onCardSelect 
                 <div
                   key={card.id}
                   onClick={(e) => handleCardClick(card, e)}
+                  onMouseEnter={(e) => showTooltip(card, e)}
+                  onMouseLeave={hideTooltip}
                   className={`bg-gray-800 rounded-lg overflow-hidden cursor-pointer transition-all hover:scale-105 relative ${
                     maxed
                       ? 'opacity-40 ring-1 ring-gray-600'
@@ -370,7 +374,11 @@ export default function CardPool({ leader, getQuantity, onAddCard, onCardSelect 
             })}
           </div>
         )}
+
       </div>
+
+      {/* Hover Tooltip */}
+      {tooltip && <CardTooltip tooltip={tooltip} />}
 
       {/* Pagination (browse mode only) */}
       {mode === 'browse' && total > PAGE_SIZE && (

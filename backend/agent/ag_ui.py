@@ -1,5 +1,6 @@
 """AG-UI event emitter for SSE streaming to frontend."""
 
+import asyncio
 import json
 import uuid
 from typing import AsyncGenerator
@@ -49,6 +50,25 @@ async def stream_agent_response(result: dict) -> AsyncGenerator[str, None]:
         yield _sse_event("TextMessageEnd", {"messageId": msg_id})
 
     # RUN_FINISHED
+    yield _sse_event("RUN_FINISHED", {})
+
+
+async def stream_from_queue(queue: asyncio.Queue) -> AsyncGenerator[str, None]:
+    """Stream SSE events from an asyncio.Queue in real-time.
+
+    Reads events pushed by run_agent_streaming() and yields them as SSE.
+    Stops when it receives None sentinel.
+    """
+    yield _sse_event("RUN_STARTED", {})
+
+    while True:
+        event = await queue.get()
+        if event is None:
+            break
+        event_type = event["type"]
+        data = {k: v for k, v in event.items() if k != "type"}
+        yield _sse_event(event_type, data)
+
     yield _sse_event("RUN_FINISHED", {})
 
 

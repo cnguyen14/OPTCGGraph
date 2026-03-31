@@ -171,3 +171,125 @@ export interface SuggestFixesResponse {
   suggestions: Suggestion[];
   validation: ValidationReport;
 }
+
+// Meta / Tournament types
+export interface Tournament {
+  id: string;
+  name: string;
+  date: string;
+  format: string;
+  player_count: number;
+}
+
+export interface MetaDeckSummary {
+  id: string;
+  leader_id: string;
+  leader_name: string;
+  archetype: string;
+  placement: number | null;
+  player_name: string;
+  tournament: Tournament | null;
+}
+
+export interface MetaDeckCard {
+  id: string;
+  name: string;
+  card_type: string;
+  cost: number | null;
+  power: number | null;
+  counter: number | null;
+  count: number;
+  image_small: string;
+  keywords: string[];
+}
+
+export interface MetaDeckDetail extends MetaDeckSummary {
+  cards: MetaDeckCard[];
+  total_cards: number;
+  type_distribution: Record<string, number>;
+  leader_image: string;
+}
+
+export interface MetaOverview {
+  total_decks: number;
+  total_tournaments: number;
+  top_archetypes: { archetype: string; count: number; share: number }[];
+  top_leaders: { id: string; name: string; deck_count: number }[];
+}
+
+export interface SwapSuggestion {
+  remove_id: string;
+  remove_name: string;
+  add_id: string;
+  add_name: string;
+  reason: string;
+}
+
+// Simulator types
+export interface SimulationProgress {
+  completed: number;
+  total: number;
+  p1Wins: number;
+  p2Wins: number;
+  draws: number;
+}
+
+export interface CardPerformance {
+  card_id: string;
+  card_name: string;
+  times_played: number;
+  total_games: number;
+  times_in_winning_game: number;
+}
+
+export interface GameReplayEntry {
+  turn: number;
+  player: string;
+  phase: string;
+  action: string;
+  details: Record<string, unknown>;
+}
+
+export interface SampleGame {
+  winner: string;
+  turns: number;
+  p1_life: number;
+  p2_life: number;
+  game_log: GameReplayEntry[];
+}
+
+export interface SimulationResult {
+  num_games: number;
+  p1_wins: number;
+  p2_wins: number;
+  draws: number;
+  avg_turns: number;
+  p1_leader: string;
+  p2_leader: string;
+  p1_win_rate: number;
+  p2_win_rate: number;
+  card_stats: Record<string, CardPerformance>;
+  sample_games: SampleGame[];
+}
+
+// Saved Deck types
+export interface SavedDeck {
+  id: string;
+  name: string;
+  description: string;
+  leader_id: string | null;
+  entries: { card_id: string; quantity: number }[];
+  deck_notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SavedDeckListItem {
+  id: string;
+  name: string;
+  description: string;
+  leader_id: string | null;
+  card_count: number;
+  created_at: string;
+  updated_at: string;
+}

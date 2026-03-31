@@ -34,3 +34,5 @@ DEFAULT_MODEL: str = os.getenv("DEFAULT_MODEL", "claude-sonnet-4-20250514")
 CRAWL_CACHE_DIR: Path = _project_root / ".crawl-cache"
 APITCG_DELAY: float = 1.0  # seconds between requests
 OPTCGAPI_DELAY: float = 1.5
+LIMITLESSTCG_DELAY: float = 2.0
+LIMITLESSTCG_BASE_URL: str = "https://onepiece.limitlesstcg.com"

@@ -144,3 +144,116 @@ class ChatRequest(BaseModel):
 class ModelSwitchRequest(BaseModel):
     provider: str  # "claude" or "openrouter"
     model: str
+
+
+# === Meta / Tournament models ===
+
+
+class TournamentResponse(BaseModel):
+    id: str
+    name: str = ""
+    date: str = ""
+    format: str = ""
+    player_count: int = 0
+
+
+class MetaDeckCard(BaseModel):
+    id: str
+    name: str = ""
+    card_type: str = ""
+    cost: int | None = None
+    power: int | None = None
+    counter: int | None = None
+    count: int = 1
+    image_small: str = ""
+    keywords: list[str] = Field(default_factory=list)
+
+
+class MetaDeckSummary(BaseModel):
+    id: str
+    leader_id: str = ""
+    leader_name: str = ""
+    archetype: str = ""
+    placement: int | None = None
+    player_name: str = ""
+    tournament: TournamentResponse | None = None
+
+
+class MetaDeckDetail(MetaDeckSummary):
+    cards: list[MetaDeckCard] = Field(default_factory=list)
+    total_cards: int = 0
+    type_distribution: dict[str, int] = Field(default_factory=dict)
+    leader_image: str = ""
+
+
+class MetaOverviewArchetype(BaseModel):
+    archetype: str
+    count: int
+    share: float  # 0-1
+
+
+class MetaOverviewResponse(BaseModel):
+    total_decks: int = 0
+    total_tournaments: int = 0
+    top_archetypes: list[MetaOverviewArchetype] = Field(default_factory=list)
+    top_leaders: list[dict] = Field(default_factory=list)
+
+
+class LeaderMetaResponse(BaseModel):
+    leader_id: str
+    leader_name: str = ""
+    total_decks: int = 0
+    avg_placement: float | None = None
+    top_cut_count: int = 0
+    top_archetypes: list[str] = Field(default_factory=list)
+    popular_cards: list[MetaDeckCard] = Field(default_factory=list)
+
+
+class SwapRequest(BaseModel):
+    deck_card_ids: list[str]
+    incoming_card_id: str
+    leader_id: str | None = None
+
+
+class SwapSuggestion(BaseModel):
+    remove_id: str
+    remove_name: str = ""
+    add_id: str
+    add_name: str = ""
+    reason: str = ""
+
+
+# --- Saved Decks ---
+
+class DeckEntryPayload(BaseModel):
+    card_id: str
+    quantity: int = Field(..., ge=1, le=4)
+
+
+class SaveDeckRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    description: str = ""
+    leader_id: str | None = None
+    entries: list[DeckEntryPayload] = Field(default_factory=list)
+    deck_notes: str = ""
+
+
+class SavedDeckResponse(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    leader_id: str | None = None
+    entries: list[DeckEntryPayload] = Field(default_factory=list)
+    deck_notes: str = ""
+    created_at: str
+    updated_at: str
+
+
+class SavedDeckListItem(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    leader_id: str | None = None
+    card_count: int = 0
+    created_at: str
+    updated_at: str

@@ -1,4 +1,6 @@
+import { useEffect, useMemo } from 'react';
 import type { Card, DeckEntry } from '../../types';
+import CardTooltip, { useCardTooltip } from './CardTooltip';
 
 const COLOR_MAP: Record<string, string> = {
   Red: '#ef4444',
@@ -11,12 +13,14 @@ const COLOR_MAP: Record<string, string> = {
 
 interface Props {
   entries: Map<string, DeckEntry>;
+  highlightedCardIds?: string[] | null;
   onAdd: (card: Card) => void;
   onRemove: (cardId: string) => void;
   onCardSelect: (card: Card) => void;
 }
 
-export default function DeckCardList({ entries, onAdd, onRemove, onCardSelect }: Props) {
+export default function DeckCardList({ entries, highlightedCardIds, onAdd, onRemove, onCardSelect }: Props) {
+  const { tooltip, show: showTooltip, hide: hideTooltip } = useCardTooltip();
   const sorted = Array.from(entries.values()).sort((a, b) => {
     // Sort by cost, then by name
     const costA = a.card.cost ?? 99;
@@ -24,6 +28,16 @@ export default function DeckCardList({ entries, onAdd, onRemove, onCardSelect }:
     if (costA !== costB) return costA - costB;
     return a.card.name.localeCompare(b.card.name);
   });
+
+  const highlightSet = useMemo(() => new Set(highlightedCardIds ?? []), [highlightedCardIds]);
+
+  // Auto-scroll to first highlighted card
+  useEffect(() => {
+    if (highlightedCardIds?.length) {
+      const el = document.getElementById(`deck-card-${highlightedCardIds[0]}`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [highlightedCardIds]);
 
   if (sorted.length === 0) {
     return (
@@ -38,12 +52,20 @@ export default function DeckCardList({ entries, onAdd, onRemove, onCardSelect }:
       {sorted.map(({ card, quantity }) => {
         const colors = card.colors?.length ? card.colors : card.color ? [card.color] : [];
         const primaryColor = colors[0];
+        const isHighlighted = highlightSet.has(card.id);
 
         return (
           <div
             key={card.id}
-            className="flex items-center gap-2 bg-gray-800/60 hover:bg-gray-800 rounded p-1.5 group cursor-pointer transition-colors"
+            id={`deck-card-${card.id}`}
+            className={`flex items-center gap-2 rounded p-1.5 group cursor-pointer transition-all duration-200 ${
+              isHighlighted
+                ? 'bg-purple-800/50 ring-1 ring-purple-500/60 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
+                : 'bg-gray-800/60 hover:bg-gray-800'
+            }`}
             onClick={() => onCardSelect(card)}
+            onMouseEnter={(e) => showTooltip(card, e)}
+            onMouseLeave={hideTooltip}
           >
             {/* Thumbnail */}
             {card.image_small ? (
@@ -99,6 +121,9 @@ export default function DeckCardList({ entries, onAdd, onRemove, onCardSelect }:
           </div>
         );
       })}
+
+      {/* Hover Tooltip */}
+      {tooltip && <CardTooltip tooltip={tooltip} />}
     </div>
   );
 }

@@ -1,6 +1,10 @@
 """Build nodes and edges in Neo4j from merged card data."""
 
+import logging
+
 from neo4j import AsyncDriver
+
+logger = logging.getLogger(__name__)
 
 
 async def create_indexes(driver: AsyncDriver) -> None:
@@ -184,3 +188,166 @@ def _split_colors(value: str) -> list[str]:
             colors.append(color)
             remaining = remaining.replace(color, "", 1).strip()
     return colors if colors else [value]
+
+
+async def create_meta_indexes(driver: AsyncDriver) -> None:
+    """Create indexes for tournament/deck nodes."""
+    queries = [
+        "CREATE INDEX tournament_id IF NOT EXISTS FOR (t:Tournament) ON (t.id)",
+        "CREATE INDEX deck_id IF NOT EXISTS FOR (d:Deck) ON (d.id)",
+        "CREATE INDEX deck_leader IF NOT EXISTS FOR (d:Deck) ON (d.leader_id)",
+        "CREATE INDEX deck_archetype IF NOT EXISTS FOR (d:Deck) ON (d.archetype)",
+    ]
+    async with driver.session() as session:
+        for q in queries:
+            await session.run(q)
+
+
+async def load_tournament_data(
+    driver: AsyncDriver,
+    tournaments: list[dict],
+    decks: list[dict],
+) -> dict:
+    """Load tournament and deck data into Neo4j.
+
+    Returns: {"tournaments": int, "decks": int, "includes_edges": int}
+    """
+    t_count = 0
+    d_count = 0
+    inc_count = 0
+
+    async with driver.session() as session:
+        # Create Tournament nodes
+        for t in tournaments:
+            await session.run(
+                """
+                MERGE (t:Tournament {id: $id})
+                SET t.name = $name,
+                    t.date = $date,
+                    t.format = $format,
+                    t.player_count = $player_count,
+                    t.source = $source
+                """,
+                id=str(t["id"]),
+                name=t.get("name", ""),
+                date=t.get("date", ""),
+                format=t.get("format", ""),
+                player_count=t.get("player_count", 0),
+                source=t.get("source", "limitlesstcg"),
+            )
+            t_count += 1
+
+        # Create Deck nodes + relationships
+        for deck in decks:
+            leader_id = deck.get("leader_id", "")
+            deck_id = str(deck["id"])
+
+            # Create Deck node
+            await session.run(
+                """
+                MERGE (d:Deck {id: $id})
+                SET d.archetype = $archetype,
+                    d.placement = $placement,
+                    d.player_name = $player_name,
+                    d.leader_id = $leader_id,
+                    d.source = $source
+                """,
+                id=deck_id,
+                archetype=deck.get("archetype", ""),
+                placement=deck.get("placement"),
+                player_name=deck.get("player_name", ""),
+                leader_id=leader_id,
+                source=deck.get("source", "limitlesstcg"),
+            )
+
+            # USES_LEADER edge (Deck → Card)
+            if leader_id:
+                await session.run(
+                    """
+                    MATCH (d:Deck {id: $deck_id})
+                    MATCH (c:Card {id: $leader_id})
+                    MERGE (d)-[:USES_LEADER]->(c)
+                    """,
+                    deck_id=deck_id,
+                    leader_id=leader_id,
+                )
+
+            # PLACED_IN edge (Deck → Tournament)
+            tournament_id = deck.get("tournament_id")
+            if tournament_id:
+                await session.run(
+                    """
+                    MATCH (d:Deck {id: $deck_id})
+                    MATCH (t:Tournament {id: $tournament_id})
+                    MERGE (d)-[:PLACED_IN]->(t)
+                    """,
+                    deck_id=deck_id,
+                    tournament_id=str(tournament_id),
+                )
+
+            # INCLUDES edges (Deck → Card) with count property
+            for card_entry in deck.get("cards", []):
+                card_id = card_entry["id"]
+                count = card_entry.get("count", 1)
+                await session.run(
+                    """
+                    MATCH (d:Deck {id: $deck_id})
+                    MATCH (c:Card {id: $card_id})
+                    MERGE (d)-[inc:INCLUDES]->(c)
+                    SET inc.count = $count
+                    """,
+                    deck_id=deck_id,
+                    card_id=card_id,
+                    count=count,
+                )
+                inc_count += 1
+
+            d_count += 1
+
+    logger.info(
+        f"Loaded {t_count} tournaments, {d_count} decks, {inc_count} INCLUDES edges"
+    )
+    return {"tournaments": t_count, "decks": d_count, "includes_edges": inc_count}
+
+
+async def compute_card_meta_stats(driver: AsyncDriver) -> int:
+    """Compute tournament popularity stats and store on Card nodes.
+
+    Sets: tournament_pick_rate, avg_copies, top_cut_rate
+    Returns: number of cards updated.
+    """
+    async with driver.session() as session:
+        # Overall pick rate + avg copies
+        result = await session.run(
+            """
+            MATCH (d:Deck)-[inc:INCLUDES]->(c:Card)
+            WITH c, count(DISTINCT d) AS deck_count, avg(inc.count) AS avg_copies
+            WITH c, deck_count, avg_copies,
+                 toFloat(deck_count) AS dc
+            CALL {
+                MATCH (d2:Deck) RETURN count(d2) AS total_decks
+            }
+            SET c.tournament_pick_rate = dc / total_decks,
+                c.avg_copies = round(avg_copies * 100) / 100
+            RETURN count(c) AS updated
+            """
+        )
+        record = await result.single()
+        pick_updated = record["updated"] if record else 0
+
+        # Top cut rate (placement <= 8)
+        await session.run(
+            """
+            MATCH (d:Deck)-[inc:INCLUDES]->(c:Card)
+            WHERE d.placement IS NOT NULL AND d.placement <= 8
+            WITH c, count(DISTINCT d) AS top_cut_count
+            CALL {
+                MATCH (d2:Deck) WHERE d2.placement IS NOT NULL AND d2.placement <= 8
+                RETURN count(d2) AS total_top_cut
+            }
+            SET c.top_cut_rate = toFloat(top_cut_count) / total_top_cut
+            """
+        )
+
+    logger.info(f"Computed meta stats for {pick_updated} cards")
+    return pick_updated

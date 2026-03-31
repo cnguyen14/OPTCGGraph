@@ -61,6 +61,17 @@ AGENT_TOOLS = [
         },
     },
     {
+        "name": "analyze_leader_playstyles",
+        "description": "Analyze tournament data to discover available playstyles for a leader. Call this BEFORE building a deck to show the user their options. Returns playstyle profiles with signature cards and strategy hints.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "leader_id": {"type": "string", "description": "Leader card ID"},
+            },
+            "required": ["leader_id"],
+        },
+    },
+    {
         "name": "build_deck_shell",
         "description": "Build a legal, competitive 50-card deck for a Leader. Enforces all OPTCG rules (50 cards, max 4 copies, color match, no LEADERs in deck). Returns validated deck with cost curve, role coverage, and quality report. ALWAYS use this tool when asked to build a deck.",
         "parameters": {
@@ -69,6 +80,15 @@ AGENT_TOOLS = [
                 "leader_id": {"type": "string", "description": "Leader card ID"},
                 "budget_max": {"type": "number", "description": "Max total price in USD (optional)"},
                 "strategy": {"type": "string", "enum": ["aggro", "midrange", "control"]},
+                "playstyle_hints": {
+                    "type": "string",
+                    "description": "Comma-separated playstyle preferences from user (e.g. 'rush,low_curve,card_advantage'). Get these from analyze_leader_playstyles results.",
+                },
+                "signature_cards": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Card IDs that MUST be included (signature cards from playstyle analysis)",
+                },
             },
             "required": ["leader_id"],
         },
@@ -114,6 +134,62 @@ AGENT_TOOLS = [
                 "card_ids": {"type": "array", "items": {"type": "string"}, "description": "List of card IDs in the deck"},
             },
             "required": ["leader_id", "card_ids"],
+        },
+    },
+    {
+        "name": "get_meta_overview",
+        "description": "Get current tournament meta overview: top archetypes with play rates, most popular leaders. Use when user asks about the meta, what decks are popular, or meta trends.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
+        "name": "get_leader_meta",
+        "description": "Get tournament meta stats for a specific leader: how many decks use it, average placement, top archetypes, most popular cards. Use when user asks how a leader performs competitively.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "leader_id": {"type": "string", "description": "Leader card ID, e.g. 'OP12-061'"},
+            },
+            "required": ["leader_id"],
+        },
+    },
+    {
+        "name": "compare_deck_to_meta",
+        "description": "Compare user's current deck against tournament-winning decks for the same leader. Shows which popular cards are missing and which unusual cards the user has. Use when user asks 'what am I missing?' or 'how does my deck compare?'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "leader_id": {"type": "string", "description": "Leader card ID"},
+                "deck_card_ids": {"type": "array", "items": {"type": "string"}, "description": "Card IDs in user's deck"},
+            },
+            "required": ["leader_id", "deck_card_ids"],
+        },
+    },
+    {
+        "name": "recommend_meta_cards",
+        "description": "Recommend tournament-proven cards for a leader. Returns cards sorted by top-cut rate and pick rate from real tournament data. Use when user asks 'what cards should I add?' or 'what's hot for this leader?'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "leader_id": {"type": "string", "description": "Leader card ID"},
+                "limit": {"type": "integer", "default": 10, "description": "Number of cards to return"},
+            },
+            "required": ["leader_id"],
+        },
+    },
+    {
+        "name": "suggest_card_swap",
+        "description": "Suggest which card to remove from a full deck (50 cards) when adding a new card. Analyzes tournament pick rates, role coverage, and cost curve impact. Returns a 1-in-1-out recommendation.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "deck_card_ids": {"type": "array", "items": {"type": "string"}, "description": "Current deck card IDs"},
+                "incoming_card_id": {"type": "string", "description": "Card the user wants to add"},
+                "leader_id": {"type": "string", "description": "Leader card ID (optional)"},
+            },
+            "required": ["deck_card_ids", "incoming_card_id"],
         },
     },
 ]

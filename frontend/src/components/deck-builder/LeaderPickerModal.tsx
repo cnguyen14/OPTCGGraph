@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { searchCards } from '../../lib/api';
 import type { Card } from '../../types';
+import CardTooltip, { useCardTooltip } from './CardTooltip';
 
 const COLOR_MAP: Record<string, string> = {
   Red: '#ef4444',
@@ -27,6 +28,7 @@ export default function LeaderPickerModal({ open, onClose, onSelect }: Props) {
   const [colorFilter, setColorFilter] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [imgErrors, setImgErrors] = useState<Set<string>>(new Set());
+  const { tooltip, show: showTooltip, hide: hideTooltip } = useCardTooltip();
 
   const handleKeywordChange = useCallback((value: string) => {
     setKeyword(value);
@@ -127,6 +129,8 @@ export default function LeaderPickerModal({ open, onClose, onSelect }: Props) {
                       onSelect(leader);
                       onClose();
                     }}
+                    onMouseEnter={(e) => showTooltip(leader, e)}
+                    onMouseLeave={hideTooltip}
                     className="bg-gray-800 rounded-lg overflow-hidden cursor-pointer transition-all hover:scale-105 hover:ring-2 hover:ring-blue-500"
                   >
                     {!imgErrors.has(leader.id) && leader.image_small ? (
@@ -169,6 +173,9 @@ export default function LeaderPickerModal({ open, onClose, onSelect }: Props) {
           )}
         </div>
       </div>
+
+      {/* Hover Tooltip */}
+      {tooltip && <CardTooltip tooltip={tooltip} />}
     </div>
   );
 }

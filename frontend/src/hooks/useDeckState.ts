@@ -9,11 +9,13 @@ const MAX_COPIES = 4;
 interface StoredDeck {
   leaderId: string | null;
   entries: { cardId: string; quantity: number }[];
+  deckNotes?: string;
 }
 
 export function useDeckState() {
   const [leader, setLeader] = useState<Card | null>(null);
   const [entries, setEntries] = useState<Map<string, DeckEntry>>(new Map());
+  const [deckNotes, setDeckNotes] = useState('');
   const [hydrating, setHydrating] = useState(true);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -41,14 +43,15 @@ export function useDeckState() {
           cardId,
           quantity: e.quantity,
         })),
+        deckNotes: deckNotes || undefined,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
     }, 500);
-  }, [leader, entries]);
+  }, [leader, entries, deckNotes]);
 
   useEffect(() => {
     if (!hydrating) saveDeck();
-  }, [leader, entries, hydrating, saveDeck]);
+  }, [leader, entries, deckNotes, hydrating, saveDeck]);
 
   // Hydrate from localStorage on mount
   useEffect(() => {
@@ -60,6 +63,10 @@ export function useDeckState() {
 
     try {
       const stored: StoredDeck = JSON.parse(raw);
+      if (stored.deckNotes) {
+        setDeckNotes(stored.deckNotes);
+      }
+
       const loadDeck = async () => {
         // Load leader
         if (stored.leaderId) {
@@ -126,6 +133,7 @@ export function useDeckState() {
 
   const clearDeck = useCallback(() => {
     setEntries(new Map());
+    setDeckNotes('');
   }, []);
 
   const getQuantity = useCallback(
@@ -208,6 +216,7 @@ export function useDeckState() {
     totalPrice,
     costCurve,
     hydrating,
+    deckNotes,
     addCard,
     removeCard,
     clearDeck,
@@ -216,6 +225,7 @@ export function useDeckState() {
     clearLeader,
     bulkReplace,
     loadDeckFromIds,
+    setDeckNotes,
   };
 }
 

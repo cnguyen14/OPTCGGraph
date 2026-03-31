@@ -14,6 +14,12 @@ interface ToolStep {
   status: 'running' | 'done';
 }
 
+interface Suggestion {
+  label: string;
+  value: string;
+  description?: string;
+}
+
 interface Props {
   sessionId: string | null;
   onSessionId: (id: string) => void;
@@ -32,6 +38,7 @@ const TOOL_LABELS: Record<string, string> = {
   suggest_deck_fixes: 'Generating suggestions',
   get_mana_curve: 'Analyzing mana curve',
   update_ui_state: 'Updating interface',
+  analyze_leader_playstyles: 'Analyzing playstyles',
 };
 
 function humanize(tool: string): string {
@@ -46,21 +53,25 @@ export default function FloatingChat({ sessionId, onSessionId, leaderId, deckCar
   const [unread, setUnread] = useState(0);
   const [steps, setSteps] = useState<ToolStep[]>([]);
   const [streamingText, setStreamingText] = useState('');
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading, steps, streamingText]);
+  }, [messages, loading, steps, streamingText, suggestions]);
 
   useEffect(() => {
     if (open) setUnread(0);
   }, [open]);
 
-  const handleSend = async () => {
-    if (!input.trim() || loading) return;
-    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: input };
+  const handleSend = async (overrideMessage?: string) => {
+    const msg = overrideMessage ?? input;
+    if (!msg.trim() || loading) return;
+    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: msg };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
+    setSuggestions([]);
     setLoading(true);
     setSteps([]);
     setStreamingText('');
@@ -70,7 +81,7 @@ export default function FloatingChat({ sessionId, onSessionId, leaderId, deckCar
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: input,
+          message: msg,
           session_id: sessionId,
           leader_id: leaderId,
           deck_card_ids: deckCardIds,
@@ -111,6 +122,10 @@ export default function FloatingChat({ sessionId, onSessionId, leaderId, deckCar
               case 'TextMessageContent':
                 fullText += event.delta ?? '';
                 setStreamingText(fullText);
+                break;
+
+              case 'SUGGESTIONS':
+                setSuggestions(event.suggestions || []);
                 break;
 
               case 'STATE_SNAPSHOT':
@@ -241,6 +256,31 @@ export default function FloatingChat({ sessionId, onSessionId, leaderId, deckCar
                 </div>
               </div>
             )}
+            {/* Suggestion buttons */}
+            {suggestions.length > 0 && !loading && (
+              <div className="px-2 py-2 space-y-1.5">
+                <p className="text-gray-500 text-[10px] uppercase tracking-wide px-1">Choose an option</p>
+                {suggestions.map((s, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleSend(s.value)}
+                    className="block w-full bg-gray-800/80 hover:bg-blue-600/20 border border-gray-700 hover:border-blue-500/50 text-left rounded-lg px-3 py-2 transition-all group"
+                  >
+                    <span className="text-xs text-white font-medium group-hover:text-blue-400">{s.label}</span>
+                    {s.description && (
+                      <span className="block text-[10px] text-gray-500 mt-0.5">{s.description}</span>
+                    )}
+                  </button>
+                ))}
+                <button
+                  onClick={() => { setSuggestions([]); inputRef.current?.focus(); }}
+                  className="block w-full text-center text-[10px] text-gray-500 hover:text-gray-300 py-1.5 transition-colors"
+                >
+                  Type your own...
+                </button>
+              </div>
+            )}
+
             <div ref={bottomRef} />
           </div>
 
@@ -248,6 +288,7 @@ export default function FloatingChat({ sessionId, onSessionId, leaderId, deckCar
           <div className="px-3 py-2.5 border-t border-gray-800 shrink-0">
             <div className="flex gap-2">
               <input
+                ref={inputRef}
                 type="text"
                 value={input}
                 onChange={e => setInput(e.target.value)}

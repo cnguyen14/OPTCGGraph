@@ -1,15 +1,17 @@
 """AI agent API endpoints with AG-UI SSE streaming."""
 
+import asyncio
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from neo4j import AsyncDriver
 
 from backend.api.models import ChatRequest
 from backend.graph.connection import get_driver
-from backend.agent.loop import run_agent
+from backend.agent.loop import run_agent, run_agent_streaming
 from backend.agent.providers import get_provider
 from backend.agent.session import Session
-from backend.agent.ag_ui import stream_agent_response
+from backend.agent.ag_ui import stream_agent_response, stream_from_queue
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -20,7 +22,7 @@ async def _get_driver() -> AsyncDriver:
 
 @router.post("/chat")
 async def chat(req: ChatRequest, driver: AsyncDriver = Depends(_get_driver)):
-    """AI chat endpoint with AG-UI SSE streaming."""
+    """AI chat endpoint with real-time AG-UI SSE streaming."""
     # Get or create session
     session = Session(req.session_id)
 
@@ -39,22 +41,29 @@ async def chat(req: ChatRequest, driver: AsyncDriver = Depends(_get_driver)):
     config = session.model_config
     provider = get_provider(config["provider"], config["model"])
 
-    # Run agent
-    result = await run_agent(
+    # Create queue for real-time event streaming
+    queue: asyncio.Queue = asyncio.Queue()
+
+    # Start agent in background — pushes events to queue as they happen
+    agent_task = asyncio.create_task(run_agent_streaming(
         user_message=req.message,
         provider=provider,
         driver=driver,
+        event_queue=queue,
         conversation_history=session.get_messages(),
         current_deck=session.current_deck,
         selected_leader=session.selected_leader,
-    )
+    ))
 
-    # Save updated messages
-    session.save_messages(result["messages"])
+    async def generate():
+        async for event in stream_from_queue(queue):
+            yield event
+        # After streaming completes, save session from agent result
+        result = await agent_task
+        session.save_messages(result["messages"])
 
-    # Stream response as SSE
     return StreamingResponse(
-        stream_agent_response(result),
+        generate(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

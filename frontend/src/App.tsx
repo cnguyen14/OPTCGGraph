@@ -3,11 +3,14 @@ import { useDeckState } from './hooks/useDeckState';
 import GraphExplorer from './components/GraphExplorer';
 import CardBrowser from './components/CardBrowser';
 import DeckBuilder from './components/deck-builder/DeckBuilder';
+import MetaExplorer from './components/MetaExplorer';
 import CardDetail from './components/CardDetail';
 import FloatingChat from './components/FloatingChat';
+import SimulatorPage from './components/simulator/SimulatorPage';
+import MyDecksPage from './components/MyDecksPage';
 import type { Card } from './types';
 
-type Tab = 'graph' | 'cards' | 'deck';
+type Tab = 'graph' | 'cards' | 'deck' | 'mydecks' | 'meta' | 'simulator';
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('graph');
@@ -16,6 +19,9 @@ function App() {
 
   // Deck state lifted to App so FloatingChat can access it
   const deckState = useDeckState();
+
+  // State for pre-selecting a deck in the simulator
+  const [simDeck, setSimDeck] = useState<{ leaderId: string; cardIds: string[] } | null>(null);
 
   // Build deck card IDs for chat context
   const deckCardIds: string[] = [];
@@ -33,6 +39,12 @@ function App() {
         setActiveTab('deck');
       }
     }
+    if (update.action === 'update_deck_notes' && update.payload) {
+      const { notes } = update.payload as { notes?: string };
+      if (notes) {
+        deckState.setDeckNotes(notes);
+      }
+    }
   };
 
   return (
@@ -48,6 +60,9 @@ function App() {
             { key: 'graph' as Tab, label: 'Graph Explorer' },
             { key: 'cards' as Tab, label: 'Cards' },
             { key: 'deck' as Tab, label: 'Deck Builder' },
+            { key: 'mydecks' as Tab, label: 'My Decks' },
+            { key: 'meta' as Tab, label: 'Meta Explorer' },
+            { key: 'simulator' as Tab, label: 'Simulator' },
           ].map(tab => (
             <button
               key={tab.key}
@@ -74,6 +89,34 @@ function App() {
         )}
         {activeTab === 'deck' && (
           <DeckBuilder onCardSelect={setSelectedCard} deckState={deckState} />
+        )}
+        {activeTab === 'mydecks' && (
+          <MyDecksPage
+            onLoadDeck={(leaderId, cardIds) => {
+              deckState.loadDeckFromIds(leaderId, cardIds);
+              setActiveTab('deck');
+            }}
+            onSimulateDeck={(leaderId, cardIds) => {
+              setSimDeck({ leaderId, cardIds });
+              setActiveTab('simulator');
+            }}
+            onNewDeck={() => {
+              deckState.clearDeck();
+              setActiveTab('deck');
+            }}
+          />
+        )}
+        {activeTab === 'meta' && (
+          <MetaExplorer onCardSelect={setSelectedCard} deckState={deckState} />
+        )}
+        {activeTab === 'simulator' && (
+          <SimulatorPage
+            currentDeckLeaderId={simDeck?.leaderId ?? deckState.leader?.id}
+            currentDeckCardIds={
+              simDeck?.cardIds ??
+              (deckCardIds.length === 50 ? deckCardIds : undefined)
+            }
+          />
         )}
       </main>
 
