@@ -20,7 +20,9 @@ router = APIRouter(prefix="/api/simulator", tags=["simulator"])
 _simulations: dict[str, dict[str, Any]] = {}
 
 
-VALID_AGENT_TYPES = {"heuristic", "llm", "stress_godmode", "stress_realistic"}
+VALID_MODES = {"virtual", "real"}
+VALID_P1_LEVELS = {"new", "amateur", "pro"}
+VALID_P2_LEVELS = {"easy", "medium", "hard"}
 
 
 class BattleRequest(BaseModel):
@@ -29,7 +31,9 @@ class BattleRequest(BaseModel):
     deck2_leader_id: str
     deck2_card_ids: list[str]
     num_games: int = 10
-    agent_type: str = "heuristic"
+    mode: str = "virtual"
+    p1_level: str = "amateur"
+    p2_level: str = "medium"
     llm_model: str | None = None
 
 
@@ -42,8 +46,18 @@ async def start_battle(req: BattleRequest) -> BattleResponse:
     """Start a battle simulation between two decks."""
     if not (1 <= req.num_games <= 50):
         raise HTTPException(400, "num_games must be between 1 and 50")
-    if req.agent_type not in VALID_AGENT_TYPES:
-        raise HTTPException(400, f"agent_type must be one of: {', '.join(sorted(VALID_AGENT_TYPES))}")
+    if req.mode not in VALID_MODES:
+        raise HTTPException(
+            400, f"mode must be one of: {', '.join(sorted(VALID_MODES))}"
+        )
+    if req.p1_level not in VALID_P1_LEVELS:
+        raise HTTPException(
+            400, f"p1_level must be one of: {', '.join(sorted(VALID_P1_LEVELS))}"
+        )
+    if req.p2_level not in VALID_P2_LEVELS:
+        raise HTTPException(
+            400, f"p2_level must be one of: {', '.join(sorted(VALID_P2_LEVELS))}"
+        )
     if len(req.deck1_card_ids) != 50:
         raise HTTPException(400, "deck1 must have exactly 50 cards")
     if len(req.deck2_card_ids) != 50:
@@ -75,7 +89,9 @@ async def stream_simulation(sim_id: str) -> StreamingResponse:
             driver = await get_driver()
             runner = SimulationRunner(
                 driver=driver,
-                agent_type=req["agent_type"],
+                mode=req.get("mode", "virtual"),
+                p1_level=req.get("p1_level", "amateur"),
+                p2_level=req.get("p2_level", "medium"),
                 llm_model=req.get("llm_model"),
             )
 

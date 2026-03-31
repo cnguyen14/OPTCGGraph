@@ -46,10 +46,13 @@ export default function DeckBuilder({ onCardSelect, deckState }: Props) {
   const [currentDeckName, setCurrentDeckName] = useState<string | null>(null);
   const [currentDeckDescription, setCurrentDeckDescription] = useState<string | null>(null);
 
-  const handleDeckSaved = (deck: SavedDeck) => {
-    setCurrentDeckId(deck.id);
-    setCurrentDeckName(deck.name);
-    setCurrentDeckDescription(deck.description);
+  const handleDeckSaved = (_deck: SavedDeck) => {
+    // Reset builder for new deck
+    deckState.clearLeader();
+    deckState.clearDeck();
+    setCurrentDeckId(null);
+    setCurrentDeckName(null);
+    setCurrentDeckDescription(null);
   };
 
   const handleLoadDeck = (deck: SavedDeck) => {

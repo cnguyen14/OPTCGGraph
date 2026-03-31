@@ -14,13 +14,16 @@ interface Props {
 export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds }: Props) {
   const [deck1, setDeck1] = useState<SelectedDeck | null>(null);
   const [deck2, setDeck2] = useState<SelectedDeck | null>(null);
+  const [mode, setMode] = useState<'virtual' | 'real'>('virtual');
   const [numGames, setNumGames] = useState(10);
-  const [agentType, setAgentType] = useState('heuristic');
+  const [p1Level, setP1Level] = useState('amateur');
+  const [p2Level, setP2Level] = useState('medium');
   const [llmModel, setLlmModel] = useState('claude-haiku-4-5-20251001');
 
   const sim = useSimulation();
 
   const canStart = deck1 && deck2 && deck1.cardIds.length === 50 && deck2.cardIds.length === 50;
+  const isIdle = sim.status === 'idle' || sim.status === 'error' || sim.status === 'complete';
 
   const handleStart = () => {
     if (!deck1 || !deck2) return;
@@ -30,8 +33,10 @@ export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds 
       deck2.leaderId,
       deck2.cardIds,
       numGames,
-      agentType,
-      agentType === 'llm' ? llmModel : undefined,
+      mode,
+      p1Level,
+      p2Level,
+      mode === 'real' ? llmModel : undefined,
     );
   };
 
@@ -62,84 +67,131 @@ export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds 
           />
         </div>
 
-        {/* Controls */}
-        <div className="flex items-center gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-gray-400">Games:</label>
-            <select
-              value={numGames}
-              onChange={(e) => setNumGames(Number(e.target.value))}
-              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white"
-              disabled={sim.status === 'running'}
-            >
-              {[5, 10, 20, 30, 50].map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-gray-400">Opponent AI:</label>
-            <select
-              value={agentType}
-              onChange={(e) => setAgentType(e.target.value)}
-              disabled={sim.status === 'running'}
-              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white"
-            >
-              <option value="heuristic">Heuristic (fast, basic)</option>
-              <option value="stress_realistic">Stress Test (smart, realistic)</option>
-              <option value="stress_godmode">Stress Test — God Mode (sees your hand)</option>
-              <option value="llm">AI Agent (LLM)</option>
-            </select>
-          </div>
-
-          {agentType === 'llm' && (
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-400">Model:</label>
-              <select
-                value={llmModel}
-                onChange={(e) => setLlmModel(e.target.value)}
-                disabled={sim.status === 'running'}
-                className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white"
+        {/* Mode Tabs + Controls */}
+        <div className="space-y-4">
+          {/* Mode Tabs */}
+          <div className="flex items-center gap-3">
+            <div className="flex bg-gray-800/80 rounded-lg p-0.5">
+              <button
+                onClick={() => setMode('virtual')}
+                disabled={!isIdle}
+                className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  mode === 'virtual'
+                    ? 'bg-gray-700 text-white shadow-sm'
+                    : 'text-gray-400 hover:text-gray-300'
+                }`}
               >
-                <option value="claude-haiku-4-5-20251001">Haiku 4.5 (fast, cheap)</option>
-                <option value="claude-sonnet-4-6">Sonnet 4.6 (balanced)</option>
-                <option value="claude-opus-4-6">Opus 4.6 (smartest, slow)</option>
+                Virtual (Free)
+              </button>
+              <button
+                onClick={() => setMode('real')}
+                disabled={!isIdle}
+                className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  mode === 'real'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-gray-400 hover:text-gray-300'
+                }`}
+              >
+                Real (AI)
+              </button>
+            </div>
+            <span className="text-[10px] text-gray-500">
+              {mode === 'virtual'
+                ? 'Fast rule-based simulation. Free, instant results.'
+                : 'LLM-powered AI agents. More realistic, costs API credits.'}
+            </span>
+          </div>
+
+          {/* Controls Row */}
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-400">Games:</label>
+              <select
+                value={numGames}
+                onChange={(e) => setNumGames(Number(e.target.value))}
+                className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white"
+                disabled={!isIdle}
+              >
+                {[5, 10, 20, 30, 50].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
               </select>
             </div>
-          )}
 
-          <div className="flex-1" />
-
-          {sim.status === 'idle' || sim.status === 'error' || sim.status === 'complete' ? (
-            <button
-              onClick={handleStart}
-              disabled={!canStart}
-              className="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
-            >
-              {sim.status === 'complete' ? 'Run Again' : 'Start Battle'}
-            </button>
-          ) : (
-            <div className="flex items-center gap-2 text-sm text-blue-400">
-              <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-              {sim.status === 'loading'
-                ? 'Loading decks...'
-                : sim.progress.completed === 0
-                  ? 'Starting first game...'
-                  : `Game ${sim.progress.completed + 1} of ${sim.progress.total} in progress...`}
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-400">Your Playstyle:</label>
+              <select
+                value={p1Level}
+                onChange={(e) => setP1Level(e.target.value)}
+                disabled={!isIdle}
+                className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white"
+              >
+                <option value="new">New Player</option>
+                <option value="amateur">Amateur</option>
+                <option value="pro">Professional</option>
+              </select>
             </div>
-          )}
 
-          {sim.status === 'complete' && (
-            <button
-              onClick={sim.reset}
-              className="px-4 py-2 text-gray-400 hover:text-white text-sm transition-colors"
-            >
-              Reset
-            </button>
-          )}
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-400">Bot Difficulty:</label>
+              <select
+                value={p2Level}
+                onChange={(e) => setP2Level(e.target.value)}
+                disabled={!isIdle}
+                className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white"
+              >
+                <option value="easy">Easy</option>
+                <option value="medium">Medium</option>
+                <option value="hard">Hard</option>
+              </select>
+            </div>
+
+            {mode === 'real' && (
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-400">Model:</label>
+                <select
+                  value={llmModel}
+                  onChange={(e) => setLlmModel(e.target.value)}
+                  disabled={!isIdle}
+                  className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white"
+                >
+                  <option value="claude-haiku-4-5-20251001">Haiku 4.5 (fast, cheap)</option>
+                  <option value="claude-sonnet-4-6">Sonnet 4.6 (balanced)</option>
+                  <option value="claude-opus-4-6">Opus 4.6 (smartest, slow)</option>
+                </select>
+              </div>
+            )}
+
+            <div className="flex-1" />
+
+            {isIdle ? (
+              <button
+                onClick={handleStart}
+                disabled={!canStart}
+                className="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                {sim.status === 'complete' ? 'Run Again' : 'Start Battle'}
+              </button>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-blue-400">
+                <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                {sim.status === 'loading'
+                  ? 'Loading decks...'
+                  : sim.progress.completed === 0
+                    ? 'Starting first game...'
+                    : `Game ${sim.progress.completed + 1} of ${sim.progress.total} in progress...`}
+              </div>
+            )}
+
+            {sim.status === 'complete' && (
+              <button
+                onClick={sim.reset}
+                className="px-4 py-2 text-gray-400 hover:text-white text-sm transition-colors"
+              >
+                Reset
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Error */}

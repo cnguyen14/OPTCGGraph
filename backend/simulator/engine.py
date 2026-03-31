@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import random
-from typing import Any, Protocol
+from typing import Protocol
 
 from .effects import EffectHandler
 from .models import (
@@ -16,7 +16,6 @@ from .models import (
     CardState,
     GameAction,
     GameCard,
-    GameLogEntry,
     GameResult,
     GameState,
     Phase,
@@ -36,13 +35,22 @@ class Agent(Protocol):
         ...
 
     async def choose_blockers(
-        self, state: GameState, blockers: list[GameCard], attacker: GameCard, target: GameCard
+        self,
+        state: GameState,
+        blockers: list[GameCard],
+        attacker: GameCard,
+        target: GameCard,
     ) -> GameCard | None:
         """Choose a blocker to redirect an attack, or None."""
         ...
 
     async def choose_counters(
-        self, state: GameState, hand: list[GameCard], attacker: GameCard, target: GameCard, power_gap: int
+        self,
+        state: GameState,
+        hand: list[GameCard],
+        attacker: GameCard,
+        target: GameCard,
+        power_gap: int,
     ) -> list[GameCard]:
         """Choose cards from hand to play as counters."""
         ...
@@ -97,7 +105,9 @@ class GameEngine:
         # Coin flip for who goes first
         first = self.rng.choice(["p1", "p2"])
         self.state = GameState(
-            p1=p1, p2=p2, turn=0,
+            p1=p1,
+            p2=p2,
+            turn=0,
             active_player_id=first,
             first_player_id=first,
         )
@@ -121,10 +131,16 @@ class GameEngine:
             self.state.active_player_id = first if self.state.turn % 2 == 1 else second
             agent = agents[self.state.active_player_id]
 
-            player = self.state.active_player
-            opp = self.state.defending_player
+            # Run phases before logging so status reflects playable state
+            self._refresh_phase()
+            self._draw_phase()
+            self._don_phase()
+
+            # Log turn start AFTER refresh/draw/DON so DON values are accurate
             self.state.log(
-                self.state.active_player_id, "turn", "start",
+                self.state.active_player_id,
+                "turn",
+                "start",
                 turn=self.state.turn,
                 p1_hand=[c.name for c in self.state.p1.hand],
                 p2_hand=[c.name for c in self.state.p2.hand],
@@ -134,20 +150,40 @@ class GameEngine:
                 p2_field=[c.name for c in self.state.p2.field],
                 p1_don=self.state.p1.don_field,
                 p2_don=self.state.p2.don_field,
+                p1_don_rested=self.state.p1.don_rested,
+                p2_don_rested=self.state.p2.don_rested,
+                p1_don_attached=sum(c.attached_don for c in self.state.p1.field)
+                + self.state.p1.leader.attached_don,
+                p2_don_attached=sum(c.attached_don for c in self.state.p2.field)
+                + self.state.p2.leader.attached_don,
+                p1_don_deck=self.state.p1.don_deck,
+                p2_don_deck=self.state.p2.don_deck,
+                p1_field_details=[
+                    {
+                        "name": c.name,
+                        "power": c.effective_power,
+                        "state": c.state.value,
+                        "don": c.attached_don,
+                    }
+                    for c in self.state.p1.field
+                ],
+                p2_field_details=[
+                    {
+                        "name": c.name,
+                        "power": c.effective_power,
+                        "state": c.state.value,
+                        "don": c.attached_don,
+                    }
+                    for c in self.state.p2.field
+                ],
             )
-
-            self._refresh_phase()
-            self._draw_phase()
-            self._don_phase()
             await self._main_phase(agent, agents)
             self._end_phase()
 
             # Check deck-out
             if not self.state.active_player.deck:
                 self.state.winner = self.state.defending_player.player_id
-                self.state.log(
-                    self.state.active_player_id, "game", "deck_out"
-                )
+                self.state.log(self.state.active_player_id, "game", "deck_out")
 
         if self.state.winner is None:
             self.state.winner = "draw"
@@ -201,18 +237,19 @@ class GameEngine:
         if player.deck:
             card = player.deck.pop(0)
             player.hand.append(card)
-            self.state.log(
-                player.player_id, "draw", "draw_card", card_name=card.name
-            )
+            self.state.log(player.player_id, "draw", "draw_card", card_name=card.name)
 
     def _don_phase(self) -> None:
         """Add DON!! from DON deck to field (max 10 total)."""
         self.state.phase = Phase.DON
         player = self.state.active_player
 
-        total_don_on_board = player.don_field + player.don_rested + sum(
-            c.attached_don for c in player.field
-        ) + player.leader.attached_don
+        total_don_on_board = (
+            player.don_field
+            + player.don_rested
+            + sum(c.attached_don for c in player.field)
+            + player.leader.attached_don
+        )
 
         don_per_turn = 1 if self.state.turn == 1 else 2
         don_to_add = min(don_per_turn, player.don_deck, 10 - total_don_on_board)
@@ -220,13 +257,14 @@ class GameEngine:
             player.don_deck -= don_to_add
             player.don_field += don_to_add
             self.state.log(
-                player.player_id, "don", "add_don",
-                amount=don_to_add, total=player.don_field,
+                player.player_id,
+                "don",
+                "add_don",
+                amount=don_to_add,
+                total=player.don_field,
             )
 
-    async def _main_phase(
-        self, agent: Agent, agents: dict[str, Agent]
-    ) -> None:
+    async def _main_phase(self, agent: Agent, agents: dict[str, Agent]) -> None:
         """Main phase — agent chooses actions until pass."""
         self.state.phase = Phase.MAIN
         max_actions = 50  # Safety limit per turn
@@ -244,9 +282,7 @@ class GameEngine:
             action = legal[choice]
 
             if action.action_type == ActionType.PASS:
-                self.state.log(
-                    self.state.active_player_id, "main", "pass"
-                )
+                self.state.log(self.state.active_player_id, "main", "pass")
                 break
 
             await self._execute_action(action, agents)
@@ -270,28 +306,37 @@ class GameEngine:
 
         # Play cards from hand
         for card in player.hand:
-            if card.card_type in ("CHARACTER", "EVENT", "STAGE") and card.cost <= player.don_field:
-                actions.append(GameAction(
-                    action_type=ActionType.PLAY_CARD,
-                    source_id=card.instance_id,
-                    description=f"Play {card.name} (cost {card.cost})",
-                ))
+            if (
+                card.card_type in ("CHARACTER", "EVENT", "STAGE")
+                and card.cost <= player.don_field
+            ):
+                actions.append(
+                    GameAction(
+                        action_type=ActionType.PLAY_CARD,
+                        source_id=card.instance_id,
+                        description=f"Play {card.name} (cost {card.cost})",
+                    )
+                )
 
         # Attach DON!! to characters or leader
         if player.don_field > 0:
             # To leader
-            actions.append(GameAction(
-                action_type=ActionType.ATTACH_DON,
-                target_id=player.leader.instance_id,
-                description=f"Attach DON to {player.leader.name} (+1000, now {player.leader.effective_power + 1000})",
-            ))
+            actions.append(
+                GameAction(
+                    action_type=ActionType.ATTACH_DON,
+                    target_id=player.leader.instance_id,
+                    description=f"Attach DON to {player.leader.name} (+1000, now {player.leader.effective_power + 1000})",
+                )
+            )
             # To active characters
             for card in player.characters:
-                actions.append(GameAction(
-                    action_type=ActionType.ATTACH_DON,
-                    target_id=card.instance_id,
-                    description=f"Attach DON to {card.name} (+1000, now {card.effective_power + 1000})",
-                ))
+                actions.append(
+                    GameAction(
+                        action_type=ActionType.ATTACH_DON,
+                        target_id=card.instance_id,
+                        description=f"Attach DON to {card.name} (+1000, now {card.effective_power + 1000})",
+                    )
+                )
 
         # Attack with leader or active characters
         # First player cannot attack on turn 1 (OPTCG rule)
@@ -306,27 +351,33 @@ class GameEngine:
 
         for attacker in attack_sources:
             # Can attack opponent's leader
-            actions.append(GameAction(
-                action_type=ActionType.ATTACK,
-                source_id=attacker.instance_id,
-                target_id=opponent.leader.instance_id,
-                description=f"Attack Leader with {attacker.name} ({attacker.effective_power} vs {opponent.leader.effective_power})",
-            ))
+            actions.append(
+                GameAction(
+                    action_type=ActionType.ATTACK,
+                    source_id=attacker.instance_id,
+                    target_id=opponent.leader.instance_id,
+                    description=f"Attack Leader with {attacker.name} ({attacker.effective_power} vs {opponent.leader.effective_power})",
+                )
+            )
             # Can attack opponent's rested characters
             for target in opponent.characters:
                 if target.state == CardState.RESTED:
-                    actions.append(GameAction(
-                        action_type=ActionType.ATTACK,
-                        source_id=attacker.instance_id,
-                        target_id=target.instance_id,
-                        description=f"Attack {target.name} with {attacker.name} ({attacker.effective_power} vs {target.effective_power})",
-                    ))
+                    actions.append(
+                        GameAction(
+                            action_type=ActionType.ATTACK,
+                            source_id=attacker.instance_id,
+                            target_id=target.instance_id,
+                            description=f"Attack {target.name} with {attacker.name} ({attacker.effective_power} vs {target.effective_power})",
+                        )
+                    )
 
         # Always can pass
-        actions.append(GameAction(
-            action_type=ActionType.PASS,
-            description="Pass (end main phase)",
-        ))
+        actions.append(
+            GameAction(
+                action_type=ActionType.PASS,
+                description="Pass (end main phase)",
+            )
+        )
 
         return actions
 
@@ -365,8 +416,11 @@ class GameEngine:
             self.effects.resolve_on_play(self, card, player, opponent)
             player.trash.append(card)
             self.state.log(
-                player.player_id, "main", "play_event",
-                card_name=card.name, cost=card.cost,
+                player.player_id,
+                "main",
+                "play_event",
+                card_name=card.name,
+                cost=card.cost,
             )
         else:
             # Characters and Stages go to field
@@ -376,13 +430,18 @@ class GameEngine:
             player.field.append(card)
             self.effects.resolve_on_play(self, card, player, opponent)
             self.state.log(
-                player.player_id, "main", "play_card",
-                card_name=card.name, cost=card.cost,
+                player.player_id,
+                "main",
+                "play_card",
+                card_name=card.name,
+                cost=card.cost,
                 card_type=card.card_type,
             )
 
         # Track cards played
-        tracker = self._cards_played_p1 if player.player_id == "p1" else self._cards_played_p2
+        tracker = (
+            self._cards_played_p1 if player.player_id == "p1" else self._cards_played_p2
+        )
         tracker[card.card_id] = tracker.get(card.card_id, 0) + 1
 
     def _attach_don(self, action: GameAction, player: PlayerState) -> None:
@@ -400,8 +459,10 @@ class GameEngine:
         player.don_field -= 1
         target.attached_don += 1
         self.state.log(
-            player.player_id, "main", "attach_don",
-            card_name=target.name,
+            player.player_id,
+            "main",
+            "attach_don",
+            card_name=self._card_label(target, player),
             new_power=target.effective_power,
         )
 
@@ -428,22 +489,30 @@ class GameEngine:
         # Rest attacker
         attacker.state = CardState.RESTED
 
-        self.state.log(
-            attacker_player.player_id, "combat", "attack_declared",
-            attacker=attacker.name, target=target.name,
-            attacker_power=attacker.effective_power,
-            target_power=target.effective_power,
-        )
-
-        # When Attacking effects
+        # When Attacking effects (resolve BEFORE logging so declared power is accurate)
         self.effects.resolve_when_attacking(
             self, attacker, attacker_player, defender_player
+        )
+
+        # Build display labels — disambiguate same-named cards (e.g. Leader vs Character)
+        attacker_label = self._card_label(attacker, attacker_player)
+        target_label = self._card_label(target, defender_player)
+
+        self.state.log(
+            attacker_player.player_id,
+            "combat",
+            "attack_declared",
+            attacker=attacker_label,
+            target=target_label,
+            attacker_power=attacker.effective_power,
+            target_power=target.effective_power,
         )
 
         # Blocker window
         defender_agent = agents[defender_player.player_id]
         available_blockers = [
-            c for c in defender_player.characters
+            c
+            for c in defender_player.characters
             if self.effects.has_blocker(c)
             and c.state == CardState.ACTIVE
             and c.instance_id != target.instance_id
@@ -457,8 +526,14 @@ class GameEngine:
                 target = blocker
                 blocker.state = CardState.RESTED
                 self.state.log(
-                    defender_player.player_id, "combat", "blocker_used",
+                    defender_player.player_id,
+                    "combat",
+                    "blocker_used",
                     blocker=blocker.name,
+                )
+                # Resolve "When Blocking" effects
+                self.effects.resolve_on_block(
+                    self, blocker, defender_player, attacker_player
                 )
 
         # Counter step
@@ -474,8 +549,11 @@ class GameEngine:
                 defender_player.hand.remove(ccard)
                 defender_player.trash.append(ccard)
                 self.state.log(
-                    defender_player.player_id, "combat", "counter_played",
-                    card_name=ccard.name, counter_value=ccard.counter,
+                    defender_player.player_id,
+                    "combat",
+                    "counter_played",
+                    card_name=ccard.name,
+                    counter_value=ccard.counter,
                 )
 
         defense_power = target.effective_power + counter_total
@@ -490,7 +568,9 @@ class GameEngine:
                     self._deal_life_damage(attacker, defender_player, attacker_player)
             else:
                 # KO the character
-                self.effects.resolve_on_ko(self, target, defender_player, attacker_player)
+                self.effects.resolve_on_ko(
+                    self, target, defender_player, attacker_player
+                )
                 defender_player.field.remove(target)
                 if self.effects.has_banish(target):
                     defender_player.deck.append(target)
@@ -501,13 +581,17 @@ class GameEngine:
                 target.attached_don = 0
                 target.power_modifier = 0
                 self.state.log(
-                    defender_player.player_id, "combat", "character_koed",
+                    defender_player.player_id,
+                    "combat",
+                    "character_koed",
                     card_name=target.name,
                 )
         else:
             self.state.log(
-                attacker_player.player_id, "combat", "attack_failed",
-                attacker=attacker.name,
+                attacker_player.player_id,
+                "combat",
+                "attack_failed",
+                attacker=attacker_label,
                 attack_power=attacker.effective_power,
                 defense_power=defense_power,
             )
@@ -520,7 +604,9 @@ class GameEngine:
             # No life left — this attack wins the game
             self.state.winner = attacker_player.player_id
             self.state.log(
-                attacker_player.player_id, "combat", "final_blow",
+                attacker_player.player_id,
+                "combat",
+                "final_blow",
                 attacker=attacker.name,
             )
             return
@@ -528,7 +614,9 @@ class GameEngine:
         life_card = defender.life.pop(0)
         defender.hand.append(life_card)  # Life card goes to hand
         self.state.log(
-            defender.player_id, "combat", "life_lost",
+            defender.player_id,
+            "combat",
+            "life_lost",
             remaining=len(defender.life),
             trigger=life_card.trigger_effect or "none",
         )
@@ -539,6 +627,20 @@ class GameEngine:
             self.effects.resolve_trigger(self, life_card, defender, opponent)
 
     # --- Utility ---
+
+    def _card_label(self, card: GameCard, owner: PlayerState) -> str:
+        """Build a display label that disambiguates same-named cards.
+
+        If a character shares a name with the owner's leader, append the card
+        type to avoid confusion in the game log (e.g. "Yamato" vs "Yamato (Leader)").
+        """
+        if card.card_type == "LEADER":
+            # Check if any field character shares the leader's name
+            if any(c.name == card.name for c in owner.field):
+                return f"{card.name} (Leader)"
+        elif card.name == owner.leader.name:
+            return f"{card.name} (Character)"
+        return card.name
 
     def get_game_summary(self, perspective: str = "p1") -> str:
         """Generate a human-readable game state summary for AI agents."""

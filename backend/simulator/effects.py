@@ -1,7 +1,11 @@
-"""Keyword-based effect resolution for the OPTCG simulator.
+"""Template-based effect resolution for the OPTCG simulator.
 
-Approximates card abilities using parsed keywords rather than implementing
-every unique card text. This is sufficient for simulation accuracy.
+Resolves EffectTemplate objects attached to cards. Each template specifies
+its type, trigger, target selection, conditions, and parameters. This replaces
+the old keyword-matching approach with parameterized effect resolution.
+
+Backward compatible: cards without effect templates fall back to keyword-based
+resolution via the legacy methods.
 """
 
 from __future__ import annotations
@@ -13,86 +17,113 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .engine import GameEngine
 
-from .models import CardState, GameCard, PlayerState
+from .models import (
+    CardState,
+    EffectCondition,
+    EffectTemplate,
+    EffectTrigger,
+    EffectType,
+    GameCard,
+    PlayerState,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class EffectHandler:
-    """Resolves keyword-based effects during gameplay."""
+    """Resolves effect templates during gameplay."""
 
     def __init__(self, rng: random.Random | None = None) -> None:
         self.rng = rng or random.Random()
 
+    # --- Public trigger entry points ---
+
     def resolve_on_play(
-        self, engine: GameEngine, card: GameCard, player: PlayerState, opponent: PlayerState
+        self,
+        engine: GameEngine,
+        card: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
     ) -> None:
         """Resolve effects when a card enters the field."""
-        keywords = [k.lower() for k in card.keywords]
-
-        if "draw" in keywords:
-            self._draw(engine, player, 1)
-
-        if "search" in keywords:
-            self._search(engine, player)
-
-        if "bounce" in keywords:
-            self._bounce_lowest(engine, opponent)
-
-        if "ko" in keywords:
-            self._ko_weakest(engine, card, opponent)
-
-        if "trash" in keywords:
-            self._trash_from_hand(engine, opponent)
-
-        if "rest" in keywords:
-            self._rest_opponent(engine, opponent)
-
-        if "power buff" in keywords or "buff" in keywords:
-            card.power_modifier += 2000
-
-        if "power debuff" in keywords or "debuff" in keywords:
-            self._debuff_opponent(engine, opponent, -2000)
+        templates = card.get_effects_by_trigger(EffectTrigger.ON_PLAY)
+        if templates:
+            for tmpl in templates:
+                self._resolve_template(engine, tmpl, card, player, opponent)
+        else:
+            # Legacy fallback for cards without parsed templates
+            self._legacy_on_play(engine, card, player, opponent)
 
     def resolve_when_attacking(
-        self, engine: GameEngine, card: GameCard, player: PlayerState, opponent: PlayerState
+        self,
+        engine: GameEngine,
+        card: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
     ) -> None:
         """Resolve 'When Attacking' effects."""
-        keywords = [k.lower() for k in card.keywords]
-
-        if "draw" in keywords and card.card_type == "LEADER":
-            self._draw(engine, player, 1)
-
-        if "power buff" in keywords or "buff" in keywords:
-            card.power_modifier += 1000
+        templates = card.get_effects_by_trigger(EffectTrigger.ON_ATTACK)
+        if templates:
+            for tmpl in templates:
+                self._resolve_template(engine, tmpl, card, player, opponent)
+        else:
+            self._legacy_when_attacking(engine, card, player, opponent)
 
     def resolve_on_ko(
-        self, engine: GameEngine, card: GameCard, player: PlayerState, opponent: PlayerState
+        self,
+        engine: GameEngine,
+        card: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
     ) -> None:
         """Resolve 'On K.O.' effects."""
-        keywords = [k.lower() for k in card.keywords]
-
-        if "draw" in keywords:
-            self._draw(engine, player, 1)
+        templates = card.get_effects_by_trigger(EffectTrigger.ON_KO)
+        if templates:
+            for tmpl in templates:
+                self._resolve_template(engine, tmpl, card, player, opponent)
+        else:
+            self._legacy_on_ko(engine, card, player, opponent)
 
     def resolve_trigger(
-        self, engine: GameEngine, card: GameCard, player: PlayerState, opponent: PlayerState
+        self,
+        engine: GameEngine,
+        card: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
     ) -> None:
         """Resolve trigger effects when a life card is revealed."""
-        if not card.trigger_effect:
-            return
+        templates = card.get_effects_by_trigger(EffectTrigger.TRIGGER)
+        if templates:
+            for tmpl in templates:
+                self._resolve_template(engine, tmpl, card, player, opponent)
+        else:
+            self._legacy_trigger(engine, card, player, opponent)
 
-        trigger_lower = card.trigger_effect.lower()
+    def resolve_on_block(
+        self,
+        engine: GameEngine,
+        card: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        """Resolve 'When Blocking' effects."""
+        templates = card.get_effects_by_trigger(EffectTrigger.ON_BLOCK)
+        for tmpl in templates:
+            self._resolve_template(engine, tmpl, card, player, opponent)
 
-        if "draw" in trigger_lower:
-            self._draw(engine, player, 1)
-        elif "rest" in trigger_lower:
-            self._rest_opponent(engine, opponent)
-        elif "play" in trigger_lower:
-            # Trigger: play a low-cost character from hand
-            self._trigger_play(engine, player)
+    # --- Keyword queries (used by engine and agents) ---
 
     def has_keyword(self, card: GameCard, keyword: str) -> bool:
+        """Check for keyword via effect templates first, then raw keywords."""
+        type_map = {
+            "blocker": EffectType.BLOCKER,
+            "rush": EffectType.RUSH,
+            "double attack": EffectType.DOUBLE_ATTACK,
+            "banish": EffectType.BANISH,
+        }
+        if keyword.lower() in type_map:
+            if card.has_effect_type(type_map[keyword.lower()]):
+                return True
         return keyword.lower() in [k.lower() for k in card.keywords]
 
     def has_rush(self, card: GameCard) -> bool:
@@ -107,7 +138,439 @@ class EffectHandler:
     def has_banish(self, card: GameCard) -> bool:
         return self.has_keyword(card, "banish")
 
-    # --- Internal effect implementations ---
+    # --- Template resolution dispatcher ---
+
+    def _resolve_template(
+        self,
+        engine: GameEngine,
+        tmpl: EffectTemplate,
+        source: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        """Dispatch a single effect template to its handler."""
+        if not tmpl.can_use():
+            return
+        tmpl.mark_used()
+
+        handlers = {
+            EffectType.KO: self._resolve_ko,
+            EffectType.BOUNCE: self._resolve_bounce,
+            EffectType.DRAW: self._resolve_draw,
+            EffectType.SEARCH: self._resolve_search,
+            EffectType.TRASH_FROM_HAND: self._resolve_trash,
+            EffectType.REST: self._resolve_rest,
+            EffectType.POWER_BOOST: self._resolve_power_boost,
+            EffectType.POWER_REDUCE: self._resolve_power_reduce,
+            EffectType.PLAY_FROM_TRASH: self._resolve_play_from_trash,
+            EffectType.DON_MINUS: self._resolve_don_minus,
+            EffectType.BOTTOM_DECK: self._resolve_bottom_deck,
+            EffectType.TRIGGER_PLAY: self._resolve_trigger_play,
+        }
+
+        handler = handlers.get(tmpl.type)
+        if handler:
+            handler(engine, tmpl, source, player, opponent)
+
+    # --- Individual effect resolvers ---
+
+    def _resolve_ko(
+        self,
+        engine: GameEngine,
+        tmpl: EffectTemplate,
+        source: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        """KO opponent characters matching conditions."""
+        targets = self._select_targets(tmpl, source, player, opponent)
+        for target in targets[: tmpl.count]:
+            opponent.field.remove(target)
+            opponent.don_field += target.attached_don
+            target.attached_don = 0
+            target.power_modifier = 0
+            opponent.trash.append(target)
+            engine.state.log(opponent.player_id, "effect", "ko", card_name=target.name)
+
+    def _resolve_bounce(
+        self,
+        engine: GameEngine,
+        tmpl: EffectTemplate,
+        source: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        """Return opponent characters to hand."""
+        targets = self._select_targets(tmpl, source, player, opponent)
+        for target in targets[: tmpl.count]:
+            opponent.field.remove(target)
+            target.state = CardState.ACTIVE
+            opponent.don_field += target.attached_don
+            target.attached_don = 0
+            target.power_modifier = 0
+            opponent.hand.append(target)
+            engine.state.log(
+                opponent.player_id, "effect", "bounced", card_name=target.name
+            )
+
+    def _resolve_draw(
+        self,
+        engine: GameEngine,
+        tmpl: EffectTemplate,
+        source: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        """Draw cards."""
+        amount = tmpl.amount if tmpl.amount > 0 else 1
+        for _ in range(amount):
+            if player.deck:
+                card = player.deck.pop(0)
+                player.hand.append(card)
+                engine.state.log(
+                    player.player_id, "effect", "draw", card_name=card.name
+                )
+
+    def _resolve_search(
+        self,
+        engine: GameEngine,
+        tmpl: EffectTemplate,
+        source: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        """Look at top N cards, add best matching one to hand."""
+        if not player.deck:
+            return
+        look_count = tmpl.amount if tmpl.amount > 0 else 5
+        top = player.deck[:look_count]
+        if not top:
+            return
+
+        # Filter by condition if present
+        if tmpl.condition:
+            matching = [
+                c for c in top if self._matches_condition(c, tmpl.condition, source)
+            ]
+            if matching:
+                best = max(matching, key=lambda c: c.cost)
+            else:
+                best = max(top, key=lambda c: c.cost)
+        else:
+            best = max(top, key=lambda c: c.cost)
+
+        player.deck.remove(best)
+        player.hand.append(best)
+        self.rng.shuffle(player.deck[: look_count - 1])
+        engine.state.log(player.player_id, "effect", "search", card_name=best.name)
+
+    def _resolve_trash(
+        self,
+        engine: GameEngine,
+        tmpl: EffectTemplate,
+        source: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        """Opponent discards from hand."""
+        count = tmpl.count if tmpl.count > 0 else 1
+        for _ in range(count):
+            if not opponent.hand:
+                break
+            card = self.rng.choice(opponent.hand)
+            opponent.hand.remove(card)
+            opponent.trash.append(card)
+            engine.state.log(
+                opponent.player_id, "effect", "trashed", card_name=card.name
+            )
+
+    def _resolve_rest(
+        self,
+        engine: GameEngine,
+        tmpl: EffectTemplate,
+        source: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        """Rest opponent characters."""
+        targets = self._select_targets(tmpl, source, player, opponent)
+        for target in targets[: tmpl.count]:
+            target.state = CardState.RESTED
+            engine.state.log(
+                opponent.player_id, "effect", "rested", card_name=target.name
+            )
+
+    def _resolve_power_boost(
+        self,
+        engine: GameEngine,
+        tmpl: EffectTemplate,
+        source: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        """Apply power boost."""
+        amount = tmpl.amount if tmpl.amount > 0 else 2000
+        if tmpl.target == "self":
+            source.power_modifier += amount
+        else:
+            targets = self._select_targets(tmpl, source, player, opponent)
+            for target in targets[: tmpl.count]:
+                target.power_modifier += amount
+
+    def _resolve_power_reduce(
+        self,
+        engine: GameEngine,
+        tmpl: EffectTemplate,
+        source: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        """Apply power reduction to opponent."""
+        amount = tmpl.amount if tmpl.amount > 0 else 2000
+        targets = self._select_targets(tmpl, source, player, opponent)
+        if targets:
+            # Target strongest by default
+            target = max(targets, key=lambda c: c.effective_power)
+            target.power_modifier -= amount
+            engine.state.log(
+                opponent.player_id,
+                "effect",
+                "debuffed",
+                card_name=target.name,
+                amount=-amount,
+            )
+
+    def _resolve_play_from_trash(
+        self,
+        engine: GameEngine,
+        tmpl: EffectTemplate,
+        source: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        """Play a character from trash to field."""
+        candidates = [c for c in player.trash if c.card_type == "CHARACTER"]
+        if tmpl.condition:
+            candidates = [
+                c
+                for c in candidates
+                if self._matches_condition(c, tmpl.condition, source)
+            ]
+        if not candidates:
+            return
+        best = max(candidates, key=lambda c: c.cost)
+        player.trash.remove(best)
+        best.state = CardState.RESTED
+        best.power_modifier = 0
+        best.attached_don = 0
+        player.field.append(best)
+        engine.state.log(
+            player.player_id, "effect", "play_from_trash", card_name=best.name
+        )
+
+    def _resolve_don_minus(
+        self,
+        engine: GameEngine,
+        tmpl: EffectTemplate,
+        source: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        """Remove DON!! from opponent's available pool."""
+        amount = tmpl.amount if tmpl.amount > 0 else 1
+        removed = min(amount, opponent.don_field)
+        if removed > 0:
+            opponent.don_field -= removed
+            opponent.don_rested += removed  # Goes to rested pool
+            engine.state.log(opponent.player_id, "effect", "don_minus", amount=removed)
+
+    def _resolve_bottom_deck(
+        self,
+        engine: GameEngine,
+        tmpl: EffectTemplate,
+        source: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        """Send opponent character to bottom of deck (stronger than bounce)."""
+        targets = self._select_targets(tmpl, source, player, opponent)
+        for target in targets[: tmpl.count]:
+            opponent.field.remove(target)
+            opponent.don_field += target.attached_don
+            target.attached_don = 0
+            target.power_modifier = 0
+            target.state = CardState.ACTIVE
+            opponent.deck.append(target)  # Bottom of deck
+            engine.state.log(
+                opponent.player_id, "effect", "bottom_deck", card_name=target.name
+            )
+
+    def _resolve_trigger_play(
+        self,
+        engine: GameEngine,
+        tmpl: EffectTemplate,
+        source: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        """Play a low-cost character from hand for free (trigger effect)."""
+        max_cost = 3
+        if tmpl.condition and tmpl.condition.cost_lte is not None:
+            max_cost = tmpl.condition.cost_lte
+
+        playable = [
+            c for c in player.hand if c.card_type == "CHARACTER" and c.cost <= max_cost
+        ]
+        if not playable:
+            return
+        card = max(playable, key=lambda c: c.cost)
+        player.hand.remove(card)
+        card.state = CardState.RESTED
+        player.field.append(card)
+        engine.state.log(
+            player.player_id, "effect", "trigger_play", card_name=card.name
+        )
+
+    # --- Target selection ---
+
+    def _select_targets(
+        self,
+        tmpl: EffectTemplate,
+        source: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> list[GameCard]:
+        """Select valid targets based on template target type and conditions."""
+        if tmpl.target == "opponent_character":
+            candidates = list(opponent.characters)
+        elif tmpl.target == "own_character":
+            candidates = list(player.characters)
+        elif tmpl.target == "self":
+            return [source]
+        else:
+            candidates = list(opponent.characters)
+
+        # Apply conditions
+        if tmpl.condition:
+            candidates = [
+                c
+                for c in candidates
+                if self._matches_condition(c, tmpl.condition, source)
+            ]
+
+        # For rest effects, only target active characters
+        if tmpl.type == EffectType.REST:
+            candidates = [c for c in candidates if c.state == CardState.ACTIVE]
+
+        # Sort by weakest first (for KO/bounce, prefer targeting weakest matching)
+        candidates.sort(key=lambda c: c.effective_power)
+
+        return candidates
+
+    def _matches_condition(
+        self,
+        target: GameCard,
+        condition: EffectCondition,
+        source: GameCard,
+    ) -> bool:
+        """Check if a target card matches the effect condition."""
+        if (
+            condition.power_lte is not None
+            and target.effective_power > condition.power_lte
+        ):
+            return False
+        if (
+            condition.power_gte is not None
+            and target.effective_power < condition.power_gte
+        ):
+            return False
+        if condition.cost_lte is not None and target.cost > condition.cost_lte:
+            return False
+        if condition.cost_gte is not None and target.cost < condition.cost_gte:
+            return False
+        if condition.card_type is not None and target.card_type != condition.card_type:
+            return False
+        if condition.color is not None and target.color != condition.color:
+            return False
+        if condition.is_active is not None:
+            expected = CardState.ACTIVE if condition.is_active else CardState.RESTED
+            if target.state != expected:
+                return False
+        if condition.source_cost_multiplier is not None:
+            threshold = source.cost * condition.source_cost_multiplier
+            if target.effective_power > threshold:
+                return False
+        return True
+
+    # --- Legacy fallbacks (for cards without parsed templates) ---
+
+    def _legacy_on_play(
+        self,
+        engine: GameEngine,
+        card: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        keywords = [k.lower() for k in card.keywords]
+        if "draw" in keywords:
+            self._draw(engine, player, 1)
+        if "search" in keywords:
+            self._search(engine, player)
+        if "bounce" in keywords:
+            self._bounce_lowest(engine, opponent)
+        if "ko" in keywords:
+            self._ko_weakest(engine, card, opponent)
+        if "trash" in keywords:
+            self._trash_from_hand(engine, opponent)
+        if "rest" in keywords:
+            self._rest_opponent(engine, opponent)
+        if "power buff" in keywords or "buff" in keywords:
+            card.power_modifier += 2000
+        if "power debuff" in keywords or "debuff" in keywords:
+            self._debuff_opponent(engine, opponent, -2000)
+
+    def _legacy_when_attacking(
+        self,
+        engine: GameEngine,
+        card: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        keywords = [k.lower() for k in card.keywords]
+        if "draw" in keywords and card.card_type == "LEADER":
+            self._draw(engine, player, 1)
+        if "power buff" in keywords or "buff" in keywords:
+            card.power_modifier += 1000
+
+    def _legacy_on_ko(
+        self,
+        engine: GameEngine,
+        card: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        keywords = [k.lower() for k in card.keywords]
+        if "draw" in keywords:
+            self._draw(engine, player, 1)
+
+    def _legacy_trigger(
+        self,
+        engine: GameEngine,
+        card: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        if not card.trigger_effect:
+            return
+        trigger_lower = card.trigger_effect.lower()
+        if "draw" in trigger_lower:
+            self._draw(engine, player, 1)
+        elif "rest" in trigger_lower:
+            self._rest_opponent(engine, opponent)
+        elif "play" in trigger_lower:
+            self._trigger_play(engine, player)
+
+    # --- Legacy internal implementations ---
 
     def _draw(self, engine: GameEngine, player: PlayerState, count: int) -> None:
         for _ in range(count):
@@ -119,104 +582,86 @@ class EffectHandler:
                 )
 
     def _search(self, engine: GameEngine, player: PlayerState) -> None:
-        """Look at top 5 cards, add best one to hand."""
         if not player.deck:
             return
         top = player.deck[:5]
         if not top:
             return
-        # Pick highest cost card from top 5
         best = max(top, key=lambda c: c.cost)
         player.deck.remove(best)
         player.hand.append(best)
-        self.rng.shuffle(player.deck[:4])  # Shuffle remaining top cards back
-        engine.state.log(
-            player.player_id, "effect", "search", card_name=best.name
-        )
+        self.rng.shuffle(player.deck[:4])
+        engine.state.log(player.player_id, "effect", "search", card_name=best.name)
 
     def _bounce_lowest(self, engine: GameEngine, opponent: PlayerState) -> None:
-        """Return opponent's lowest-cost character to hand."""
         chars = opponent.characters
         if not chars:
             return
         lowest = min(chars, key=lambda c: c.cost)
         opponent.field.remove(lowest)
         lowest.state = CardState.ACTIVE
-        # Return attached DON!! to owner's pool (OPTCG rule)
         opponent.don_field += lowest.attached_don
         lowest.attached_don = 0
         lowest.power_modifier = 0
         opponent.hand.append(lowest)
-        engine.state.log(
-            opponent.player_id, "effect", "bounced", card_name=lowest.name
-        )
+        engine.state.log(opponent.player_id, "effect", "bounced", card_name=lowest.name)
 
     def _ko_weakest(
         self, engine: GameEngine, source: GameCard, opponent: PlayerState
     ) -> None:
-        """KO opponent's character with power <= source cost * 1000."""
         threshold = source.cost * 1000
         targets = [c for c in opponent.characters if c.effective_power <= threshold]
         if not targets:
             return
         target = min(targets, key=lambda c: c.effective_power)
         opponent.field.remove(target)
-        # Return attached DON!! to owner's pool (OPTCG rule)
         opponent.don_field += target.attached_don
         target.attached_don = 0
         target.power_modifier = 0
         opponent.trash.append(target)
-        engine.state.log(
-            opponent.player_id, "effect", "ko", card_name=target.name
-        )
+        engine.state.log(opponent.player_id, "effect", "ko", card_name=target.name)
 
     def _trash_from_hand(self, engine: GameEngine, opponent: PlayerState) -> None:
-        """Opponent discards 1 card from hand (random)."""
         if not opponent.hand:
             return
         card = self.rng.choice(opponent.hand)
         opponent.hand.remove(card)
         opponent.trash.append(card)
-        engine.state.log(
-            opponent.player_id, "effect", "trashed", card_name=card.name
-        )
+        engine.state.log(opponent.player_id, "effect", "trashed", card_name=card.name)
 
     def _rest_opponent(self, engine: GameEngine, opponent: PlayerState) -> None:
-        """Rest 1 opponent character."""
         active_chars = [c for c in opponent.characters if c.state == CardState.ACTIVE]
         if not active_chars:
             return
         target = self.rng.choice(active_chars)
         target.state = CardState.RESTED
-        engine.state.log(
-            opponent.player_id, "effect", "rested", card_name=target.name
-        )
+        engine.state.log(opponent.player_id, "effect", "rested", card_name=target.name)
 
     def _debuff_opponent(
         self, engine: GameEngine, opponent: PlayerState, amount: int
     ) -> None:
-        """Apply power debuff to opponent's strongest character."""
         chars = opponent.characters
         if not chars:
             return
         target = max(chars, key=lambda c: c.effective_power)
         target.power_modifier += amount
         engine.state.log(
-            opponent.player_id, "effect", "debuffed",
-            card_name=target.name, amount=amount,
+            opponent.player_id,
+            "effect",
+            "debuffed",
+            card_name=target.name,
+            amount=amount,
         )
 
     def _trigger_play(self, engine: GameEngine, player: PlayerState) -> None:
-        """Play a low-cost character from hand for free (trigger effect)."""
         playable = [
-            c for c in player.hand
-            if c.card_type == "CHARACTER" and c.cost <= 3
+            c for c in player.hand if c.card_type == "CHARACTER" and c.cost <= 3
         ]
         if not playable:
             return
         card = max(playable, key=lambda c: c.cost)
         player.hand.remove(card)
-        card.state = CardState.RESTED  # Enters rested
+        card.state = CardState.RESTED
         player.field.append(card)
         engine.state.log(
             player.player_id, "effect", "trigger_play", card_name=card.name

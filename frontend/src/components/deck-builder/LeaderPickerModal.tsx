@@ -25,7 +25,7 @@ export default function LeaderPickerModal({ open, onClose, onSelect }: Props) {
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [debouncedKeyword, setDebouncedKeyword] = useState('');
-  const [colorFilter, setColorFilter] = useState('');
+  const [colorFilters, setColorFilters] = useState<Set<string>>(new Set());
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [imgErrors, setImgErrors] = useState<Set<string>>(new Set());
   const { tooltip, show: showTooltip, hide: hideTooltip } = useCardTooltip();
@@ -43,20 +43,28 @@ export default function LeaderPickerModal({ open, onClose, onSelect }: Props) {
     searchCards({
       card_type: 'LEADER',
       keyword: debouncedKeyword || undefined,
-      color: colorFilter || undefined,
+      color: colorFilters.size === 1 ? [...colorFilters][0] : undefined,
       limit: 100,
       sort_by: 'name',
       sort_order: 'asc',
     })
       .then((res) => {
-        setLeaders(res.cards);
+        let filtered = res.cards;
+        // Client-side filter for multi-color selection
+        if (colorFilters.size > 1) {
+          filtered = filtered.filter((card) => {
+            const cardColors = card.colors?.length ? card.colors : card.color ? [card.color] : [];
+            return [...colorFilters].every((c) => cardColors.includes(c));
+          });
+        }
+        setLeaders(filtered);
         setLoading(false);
       })
       .catch(() => {
         setLeaders([]);
         setLoading(false);
       });
-  }, [open, debouncedKeyword, colorFilter]);
+  }, [open, debouncedKeyword, colorFilters]);
 
   if (!open) return null;
 
@@ -88,9 +96,14 @@ export default function LeaderPickerModal({ open, onClose, onSelect }: Props) {
             {COLORS.map((c) => (
               <button
                 key={c}
-                onClick={() => setColorFilter(colorFilter === c ? '' : c)}
+                onClick={() => setColorFilters((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(c)) next.delete(c);
+                  else next.add(c);
+                  return next;
+                })}
                 className={`w-7 h-7 rounded-full border-2 transition-all ${
-                  colorFilter === c ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'
+                  colorFilters.has(c) ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'
                 }`}
                 style={{ backgroundColor: COLOR_MAP[c] }}
                 title={c}

@@ -234,9 +234,10 @@ export async function startBattle(
   deck2LeaderId: string,
   deck2CardIds: string[],
   numGames: number = 10,
-  agentType: string = 'heuristic',
+  mode: string = 'virtual',
+  p1Level: string = 'amateur',
+  p2Level: string = 'medium',
   llmModel?: string,
-  p1AgentType: string = 'intermediate',
 ): Promise<{ sim_id: string }> {
   const resp = await fetch(`${BASE_URL}/simulator/battle`, {
     method: 'POST',
@@ -247,8 +248,9 @@ export async function startBattle(
       deck2_leader_id: deck2LeaderId,
       deck2_card_ids: deck2CardIds,
       num_games: numGames,
-      agent_type: agentType,
-      p1_agent_type: p1AgentType,
+      mode,
+      p1_level: p1Level,
+      p2_level: p2Level,
       ...(llmModel ? { llm_model: llmModel } : {}),
     }),
   });

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import random
 from typing import Any, AsyncIterator
@@ -11,9 +10,10 @@ from neo4j import AsyncDriver
 
 from backend.graph.queries import get_card_by_id
 
-from .agent import HeuristicAgent, MaxStressAgent, SimulatorAgent
+from .agent import HeuristicAgent, LLMAgent
 from .engine import Agent, GameEngine
 from .models import CardStat, GameCard, GameResult, SimulationResult
+from .template_parser import parse_effects
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +26,33 @@ async def _load_game_card(
     if not data:
         raise ValueError(f"Card not found: {card_id}")
 
+    card_type = data.get("card_type", "CHARACTER")
+    cost = data.get("cost", 0) or 0
+    keywords = data.get("keywords", [])
+    ability_text = data.get("ability", "") or ""
+    trigger_effect = data.get("trigger_effect", "") or ""
+
+    effects = parse_effects(
+        keywords=keywords,
+        ability_text=ability_text,
+        trigger_effect=trigger_effect,
+        card_type=card_type,
+        cost=cost,
+    )
+
     return GameCard(
         instance_id=instance_id,
         card_id=card_id,
         name=data.get("name", "Unknown"),
-        card_type=data.get("card_type", "CHARACTER"),
-        cost=data.get("cost", 0) or 0,
+        card_type=card_type,
+        cost=cost,
         power=data.get("power", 0) or 0,
         counter=data.get("counter", 0) or 0,
-        keywords=data.get("keywords", []),
-        ability_text=data.get("ability", ""),
-        trigger_effect=data.get("trigger_effect", ""),
+        keywords=keywords,
+        ability_text=ability_text,
+        trigger_effect=trigger_effect,
         color=data.get("color", ""),
+        effects=effects,
     )
 
 
@@ -60,25 +75,38 @@ def _clone_cards(
 ) -> tuple[GameCard, list[GameCard]]:
     """Deep-clone leader and deck for a fresh game."""
     import copy
+
     new_leader = copy.deepcopy(leader)
     new_deck = copy.deepcopy(deck)
     return new_leader, new_deck
 
 
 class SimulationRunner:
-    """Runs N games between two decks and collects statistics."""
+    """Runs N games between two decks and collects statistics.
+
+    Parameters
+    ----------
+    mode : "virtual" (rule-based, free) or "real" (LLM-powered, costs $)
+    p1_level : "new" | "amateur" | "pro"
+    p2_level : "easy" | "medium" | "hard"
+    llm_model : Claude model ID (only used in real mode)
+    """
 
     def __init__(
         self,
         driver: AsyncDriver,
-        agent_type: str = "heuristic",
-        base_seed: int = 42,
+        mode: str = "virtual",
+        p1_level: str = "amateur",
+        p2_level: str = "medium",
         llm_model: str | None = None,
+        base_seed: int = 42,
     ) -> None:
         self.driver = driver
-        self.agent_type = agent_type
-        self.base_seed = base_seed
+        self.mode = mode
+        self.p1_level = p1_level
+        self.p2_level = p2_level
         self.llm_model = llm_model
+        self.base_seed = base_seed
 
     async def run(
         self,
@@ -88,16 +116,9 @@ class SimulationRunner:
         deck2_card_ids: list[str],
         num_games: int = 10,
     ) -> AsyncIterator[dict[str, Any]]:
-        """Run simulation, yielding progress events via SSE.
-
-        Yields dicts like:
-            {"type": "loading", "message": "Loading decks..."}
-            {"type": "game_complete", "game": 1, "winner": "p1", ...}
-            {"type": "complete", "result": {...}}
-        """
+        """Run simulation, yielding progress events via SSE."""
         yield {"type": "loading", "message": "Loading decks from database..."}
 
-        # Load cards once
         p1_leader, p1_deck = await load_deck(
             self.driver, deck1_leader_id, deck1_card_ids, "p1"
         )
@@ -111,21 +132,19 @@ class SimulationRunner:
             "p2_leader": p2_leader.name,
         }
 
-        # Create agents
+        # Create agents based on mode
         rng = random.Random(self.base_seed)
-        if self.agent_type == "llm":
+
+        if self.mode == "real":
             model = self.llm_model or "claude-haiku-4-5-20251001"
-            p1_agent: Agent = SimulatorAgent(model=model)
-            p2_agent: Agent = SimulatorAgent(model=model)
-        elif self.agent_type == "stress_godmode":
-            p1_agent = HeuristicAgent(rng=random.Random(rng.randint(0, 2**32)))
-            p2_agent = MaxStressAgent(rng=random.Random(rng.randint(0, 2**32)), omniscient=True)
-        elif self.agent_type == "stress_realistic":
-            p1_agent = HeuristicAgent(rng=random.Random(rng.randint(0, 2**32)))
-            p2_agent = MaxStressAgent(rng=random.Random(rng.randint(0, 2**32)), omniscient=False)
+            p1_agent: Agent = LLMAgent(role="player", level=self.p1_level, model=model)
+            p2_agent: Agent = LLMAgent(role="bot", level=self.p2_level, model=model)
         else:
-            p1_agent = HeuristicAgent(rng=random.Random(rng.randint(0, 2**32)))
-            p2_agent = HeuristicAgent(rng=random.Random(rng.randint(0, 2**32)))
+            # Virtual mode — rule-based agents
+            p1_rng = random.Random(rng.randint(0, 2**32))
+            p2_rng = random.Random(rng.randint(0, 2**32))
+            p1_agent = HeuristicAgent(role="player", level=self.p1_level, rng=p1_rng)
+            p2_agent = HeuristicAgent(role="bot", level=self.p2_level, rng=p2_rng)
 
         results: list[GameResult] = []
         p1_wins = 0
@@ -136,7 +155,6 @@ class SimulationRunner:
             seed = self.base_seed + game_num
             engine = GameEngine(seed=seed)
 
-            # Clone cards for fresh game
             l1, d1 = _clone_cards(p1_leader, p1_deck)
             l2, d2 = _clone_cards(p2_leader, p2_deck)
 
@@ -167,7 +185,7 @@ class SimulationRunner:
             }
 
         # Aggregate stats
-        card_stats = self._aggregate_card_stats(results, p1_leader, p2_leader)
+        card_stats = self._aggregate_card_stats(results)
         avg_turns = sum(r.turns for r in results) / max(len(results), 1)
 
         sim_result = SimulationResult(
@@ -178,8 +196,8 @@ class SimulationRunner:
             avg_turns=avg_turns,
             p1_leader=p1_leader.name,
             p2_leader=p2_leader.name,
-            card_stats={k: v.__dict__ for k, v in card_stats.items()},  # type: ignore[assignment]
-            sample_games=results[:3],  # Keep first 3 for replay
+            card_stats={k: v.__dict__ for k, v in card_stats.items()},  # type: ignore[assignment,misc]
+            sample_games=results[:3],
         )
 
         yield {
@@ -201,28 +219,21 @@ class SimulationRunner:
                         "turns": g.turns,
                         "p1_life": g.p1_life_remaining,
                         "p2_life": g.p2_life_remaining,
-                        "game_log": g.game_log[:200],  # Cap log size
+                        "game_log": g.game_log[:200],
                     }
                     for g in sim_result.sample_games
                 ],
             },
         }
 
-    def _aggregate_card_stats(
-        self,
-        results: list[GameResult],
-        p1_leader: GameCard,
-        p2_leader: GameCard,
-    ) -> dict[str, CardStat]:
+    def _aggregate_card_stats(self, results: list[GameResult]) -> dict[str, CardStat]:
         """Aggregate card performance across all games."""
         stats: dict[str, CardStat] = {}
 
         for result in results:
             for card_id, times in result.p1_cards_played.items():
                 if card_id not in stats:
-                    stats[card_id] = CardStat(
-                        card_id=card_id, card_name=card_id
-                    )
+                    stats[card_id] = CardStat(card_id=card_id, card_name=card_id)
                 s = stats[card_id]
                 s.times_played += times
                 s.total_games += 1
@@ -231,9 +242,7 @@ class SimulationRunner:
 
             for card_id, times in result.p2_cards_played.items():
                 if card_id not in stats:
-                    stats[card_id] = CardStat(
-                        card_id=card_id, card_name=card_id
-                    )
+                    stats[card_id] = CardStat(card_id=card_id, card_name=card_id)
                 s = stats[card_id]
                 s.times_played += times
                 s.total_games += 1

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { listSavedDecks, loadSavedDeck, deleteSavedDeck } from '../lib/api';
+import { listSavedDecks, loadSavedDeck, deleteSavedDeck, searchCards } from '../lib/api';
 import type { SavedDeckListItem } from '../types';
 
 interface Props {
@@ -16,6 +16,7 @@ export default function MyDecksPage({ onLoadDeck, onSimulateDeck, onNewDeck }: P
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [leaderImages, setLeaderImages] = useState<Record<string, string>>({});
 
   const fetchDecks = () => {
     setLoading(true);
@@ -28,6 +29,29 @@ export default function MyDecksPage({ onLoadDeck, onSimulateDeck, onNewDeck }: P
   useEffect(() => {
     fetchDecks();
   }, []);
+
+  // Fetch leader card images
+  useEffect(() => {
+    const leaderIds = [...new Set(decks.map((d) => d.leader_id).filter(Boolean))] as string[];
+    const missing = leaderIds.filter((id) => !leaderImages[id]);
+    if (missing.length === 0) return;
+
+    Promise.all(
+      missing.map((id) =>
+        searchCards({ keyword: id, card_type: 'LEADER', limit: 1 })
+          .then((res) => ({ id, image: res.cards[0]?.image_small ?? '' }))
+          .catch(() => ({ id, image: '' })),
+      ),
+    ).then((results) => {
+      setLeaderImages((prev) => {
+        const next = { ...prev };
+        for (const r of results) {
+          if (r.image) next[r.id] = r.image;
+        }
+        return next;
+      });
+    });
+  }, [decks]);
 
   const handleDelete = async (id: string) => {
     setDeletingId(id);
@@ -150,7 +174,20 @@ export default function MyDecksPage({ onLoadDeck, onSimulateDeck, onNewDeck }: P
                 key={deck.id}
                 className="rounded-xl border border-gray-700/50 bg-gray-900/50 p-4 hover:border-gray-600/50 transition-colors"
               >
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  {/* Leader card image */}
+                  {deck.leader_id && leaderImages[deck.leader_id] ? (
+                    <img
+                      src={leaderImages[deck.leader_id]}
+                      alt="Leader"
+                      className="w-16 h-[88px] object-cover rounded-lg shrink-0 border border-gray-700/50"
+                    />
+                  ) : (
+                    <div className="w-16 h-[88px] bg-gray-800 rounded-lg shrink-0 border border-gray-700/50 flex items-center justify-center">
+                      <span className="text-[10px] text-gray-500 text-center px-1">{deck.leader_id ?? 'No leader'}</span>
+                    </div>
+                  )}
+
                   <div className="flex-1 min-w-0">
                     <h3 className="text-sm font-semibold text-white truncate">{deck.name}</h3>
                     <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">

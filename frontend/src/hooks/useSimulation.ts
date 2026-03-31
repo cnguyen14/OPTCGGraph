@@ -60,7 +60,9 @@ export function useSimulation() {
       deck2LeaderId: string,
       deck2CardIds: string[],
       numGames: number = 10,
-      agentType: string = 'heuristic',
+      mode: string = 'virtual',
+      p1Level: string = 'amateur',
+      p2Level: string = 'medium',
       llmModel?: string,
     ) => {
       // Cleanup previous
@@ -87,7 +89,9 @@ export function useSimulation() {
           deck2LeaderId,
           deck2CardIds,
           numGames,
-          agentType,
+          mode,
+          p1Level,
+          p2Level,
           llmModel,
         );
 

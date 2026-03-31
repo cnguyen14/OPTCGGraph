@@ -1,7 +1,10 @@
 """AI agents for the OPTCG battle simulator.
 
-HeuristicAgent: Rule-based (free, instant) — good baseline.
-SimulatorAgent: LLM-powered (Haiku, ~$0.03/game) — smarter decisions.
+Two agent classes:
+  HeuristicAgent — rule-based (free, instant) for Virtual mode
+  LLMAgent       — Claude-powered (costs $) for Real mode
+
+Each agent supports a role ("player" or "bot") with 3 skill levels.
 """
 
 from __future__ import annotations
@@ -9,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 from typing import Any
 
 import anthropic
@@ -18,6 +22,8 @@ from backend.config import ANTHROPIC_API_KEY
 from .models import (
     ActionType,
     CardState,
+    EffectTrigger,
+    EffectType,
     GameAction,
     GameCard,
     GameState,
@@ -28,7 +34,9 @@ logger = logging.getLogger(__name__)
 
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
 
-# --- Shared scoring constants for MaxStressAgent ---
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
 
 KEYWORD_VALUE: dict[str, float] = {
     "ko": 8.0,
@@ -46,236 +54,540 @@ KEYWORD_VALUE: dict[str, float] = {
     "power debuff": 3.0,
 }
 
+EFFECT_TYPE_VALUE: dict[EffectType, float] = {
+    EffectType.KO: 8.0,
+    EffectType.BOUNCE: 6.0,
+    EffectType.DRAW: 5.0,
+    EffectType.DOUBLE_ATTACK: 5.0,
+    EffectType.SEARCH: 4.0,
+    EffectType.TRASH_FROM_HAND: 4.0,
+    EffectType.PLAY_FROM_TRASH: 4.0,
+    EffectType.BOTTOM_DECK: 5.0,
+    EffectType.REST: 3.0,
+    EffectType.RUSH: 3.0,
+    EffectType.BLOCKER: 3.0,
+    EffectType.POWER_REDUCE: 3.0,
+    EffectType.DON_MINUS: 3.5,
+    EffectType.POWER_BOOST: 2.0,
+    EffectType.BANISH: 1.5,
+    EffectType.PROTECT: 2.0,
+    EffectType.COST_REDUCE: 2.5,
+    EffectType.EXTRA_DON: 2.0,
+    EffectType.ON_KO_DRAW: 2.0,
+    EffectType.TRIGGER_PLAY: 2.0,
+}
+
+ON_PLAY_EFFECT_TYPES = {
+    EffectType.KO,
+    EffectType.BOUNCE,
+    EffectType.DRAW,
+    EffectType.SEARCH,
+    EffectType.TRASH_FROM_HAND,
+    EffectType.REST,
+    EffectType.BOTTOM_DECK,
+    EffectType.PLAY_FROM_TRASH,
+    EffectType.POWER_REDUCE,
+}
+
 ON_PLAY_KEYWORDS = {"ko", "bounce", "draw", "search", "trash", "rest"}
 
 
 def _keyword_score(card: GameCard) -> float:
-    """Sum keyword values for a card."""
+    """Score a card's effects using templates (with keyword fallback)."""
+    if card.effects:
+        return sum(EFFECT_TYPE_VALUE.get(e.type, 0) for e in card.effects)
     return sum(KEYWORD_VALUE.get(kw.lower(), 0) for kw in card.keywords)
 
 
 def _card_utility(card: GameCard, player: PlayerState) -> float:
-    """Future utility of keeping a card in hand (lower = safer to discard)."""
     score = _keyword_score(card)
     if card.cost <= player.don_field + 2:
-        score += 1.0  # Playable soon
+        score += 1.0
     if card.cost > 7 and player.don_field < 5:
-        score -= 1.0  # Too expensive right now
+        score -= 1.0
     return score
 
 
 def _has_on_play_effect(card: GameCard) -> bool:
-    """Check if card has keywords that trigger on play."""
+    """Check if card has an on-play effect worth prioritizing."""
+    if card.effects:
+        return any(
+            e.trigger == EffectTrigger.ON_PLAY and e.type in ON_PLAY_EFFECT_TYPES
+            for e in card.effects
+        )
     return any(kw.lower() in ON_PLAY_KEYWORDS for kw in card.keywords)
 
-SIMULATOR_SYSTEM = """You are an OPTCG (One Piece TCG) player. Pick the best action by index.
 
-Game rules reminder:
-- Play characters/events by paying DON!! cost
-- Attach DON!! to boost power (+1000 each)
-- Attack opponent's Leader to remove Life, attack rested characters to KO them
-- Characters enter RESTED and can't attack until next turn (unless Rush)
-- Win by removing all opponent Life then hitting their Leader one more time
+def _find_card(instance_id: str, player: PlayerState) -> GameCard | None:
+    if instance_id == player.leader.instance_id:
+        return player.leader
+    return player.find_card_on_field(instance_id)
 
-Strategy tips:
-- Play cards before attacking (to set up board)
-- Attach DON!! to attackers before attacking
-- Attack rested characters if you can KO them
-- Attack Leader when you have power advantage
-- Save DON!! for bigger plays if nothing good is affordable
 
-Respond with ONLY valid JSON: {"action_index": N}
-No explanation, no extra text."""
+def _extract_cost(action: GameAction) -> int:
+    match = re.search(r"cost (\d+)", action.description)
+    return int(match.group(1)) if match else 0
+
+
+# ---------------------------------------------------------------------------
+# Board evaluation (Phase 2: AI Intelligence)
+# ---------------------------------------------------------------------------
+
+
+def evaluate_board(state: GameState, player_id: str) -> float:
+    """Score the board state from the perspective of player_id.
+
+    Higher score = better position. Used by look-ahead action selection.
+    Weights tuned to reflect OPTCG tempo/card advantage dynamics.
+    """
+    player = state.p1 if player_id == "p1" else state.p2
+    opponent = state.p2 if player_id == "p1" else state.p1
+
+    score = 0.0
+
+    # Life advantage — life is both a resource and win condition
+    # Being at 1 life is very bad; at 5 is great (but not linearly)
+    score += len(player.life) * 120.0
+    score -= len(opponent.life) * 120.0
+
+    # Card advantage — hand size matters a lot
+    score += len(player.hand) * 18.0
+    score -= len(opponent.hand) * 10.0  # Opponent hand is less visible, weight less
+
+    # Board power — total effective power on field (attacker threat)
+    player_board_power = sum(c.effective_power for c in player.characters)
+    opponent_board_power = sum(c.effective_power for c in opponent.characters)
+    score += player_board_power * 0.004
+    score -= opponent_board_power * 0.004
+
+    # Leader power with DON attached (leader always matters)
+    score += player.leader.effective_power * 0.002
+    score -= opponent.leader.effective_power * 0.002
+
+    # DON availability — more DON = more options
+    score += player.don_field * 8.0
+    score -= opponent.don_field * 4.0
+
+    # Character count advantage
+    score += len(player.characters) * 15.0
+    score -= len(opponent.characters) * 15.0
+
+    # Active characters = attack potential
+    active_own = sum(1 for c in player.characters if c.state == CardState.ACTIVE)
+    active_opp = sum(1 for c in opponent.characters if c.state == CardState.ACTIVE)
+    score += active_own * 10.0
+    score -= active_opp * 10.0
+
+    # Blocker presence — defensive value
+    blockers_own = sum(
+        1 for c in player.characters if _has_effect(c, EffectType.BLOCKER)
+    )
+    score += blockers_own * 8.0
+
+    # Effect quality on board
+    for c in player.characters:
+        score += _keyword_score(c) * 3.0
+    for c in opponent.characters:
+        score -= _keyword_score(c) * 3.0
+
+    # Trash advantage (play_from_trash potential)
+    score += len(player.trash) * 0.5
+
+    return score
+
+
+def _has_effect(card: GameCard, effect_type: EffectType) -> bool:
+    """Check if card has a specific effect type."""
+    if card.effects:
+        return card.has_effect_type(effect_type)
+    return False
+
+
+def _estimate_action_value(
+    action: GameAction,
+    state: GameState,
+    player: PlayerState,
+    opponent: PlayerState,
+) -> float:
+    """Estimate the value of an action without full simulation.
+
+    Returns a score representing the expected board value gained.
+    This is a 0-step estimate (no deep copy needed) that considers:
+    - Card play: effect value + power added to board
+    - DON attach: power gap closed toward opponent
+    - Attack: expected damage or board removal value
+    - Pass: 0 baseline
+    """
+    if action.action_type == ActionType.PASS:
+        return 0.0
+
+    if action.action_type == ActionType.PLAY_CARD:
+        card = player.find_card_in_hand(action.source_id)
+        if not card:
+            return 0.0
+        # Base value: card effect utility + power/1000
+        base = _keyword_score(card) * 4.0 + card.power * 0.001
+        # Bonus for on-play effects (immediate impact)
+        if _has_on_play_effect(card):
+            base += 15.0
+        # Cost efficiency: high cost / low don is bad
+        remaining_don = player.don_field - card.cost
+        if remaining_don < 0:
+            return -999.0  # Illegal
+        # Bonus for leaving DON for attacks
+        if remaining_don >= 2:
+            base += 5.0
+        # Penalty for low-power cards late game
+        if state.turn >= 6 and card.power < 4000:
+            base -= 5.0
+        return base
+
+    if action.action_type == ActionType.ATTACH_DON:
+        target = _find_card(action.target_id, player)
+        if not target or target.state != CardState.ACTIVE:
+            return -5.0  # Wasted DON on rested card
+        new_power = target.effective_power + 1000
+        opp_leader_power = opponent.leader.effective_power
+        # Value = how much the gap closes toward opponent leader
+        gap_before = opp_leader_power - target.effective_power
+        gap_after = opp_leader_power - new_power
+        if gap_before > 0 >= gap_after:
+            return 25.0  # Crosses the threshold — very valuable
+        if gap_before > 0 and gap_after < gap_before:
+            return 12.0 + (gap_before - gap_after) * 0.005
+        # Attach to already-winning attacker (less urgent)
+        if gap_before <= 0:
+            return 6.0
+        return 3.0
+
+    if action.action_type == ActionType.ATTACK:
+        attacker = _find_card(action.source_id, player)
+        target = _find_card(action.target_id, opponent)
+        if not attacker or not target:
+            return 0.0
+
+        power_gap = attacker.effective_power - target.effective_power
+
+        if target.card_type == "LEADER":
+            opp_life = len(opponent.life)
+            if power_gap < 0:
+                return -8.0  # Attack will likely fail
+            if opp_life == 0:
+                return 200.0  # Win condition
+            if opp_life == 1:
+                return 80.0  # Near-lethal
+            # Value scales with life pressure
+            base_attack_value = 20.0 + (5 - opp_life) * 8.0
+            # Double attack bonus
+            if _has_effect(attacker, EffectType.DOUBLE_ATTACK) and opp_life >= 2:
+                base_attack_value += 20.0
+            return base_attack_value if power_gap >= 0 else base_attack_value * 0.3
+        else:
+            # Attacking a rested character
+            if power_gap < 0:
+                return -5.0
+            # Value = remove threat from board
+            removal_value = (
+                _keyword_score(target) * 5.0 + target.effective_power * 0.003
+            )
+            return removal_value + 10.0
+
+    return 0.0
+
+
+# ---------------------------------------------------------------------------
+# Deck archetype detection
+# ---------------------------------------------------------------------------
+
+
+def _detect_archetype(player: PlayerState) -> str:
+    """Detect deck archetype from leader + deck composition.
+
+    Returns: "aggro", "midrange", or "control"
+    """
+    all_cards = list(player.deck) + list(player.hand) + list(player.field)
+    if not all_cards:
+        return "midrange"
+
+    costs = [c.cost for c in all_cards if c.card_type != "LEADER"]
+    if not costs:
+        return "midrange"
+
+    avg_cost = sum(costs) / len(costs)
+    low_cost_ratio = sum(1 for c in costs if c <= 3) / len(costs)
+    high_cost_ratio = sum(1 for c in costs if c >= 7) / len(costs)
+
+    # Detect effect profile
+    ko_count = sum(1 for c in all_cards if _has_effect(c, EffectType.KO))
+    bounce_count = sum(1 for c in all_cards if _has_effect(c, EffectType.BOUNCE))
+    blocker_count = sum(1 for c in all_cards if _has_effect(c, EffectType.BLOCKER))
+
+    if avg_cost <= 3.5 and low_cost_ratio >= 0.4:
+        return "aggro"
+    if high_cost_ratio >= 0.2 or (ko_count + bounce_count) >= 8:
+        return "control"
+    if blocker_count >= 6:
+        return "control"
+    return "midrange"
+
+
+# ---------------------------------------------------------------------------
+# Profile definitions
+# ---------------------------------------------------------------------------
+
+PLAYER_PROFILES: dict[str, dict[str, Any]] = {
+    "new": {
+        "play_before_attack": 0.70,
+        "hand_dump_rate": 0.80,
+        "don_boost_awareness": 0.30,
+        "attack_weak_targets": True,
+        "counter_aggressively": True,
+        "lethal_recognition": 0.20,
+        "mistake_rate": 0.20,
+        "omniscient_counters": False,
+        "use_lookahead": False,
+    },
+    "amateur": {
+        "play_before_attack": 0.30,
+        "hand_dump_rate": 0.50,
+        "don_boost_awareness": 0.70,
+        "attack_weak_targets": False,
+        "counter_aggressively": False,
+        "lethal_recognition": 0.60,
+        "mistake_rate": 0.08,
+        "omniscient_counters": False,
+        "use_lookahead": False,
+    },
+    "pro": {
+        "play_before_attack": 0.10,
+        "hand_dump_rate": 0.35,
+        "don_boost_awareness": 1.00,
+        "attack_weak_targets": False,
+        "counter_aggressively": False,
+        "lethal_recognition": 0.95,
+        "mistake_rate": 0.02,
+        "omniscient_counters": False,
+        "use_lookahead": True,
+    },
+}
+
+BOT_PROFILES: dict[str, dict[str, Any]] = {
+    "easy": {
+        "play_before_attack": 0.60,
+        "hand_dump_rate": 0.70,
+        "don_boost_awareness": 0.40,
+        "attack_weak_targets": True,
+        "counter_aggressively": True,
+        "lethal_recognition": 0.30,
+        "mistake_rate": 0.15,
+        "omniscient_counters": False,
+        "use_lookahead": False,
+    },
+    "medium": {
+        "play_before_attack": 0.20,
+        "hand_dump_rate": 0.45,
+        "don_boost_awareness": 0.85,
+        "attack_weak_targets": False,
+        "counter_aggressively": False,
+        "lethal_recognition": 0.75,
+        "mistake_rate": 0.05,
+        "omniscient_counters": False,
+        "use_lookahead": False,
+    },
+    "hard": {
+        "play_before_attack": 0.05,
+        "hand_dump_rate": 0.30,
+        "don_boost_awareness": 1.00,
+        "attack_weak_targets": False,
+        "counter_aggressively": False,
+        "lethal_recognition": 0.98,
+        "mistake_rate": 0.01,
+        "omniscient_counters": True,
+        "use_lookahead": True,
+    },
+}
+
+
+# ===================================================================
+# HeuristicAgent — rule-based, for Virtual mode
+# ===================================================================
 
 
 class HeuristicAgent:
-    """Rule-based agent — prioritizes plays by simple heuristics.
+    """Profile-driven rule-based agent for both Player and Bot roles.
 
-    Priority: play highest-cost card → attach DON to strongest attacker →
-    attack leader if advantageous → attack rested characters → pass.
+    Parameters
+    ----------
+    role : "player" | "bot"
+    level : "new" | "amateur" | "pro"  (player)
+            "easy" | "medium" | "hard" (bot)
     """
 
-    def __init__(self, rng: random.Random | None = None) -> None:
+    def __init__(
+        self,
+        role: str = "player",
+        level: str = "amateur",
+        rng: random.Random | None = None,
+    ) -> None:
+        profiles = PLAYER_PROFILES if role == "player" else BOT_PROFILES
+        if level not in profiles:
+            level = list(profiles.keys())[1]  # default middle
+        self.role = role
+        self.level = level
+        self.profile = profiles[level]
         self.rng = rng or random.Random()
+        self._cards_played_this_turn = 0
+        self._attacks_made_this_turn = 0
+        self._last_turn = -1
+        self._archetype: str | None = None  # Detected lazily on first turn
 
-    async def choose_main_action(
-        self, state: GameState, legal_actions: list[GameAction]
-    ) -> int:
-        player = state.active_player
-        opponent = state.defending_player
-
-        play_actions = [
-            (i, a) for i, a in enumerate(legal_actions)
-            if a.action_type == ActionType.PLAY_CARD
-        ]
-        don_actions = [
-            (i, a) for i, a in enumerate(legal_actions)
-            if a.action_type == ActionType.ATTACH_DON
-        ]
-        attack_actions = [
-            (i, a) for i, a in enumerate(legal_actions)
-            if a.action_type == ActionType.ATTACK
-        ]
-
-        # Decide: should we save DON for attacks or spend on cards?
-        # If we have active attackers that could benefit from DON boost, prioritize DON
-        best_attacker_power = 0
-        if player.leader.state == CardState.ACTIVE:
-            best_attacker_power = player.leader.effective_power
-        for c in player.characters:
-            if c.state == CardState.ACTIVE and c.effective_power > best_attacker_power:
-                best_attacker_power = c.effective_power
-
-        target_power = opponent.leader.effective_power
-        need_don_boost = (
-            best_attacker_power > 0
-            and best_attacker_power < target_power
-            and player.don_field > 0
-            and (target_power - best_attacker_power) <= player.don_field * 1000
-        )
-
-        # 1. If we need DON to make attacks viable, attach DON first
-        if need_don_boost and don_actions:
-            return self._best_don_target(don_actions, player)
-
-        # 2. Play highest-cost affordable card (but save DON for attacks if close)
-        if play_actions:
-            best_play = max(play_actions, key=lambda x: self._extract_cost(x[1]))
-            play_cost = self._extract_cost(best_play[1])
-            # Only play if we can still afford to boost for attack, or card is high value
-            remaining_don = player.don_field - play_cost
-            if remaining_don >= 0:
-                if not need_don_boost or play_cost >= 3:
-                    return best_play[0]
-
-        # 3. Attach remaining DON to active attackers
-        if don_actions:
-            return self._best_don_target(don_actions, player)
-
-        # 4. Attack — prefer leader, only attack if power advantage
-        if attack_actions:
-            viable_attacks: list[tuple[int, GameAction, int]] = []
-            for i, a in attack_actions:
-                attacker = player.find_card_on_field(a.source_id)
-                if attacker is None and a.source_id == player.leader.instance_id:
-                    attacker = player.leader
-                target = opponent.find_card_on_field(a.target_id)
-                if target is None and a.target_id == opponent.leader.instance_id:
-                    target = opponent.leader
-                if not attacker or not target:
-                    continue
-                if attacker.effective_power < target.effective_power:
-                    continue
-                gap = attacker.effective_power - target.effective_power
-                score = gap
-                if target.card_type == "LEADER":
-                    score += 10000
-                viable_attacks.append((i, a, score))
-
-            if viable_attacks:
-                viable_attacks.sort(key=lambda x: x[2], reverse=True)
-                return viable_attacks[0][0]
-
-        # 4. Pass
-        return len(legal_actions) - 1
-
-    async def choose_blockers(
-        self,
-        state: GameState,
-        blockers: list[GameCard],
-        attacker: GameCard,
-        target: GameCard,
-    ) -> GameCard | None:
-        # Block if targeting leader and a blocker can survive
-        if target.card_type == "LEADER":
-            for b in blockers:
-                if b.effective_power >= attacker.effective_power:
-                    return b
-            # Block with weakest blocker even if it dies (to protect life)
-            if blockers:
-                return min(blockers, key=lambda b: b.effective_power)
-        return None
-
-    async def choose_counters(
-        self,
-        state: GameState,
-        hand: list[GameCard],
-        attacker: GameCard,
-        target: GameCard,
-        power_gap: int,
-    ) -> list[GameCard]:
-        if power_gap <= 0:
-            return []
-
-        # Use minimum counters to survive if targeting leader
-        if target.card_type != "LEADER":
-            return []
-
-        counter_cards = sorted(
-            [c for c in hand if c.counter > 0],
-            key=lambda c: c.counter,
-            reverse=True,
-        )
-        selected: list[GameCard] = []
-        total = 0
-        for card in counter_cards:
-            selected.append(card)
-            total += card.counter
-            if total >= power_gap:
-                break
-
-        return selected if total >= power_gap else []
-
-    def _best_don_target(
-        self,
-        don_actions: list[tuple[int, GameAction]],
-        player: PlayerState,
-    ) -> int:
-        """Attach DON to the best active attacker."""
-        # Prefer leader if active
-        leader_attach = [
-            (i, a) for i, a in don_actions
-            if a.target_id == player.leader.instance_id
-            and player.leader.state == CardState.ACTIVE
-        ]
-        if leader_attach:
-            return leader_attach[0][0]
-        # Attach to strongest active character
-        best_idx = don_actions[0][0]
-        best_power = -1
-        for i, a in don_actions:
-            card = player.find_card_on_field(a.target_id)
-            if card and card.state == CardState.ACTIVE and card.effective_power > best_power:
-                best_power = card.effective_power
-                best_idx = i
-        return best_idx
-
-    def _extract_cost(self, action: GameAction) -> int:
-        """Extract cost from action description like 'Play X (cost 3)'."""
-        import re
-        match = re.search(r"cost (\d+)", action.description)
-        return int(match.group(1)) if match else 0
-
-
-class SimulatorAgent:
-    """LLM-powered agent using Claude Haiku for game decisions.
-
-    ~50-80 decisions per game, ~$0.03/game with Haiku.
-    """
-
-    def __init__(self, model: str = HAIKU_MODEL) -> None:
-        self.client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
-        self.model = model
-        self._fallback = HeuristicAgent()
+    # ------------------------------------------------------------------
+    # Main phase
+    # ------------------------------------------------------------------
 
     async def choose_main_action(
         self, state: GameState, legal_actions: list[GameAction]
     ) -> int:
         if len(legal_actions) <= 1:
-            return 0  # Only pass available
+            return 0
 
-        prompt = self._build_main_prompt(state, legal_actions)
-        return await self._ask_llm(prompt, len(legal_actions))
+        player = state.active_player
+        opponent = state.defending_player
+        prof = self.profile
+
+        # Reset per-turn counters and detect archetype lazily
+        if state.turn != self._last_turn:
+            self._last_turn = state.turn
+            self._cards_played_this_turn = 0
+            self._attacks_made_this_turn = 0
+            if self._archetype is None:
+                self._archetype = _detect_archetype(player)
+
+        # Mistake injection
+        if self.rng.random() < prof["mistake_rate"]:
+            return self.rng.randint(0, len(legal_actions) - 1)
+
+        # Lethal check (gated by skill, always before look-ahead)
+        if self.rng.random() < prof["lethal_recognition"]:
+            lethal = self._check_lethal(state, legal_actions, player, opponent)
+            if lethal is not None:
+                return lethal
+
+        # --- Look-ahead path for pro/hard agents ---
+        if prof.get("use_lookahead"):
+            return self._choose_by_scoring(state, legal_actions, player, opponent)
+
+        # --- Heuristic path for new/amateur/easy/medium ---
+        play_actions = [
+            (i, a)
+            for i, a in enumerate(legal_actions)
+            if a.action_type == ActionType.PLAY_CARD
+        ]
+        don_actions = [
+            (i, a)
+            for i, a in enumerate(legal_actions)
+            if a.action_type == ActionType.ATTACH_DON
+        ]
+        attack_actions = [
+            (i, a)
+            for i, a in enumerate(legal_actions)
+            if a.action_type == ActionType.ATTACK
+        ]
+
+        plays_first = self.rng.random() < prof["play_before_attack"]
+        has_attacks = len(attack_actions) > 0
+
+        if plays_first:
+            r = self._try_play_card(play_actions, player)
+            if r is not None:
+                return r
+            r = self._try_attach_don(
+                don_actions, player, opponent, can_attack=has_attacks
+            )
+            if r is not None:
+                return r
+            r = self._try_attack(attack_actions, player, opponent, state)
+            if r is not None:
+                return r
+        else:
+            r = self._try_attach_don(
+                don_actions, player, opponent, can_attack=has_attacks
+            )
+            if r is not None:
+                return r
+            r = self._try_attack(attack_actions, player, opponent, state)
+            if r is not None:
+                return r
+            r = self._try_play_card(play_actions, player)
+            if r is not None:
+                return r
+
+        # Pass
+        return len(legal_actions) - 1
+
+    def _choose_by_scoring(
+        self,
+        state: GameState,
+        legal_actions: list[GameAction],
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> int:
+        """Score all actions and pick the highest-value one (pro/hard path).
+
+        Uses _estimate_action_value for each action with archetype-based
+        adjustments. Replaces the rigid heuristic ordering.
+        """
+        archetype = self._archetype or "midrange"
+        scored: list[tuple[int, float]] = []
+        for i, action in enumerate(legal_actions):
+            if action.action_type == ActionType.PASS:
+                scored.append((i, 0.0))
+                continue
+
+            score = _estimate_action_value(action, state, player, opponent)
+
+            # Archetype adjustments
+            if archetype == "aggro":
+                # Aggro: boost attack value, penalize non-attack plays
+                if action.action_type == ActionType.ATTACK:
+                    score *= 1.3
+                elif action.action_type == ActionType.PLAY_CARD:
+                    card = player.find_card_in_hand(action.source_id)
+                    if card and card.cost > 5:
+                        score *= 0.7  # Aggro shouldn't play expensive cards
+
+            elif archetype == "control":
+                # Control: boost removal/bounce value, less rush to attack leader
+                if action.action_type == ActionType.PLAY_CARD:
+                    card = player.find_card_in_hand(action.source_id)
+                    if card and _has_on_play_effect(card):
+                        score *= 1.25
+                if action.action_type == ActionType.ATTACK:
+                    target = _find_card(action.target_id, opponent)
+                    if target and target.card_type == "LEADER":
+                        # Control is less aggressive on leader early
+                        if len(opponent.life) >= 4 and state.turn <= 5:
+                            score *= 0.8
+
+            # Hand dump penalty: don't empty hand recklessly
+            if action.action_type == ActionType.PLAY_CARD:
+                if len(player.hand) <= 2 and state.turn >= 4:
+                    score *= 0.85
+
+            scored.append((i, score))
+
+        if scored:
+            best_idx_val, best_score_val = max(scored, key=lambda x: x[1])
+            # Only pass if all scored actions are negative
+            if best_score_val <= 0:
+                return len(legal_actions) - 1
+            return best_idx_val
+
+        return len(legal_actions) - 1
+
+    # ------------------------------------------------------------------
+    # Blocker decision
+    # ------------------------------------------------------------------
 
     async def choose_blockers(
         self,
@@ -287,26 +599,40 @@ class SimulatorAgent:
         if not blockers:
             return None
 
-        options = ["Don't block"]
-        for b in blockers:
-            options.append(
-                f"Block with {b.name} (P:{b.effective_power})"
-            )
+        life = len(state.defending_player.life)
+        prof = self.profile
 
-        prompt = (
-            f"{attacker.name} (P:{attacker.effective_power}) is attacking "
-            f"your {'Leader' if target.card_type == 'LEADER' else target.name} "
-            f"(P:{target.effective_power}).\n"
-            f"Your life: {len(state.defending_player.life)}\n"
-            f"Options:\n"
-        )
-        for i, opt in enumerate(options):
-            prompt += f"  [{i}] {opt}\n"
-
-        choice = await self._ask_llm(prompt, len(options))
-        if choice == 0:
+        # Attack won't succeed anyway
+        if attacker.effective_power < target.effective_power:
             return None
-        return blockers[choice - 1] if choice - 1 < len(blockers) else None
+
+        sorted_blockers = sorted(
+            blockers, key=lambda b: _keyword_score(b) + b.effective_power / 1000.0
+        )
+
+        if target.card_type == "LEADER":
+            if life <= 1:
+                return sorted_blockers[0]  # must block at lethal
+            if life <= 2 and prof["don_boost_awareness"] >= 0.7:
+                return sorted_blockers[0]
+            if prof["counter_aggressively"] and self.rng.random() < 0.5:
+                return self.rng.choice(blockers)
+            return None
+        else:
+            # Protect high-value characters (skilled players only)
+            if prof["don_boost_awareness"] >= 0.85:
+                tv = _keyword_score(target) + target.effective_power / 1000.0
+                bv = (
+                    _keyword_score(sorted_blockers[0])
+                    + sorted_blockers[0].effective_power / 1000.0
+                )
+                if tv > bv + 2.0:
+                    return sorted_blockers[0]
+            return None
+
+    # ------------------------------------------------------------------
+    # Counter decision
+    # ------------------------------------------------------------------
 
     async def choose_counters(
         self,
@@ -316,135 +642,278 @@ class SimulatorAgent:
         target: GameCard,
         power_gap: int,
     ) -> list[GameCard]:
-        # Delegate to heuristic — counter decisions are relatively simple
-        return await self._fallback.choose_counters(
-            state, hand, attacker, target, power_gap
-        )
+        if power_gap <= 0:
+            return []
+        if target.card_type != "LEADER":
+            return []
 
-    def _build_main_prompt(
-        self, state: GameState, legal_actions: list[GameAction]
-    ) -> str:
-        player = state.active_player
-        opponent = state.defending_player
+        life = len(state.defending_player.life)
+        counter_cards = [c for c in hand if c.counter > 0]
+        if not counter_cards:
+            return []
 
-        lines = [
-            f"Turn {state.turn} | Your life: {len(player.life)} | Opp life: {len(opponent.life)} | DON: {player.don_field}",
-            f"Hand ({len(player.hand)}):",
-        ]
-        for card in player.hand:
-            kw = f" [{', '.join(card.keywords)}]" if card.keywords else ""
-            lines.append(f"  {card.name} (Cost:{card.cost} P:{card.power}{kw})")
+        prof = self.profile
+        archetype = self._archetype or "midrange"
 
-        lines.append(f"Your field:")
-        lines.append(
-            f"  Leader: {player.leader.name} P:{player.leader.effective_power} "
-            f"{'ACTIVE' if player.leader.state == CardState.ACTIVE else 'RESTED'}"
-        )
-        for card in player.field:
-            status = "ACTIVE" if card.state == CardState.ACTIVE else "RESTED"
-            lines.append(f"  {card.name} P:{card.effective_power} {status}")
+        # Aggressive countering (new/easy players counter everything)
+        if prof["counter_aggressively"]:
+            if self.rng.random() < 0.7:
+                return self._select_counters(
+                    counter_cards, power_gap, state.defending_player
+                )
+            return []
 
-        lines.append(f"Opp field:")
-        lines.append(f"  Leader: {opponent.leader.name} P:{opponent.leader.effective_power}")
-        for card in opponent.field:
-            status = "ACTIVE" if card.state == CardState.ACTIVE else "RESTED"
-            blocker = " [Blocker]" if "Blocker" in card.keywords else ""
-            lines.append(f"  {card.name} P:{card.effective_power} {status}{blocker}")
-
-        lines.append("Legal actions:")
-        for i, a in enumerate(legal_actions):
-            lines.append(f"  [{i}] {a.description}")
-
-        return "\n".join(lines)
-
-    async def _ask_llm(self, prompt: str, num_options: int) -> int:
-        """Ask LLM for an action index. Falls back to heuristic on error."""
-        try:
-            response = await self.client.messages.create(
-                model=self.model,
-                system=SIMULATOR_SYSTEM,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=50,
+        # Pro/hard path: evaluate whether countering is worth the card cost
+        if prof.get("use_lookahead"):
+            return self._smart_counter_decision(
+                state, counter_cards, power_gap, life, archetype
             )
-            text = response.content[0].text.strip()
 
-            # Parse JSON response
-            data = json.loads(text)
-            idx = int(data.get("action_index", 0))
-            return max(0, min(idx, num_options - 1))
+        # Standard heuristic: take early life, counter later
+        if life >= 4:
+            return []
+        if life == 3:
+            low_utility = [
+                c
+                for c in counter_cards
+                if _card_utility(c, state.defending_player) < 3.0
+            ]
+            if low_utility:
+                return self._select_counters(
+                    low_utility, power_gap, state.defending_player, max_cards=2
+                )
+            return []
+        # life <= 2: always try to counter
+        sorted_by_utility = sorted(
+            counter_cards, key=lambda c: _card_utility(c, state.defending_player)
+        )
+        return self._select_counters(
+            sorted_by_utility, power_gap, state.defending_player
+        )
 
-        except (json.JSONDecodeError, KeyError, IndexError, ValueError) as e:
-            logger.debug(f"LLM parse error: {e}, response: {text if 'text' in dir() else 'N/A'}")
-            return 0
-        except Exception as e:
-            logger.warning(f"LLM call failed: {e}")
-            return 0
+    def _smart_counter_decision(
+        self,
+        state: GameState,
+        counter_cards: list[GameCard],
+        power_gap: int,
+        life: int,
+        archetype: str,
+    ) -> list[GameCard]:
+        """Pro/hard counter logic: weigh the cost of countering vs taking the hit.
 
+        Key insight: countering costs a card from hand. Is that worth saving 1 life?
+        - Life at 0 → taking hit loses the game → always counter if possible
+        - Life at 1 → critical → counter with low-utility cards
+        - Life at 2 → dangerous → counter if cheap (1 card)
+        - Life at 3+ → take the hit, keep the hand card
+        - Aggro decks: take life more aggressively (life is cheap, speed matters)
+        - Control decks: protect life harder (they need time)
+        """
+        player = state.defending_player
 
-class MaxStressAgent:
-    """Score-based agent that plays optimally as P2 to stress-test P1's deck.
+        # Always counter at 0 life (next hit loses)
+        if life == 0:
+            sorted_by_utility = sorted(
+                counter_cards, key=lambda c: _card_utility(c, player)
+            )
+            return self._select_counters(sorted_by_utility, power_gap, player)
 
-    Two modes:
-    - omniscient=True (God Mode): sees opponent's hand and deck
-    - omniscient=False (Realistic): estimates from public info only
-    """
+        # Critical life (1): counter with lowest-utility cards
+        if life == 1:
+            sorted_by_utility = sorted(
+                counter_cards, key=lambda c: _card_utility(c, player)
+            )
+            return self._select_counters(sorted_by_utility, power_gap, player)
 
-    def __init__(
-        self, rng: random.Random | None = None, omniscient: bool = True
-    ) -> None:
-        self.rng = rng or random.Random()
-        self.omniscient = omniscient
-        self._last_turn = -1
-        self._lethal_plan: list[int] | None = None
+        # Dangerous (2): counter only if we can do it with 1 low-utility card
+        if life == 2:
+            # Aggro takes hits to preserve tempo
+            if archetype == "aggro":
+                return []
+            low_utility = [c for c in counter_cards if _card_utility(c, player) < 2.5]
+            if low_utility and low_utility[0].counter >= power_gap:
+                return [low_utility[0]]
+            return []
 
-    # --- Information access layer ---
+        # Life 3+: generally take the hit (cards are more valuable than life)
+        # Exception: if opponent is at low life themselves, they might win fast
+        opp_life = len(state.p2.life if player.player_id == "p1" else state.p1.life)
+        if opp_life <= 1 and life == 3:
+            # Race situation: don't counter, we need to finish them off
+            return []
 
-    def _get_opponent(self, state: GameState) -> PlayerState:
-        return state.p1 if state.active_player_id == "p2" else state.p2
+        return []
 
-    def _estimate_opponent_counters(self, state: GameState) -> int:
-        opponent = self._get_opponent(state)
-        if self.omniscient:
-            return sum(c.counter for c in opponent.hand)
-        # Realistic: ~60% of hand has counters averaging 1000
-        return int(len(opponent.hand) * 0.6 * 1000)
+    # ------------------------------------------------------------------
+    # Internal: play card
+    # ------------------------------------------------------------------
 
-    # --- Main phase decision ---
+    def _try_play_card(
+        self, play_actions: list[tuple[int, GameAction]], player: PlayerState
+    ) -> int | None:
+        if not play_actions:
+            return None
 
-    async def choose_main_action(
-        self, state: GameState, legal_actions: list[GameAction]
-    ) -> int:
-        if len(legal_actions) <= 1:
-            return 0
+        affordable = [
+            (i, a) for i, a in play_actions if _extract_cost(a) <= player.don_field
+        ]
+        if not affordable:
+            return None
 
-        player = state.active_player
-        opponent = self._get_opponent(state)
+        max_plays = max(1, int(len(player.hand) * self.profile["hand_dump_rate"]))
+        if self._cards_played_this_turn >= max_plays:
+            return None
 
-        # Reset lethal plan on new turn
-        if state.turn != self._last_turn:
-            self._last_turn = state.turn
-            self._lethal_plan = None
+        best = max(affordable, key=lambda x: _extract_cost(x[1]))
+        self._cards_played_this_turn += 1
+        return best[0]
 
-        # Consume lethal plan if active
-        if self._lethal_plan:
-            if self._lethal_plan:
-                idx = self._lethal_plan.pop(0)
-                if idx < len(legal_actions):
-                    return idx
-            self._lethal_plan = None
+    # ------------------------------------------------------------------
+    # Internal: attach DON
+    # ------------------------------------------------------------------
 
-        # Phase 1: Lethal check
-        lethal_seq = self._check_lethal(state, legal_actions, player, opponent)
-        if lethal_seq:
-            self._lethal_plan = lethal_seq[1:]  # Save rest for next calls
-            return lethal_seq[0]
+    def _try_attach_don(
+        self,
+        don_actions: list[tuple[int, GameAction]],
+        player: PlayerState,
+        opponent: PlayerState,
+        *,
+        can_attack: bool = True,
+    ) -> int | None:
+        if not don_actions or player.don_field <= 0:
+            return None
+        # No point boosting power if we can't attack this turn
+        if not can_attack:
+            return None
 
-        # Phase 2: Score every action
-        scores: list[float] = []
-        for i, action in enumerate(legal_actions):
-            scores.append(self._score_action(action, state, player, opponent))
+        awareness = self.profile["don_boost_awareness"]
 
-        return int(max(range(len(scores)), key=lambda i: scores[i]))
+        # Low awareness: randomly attach to leader sometimes
+        if awareness < 0.5:
+            if self.rng.random() < awareness:
+                leader_dons = [
+                    (i, a)
+                    for i, a in don_actions
+                    if a.target_id == player.leader.instance_id
+                    and player.leader.state == CardState.ACTIVE
+                ]
+                if leader_dons:
+                    return leader_dons[0][0]
+            return None
+
+        # Smart DON attachment: only attach to ACTIVE cards, limit to what's needed
+        opp_leader_power = opponent.leader.effective_power
+        best: tuple[int, int] | None = None  # (action_idx, gap)
+
+        for i, a in don_actions:
+            card = _find_card(a.target_id, player)
+            if card is None or card.state != CardState.ACTIVE:
+                continue
+
+            gap = opp_leader_power - card.effective_power
+            if gap > 0 and gap <= player.don_field * 1000:
+                if best is None or gap < best[1]:
+                    best = (i, gap)
+
+        if best is not None:
+            # Check: don't spend ALL DON on boosting — reserve for card plays
+            boost_cost = (best[1] + 999) // 1000
+            remaining_after = player.don_field - 1  # We attach 1 at a time
+            has_playable = any(
+                c.cost <= remaining_after
+                for c in player.hand
+                if c.card_type in ("CHARACTER", "EVENT", "STAGE")
+            )
+            # If we still have playable cards and this DON would leave us unable to play them,
+            # only attach if the gap is small (worth it for the attack)
+            if has_playable and remaining_after < 2 and boost_cost > 2:
+                return None
+            return best[0]
+
+        # Attach to strongest active attacker if DON awareness is high
+        if awareness >= 0.85:
+            active_dons = [
+                (i, a)
+                for i, a in don_actions
+                if _find_card(a.target_id, player) is not None
+                and _find_card(a.target_id, player).state == CardState.ACTIVE  # type: ignore[union-attr]
+            ]
+            if active_dons:
+                return active_dons[0][0]
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Internal: attack
+    # ------------------------------------------------------------------
+
+    def _try_attack(
+        self,
+        attack_actions: list[tuple[int, GameAction]],
+        player: PlayerState,
+        opponent: PlayerState,
+        state: GameState,
+    ) -> int | None:
+        if not attack_actions:
+            return None
+
+        prof = self.profile
+        leader_attacks: list[tuple[int, GameAction, int]] = []
+        char_attacks: list[tuple[int, GameAction, int]] = []
+
+        for i, a in attack_actions:
+            attacker = _find_card(a.source_id, player)
+            target = _find_card(a.target_id, opponent)
+            if not attacker or not target:
+                continue
+
+            power_gap = attacker.effective_power - target.effective_power
+
+            # Skip losing attacks unless profile allows weak targets
+            if power_gap < 0 and not prof["attack_weak_targets"]:
+                continue
+
+            if target.card_type == "LEADER":
+                leader_attacks.append((i, a, power_gap))
+            else:
+                char_attacks.append((i, a, power_gap))
+
+        # Advanced: prefer KO-ing high-value rested characters first
+        if not prof["attack_weak_targets"] and char_attacks:
+            scored = []
+            for i, a, gap in char_attacks:
+                target = _find_card(a.target_id, opponent)
+                if target and gap >= 0:
+                    value = _keyword_score(target) + target.effective_power / 1000.0
+                    scored.append((i, value))
+            if scored:
+                best_char = max(scored, key=lambda x: x[1])
+                if best_char[1] > 5.0:
+                    return best_char[0]
+
+        # Attack leader
+        if leader_attacks:
+            viable = [(i, a, g) for i, a, g in leader_attacks if g >= 0]
+            if viable:
+                best = max(viable, key=lambda x: x[2])
+                return best[0]
+            # Weak-target players attack anyway
+            if prof["attack_weak_targets"]:
+                return leader_attacks[0][0]
+
+        # Fallback to any viable character attack
+        if char_attacks:
+            viable = [(i, a, g) for i, a, g in char_attacks if g >= 0]
+            if viable:
+                return viable[0][0]
+            if prof["attack_weak_targets"]:
+                return char_attacks[0][0]
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Internal: lethal check
+    # ------------------------------------------------------------------
 
     def _check_lethal(
         self,
@@ -452,332 +921,29 @@ class MaxStressAgent:
         legal_actions: list[GameAction],
         player: PlayerState,
         opponent: PlayerState,
-    ) -> list[int] | None:
-        """Check if we can kill opponent this turn. Returns action index sequence or None."""
-        life_to_clear = len(opponent.life) + 1  # life cards + final blow
-        estimated_counters = self._estimate_opponent_counters(state)
-        opp_leader_power = opponent.leader.effective_power
-
-        # Collect active attackers and their potential
-        active_attackers: list[tuple[GameCard, bool]] = []  # (card, is_leader)
-        if player.leader.state == CardState.ACTIVE:
-            active_attackers.append((player.leader, True))
-        for c in player.characters:
-            if c.state == CardState.ACTIVE:
-                active_attackers.append((c, False))
-
-        if not active_attackers:
-            return None
-
-        # Count how many successful hits we can land on leader
-        # Each hit needs effective_power >= opp_leader_power
-        don_available = player.don_field
-        hits = 0
-        don_needed: list[tuple[GameCard, int]] = []  # (card, don to attach)
-
-        for card, _is_leader in active_attackers:
-            gap = opp_leader_power - card.effective_power
-            if gap <= 0:
-                hits += 1
-                # Check double attack
-                if any(kw.lower() == "double attack" for kw in card.keywords):
-                    hits += 1
-                don_needed.append((card, 0))
-            elif gap <= don_available * 1000:
-                don_count = (gap + 999) // 1000  # Ceil division
-                don_available -= don_count
-                hits += 1
-                if any(kw.lower() == "double attack" for kw in card.keywords):
-                    hits += 1
-                don_needed.append((card, don_count))
-
-        # Account for counters reducing our hits
-        # Rough: each 1000 counter can negate one marginal hit
-        counter_negated_hits = estimated_counters // max(opp_leader_power, 1000)
-        effective_hits = hits - counter_negated_hits
-
-        if effective_hits < life_to_clear:
-            return None
-
-        # Build action sequence: DON attachments first, then attacks
-        sequence: list[int] = []
-
-        # Attach DON
-        for card, don_count in don_needed:
-            for _ in range(don_count):
-                for j, a in enumerate(legal_actions):
-                    if (
-                        a.action_type == ActionType.ATTACH_DON
-                        and a.target_id == card.instance_id
-                        and j not in sequence
-                    ):
-                        sequence.append(j)
-                        break
-
-        # Attack leader with strongest first (to overwhelm counters)
-        attack_indices: list[tuple[int, int]] = []  # (index, power)
-        for j, a in enumerate(legal_actions):
-            if (
-                a.action_type == ActionType.ATTACK
-                and a.target_id == opponent.leader.instance_id
-            ):
-                # Find attacker power
-                src = player.find_card_on_field(a.source_id)
-                if src is None and a.source_id == player.leader.instance_id:
-                    src = player.leader
-                power = src.effective_power if src else 0
-                attack_indices.append((j, power))
-
-        # Sort by power descending (strongest attacks first to burn counters)
-        attack_indices.sort(key=lambda x: -x[1])
-        sequence.extend(idx for idx, _ in attack_indices)
-
-        return sequence if sequence else None
-
-    def _score_action(
-        self,
-        action: GameAction,
-        state: GameState,
-        player: PlayerState,
-        opponent: PlayerState,
-    ) -> float:
-        if action.action_type == ActionType.PLAY_CARD:
-            return self._score_play(action, player, opponent)
-        elif action.action_type == ActionType.ATTACH_DON:
-            return self._score_don(action, player, opponent)
-        elif action.action_type == ActionType.ATTACK:
-            return self._score_attack(action, state, player, opponent)
-        elif action.action_type == ActionType.PASS:
-            return 0.0
-        return 0.0
-
-    def _score_play(
-        self, action: GameAction, player: PlayerState, opponent: PlayerState
-    ) -> float:
-        card = player.find_card_in_hand(action.source_id)
-        if not card:
-            return 1.0
-
-        score = _keyword_score(card) + card.power / 1000.0
-
-        # Board need: bonus if we have fewer characters
-        if len(player.characters) < len(opponent.characters):
-            score += 3.0
-
-        # Blocker bonus when opponent has active attackers
-        active_opp = sum(
-            1 for c in opponent.characters if c.state == CardState.ACTIVE
-        )
-        if any(kw.lower() == "blocker" for kw in card.keywords) and active_opp > 0:
-            score += 2.0
-
-        # On-play effect bias: resolve effects before attacks
-        if _has_on_play_effect(card):
-            score += 1.0
-
-        # Resource waste penalty: playing this empties DON with better cards waiting
-        remaining_don = player.don_field - card.cost
-        if remaining_don == 0:
-            better_in_hand = any(
-                _keyword_score(c) > _keyword_score(card)
-                and c.cost <= player.don_field + 2
-                and c.instance_id != card.instance_id
-                for c in player.hand
-            )
-            if better_in_hand:
-                score -= 3.0
-
-        return score
-
-    def _score_don(
-        self, action: GameAction, player: PlayerState, opponent: PlayerState
-    ) -> float:
-        target = player.find_card_on_field(action.target_id)
-        if target is None and action.target_id == player.leader.instance_id:
-            target = player.leader
-        if target is None:
-            return 0.5
-
-        # Attached to active card that can attack = high value
-        if target.state == CardState.ACTIVE:
-            score = 4.0
-            # Would this enable a successful leader attack?
-            new_power = target.effective_power + 1000
-            if new_power >= opponent.leader.effective_power:
-                score += 2.0
-            # Would this enable KO of a rested opponent character?
-            for opp_card in opponent.characters:
-                if (
-                    opp_card.state == CardState.RESTED
-                    and new_power >= opp_card.effective_power
-                    and target.effective_power < opp_card.effective_power
-                ):
-                    score += 3.0
-                    break
-            return score
-
-        # Target is rested — low value
-        return 0.5
-
-    def _score_attack(
-        self,
-        action: GameAction,
-        state: GameState,
-        player: PlayerState,
-        opponent: PlayerState,
-    ) -> float:
-        # Find attacker
-        attacker = player.find_card_on_field(action.source_id)
-        if attacker is None and action.source_id == player.leader.instance_id:
-            attacker = player.leader
-        if attacker is None:
-            return 0.0
-
-        # Find target
-        target = opponent.find_card_on_field(action.target_id)
-        if target is None and action.target_id == opponent.leader.instance_id:
-            target = opponent.leader
-        if target is None:
-            return 0.0
-
-        # Attacking a character
-        if target.card_type != "LEADER":
-            if attacker.effective_power >= target.effective_power:
-                # Guaranteed KO — score by target value
-                return 10.0 + _keyword_score(target) + target.effective_power / 1000.0
-            else:
-                return -1.0  # Attack will fail, waste of action
-
-        # Attacking leader
+    ) -> int | None:
         opp_life = len(opponent.life)
-        if opp_life == 0:
-            # This is the killing blow!
-            if attacker.effective_power >= target.effective_power:
-                return 100.0
-            return -1.0
-
-        score = 1.0
-
-        # Life pressure: more urgent as life drops
-        score += 5.0 * (1.0 / max(opp_life, 1))
-
-        # Power advantage check
-        power_gap = attacker.effective_power - target.effective_power
-        if power_gap < 0:
-            return -1.0  # Attack will fail without counter from opponent
-
-        # Counter awareness: penalty if opponent likely counters
-        est_counters = self._estimate_opponent_counters(state)
-        if est_counters >= power_gap + 1000:
-            score -= 2.0
-
-        # Bait bonus: weakest attacker goes first to draw out counters
-        active_powers = []
-        if player.leader.state == CardState.ACTIVE:
-            active_powers.append(player.leader.effective_power)
-        for c in player.characters:
-            if c.state == CardState.ACTIVE:
-                active_powers.append(c.effective_power)
-
-        if (
-            len(active_powers) > 1
-            and attacker.effective_power == min(active_powers)
-        ):
-            score += 3.0  # Bait: sacrifice weak attack to drain counters
-
-        return score
-
-    # --- Blocker decision ---
-
-    async def choose_blockers(
-        self,
-        state: GameState,
-        blockers: list[GameCard],
-        attacker: GameCard,
-        target: GameCard,
-    ) -> GameCard | None:
-        if not blockers:
+        if opp_life > 2:
             return None
 
-        defender = state.defending_player
-        life = len(defender.life)
+        viable: list[tuple[int, int]] = []
+        for i, a in enumerate(legal_actions):
+            if a.action_type != ActionType.ATTACK:
+                continue
+            if a.target_id != opponent.leader.instance_id:
+                continue
+            attacker = _find_card(a.source_id, player)
+            if attacker and attacker.effective_power >= opponent.leader.effective_power:
+                viable.append((i, attacker.effective_power))
 
-        # If attack will fail anyway, don't block
-        if attacker.effective_power < target.effective_power:
-            return None
+        if len(viable) > opp_life:
+            viable.sort(key=lambda x: -x[1])
+            return viable[0][0]
+        return None
 
-        # Sort blockers by value (lowest first = best to sacrifice)
-        sorted_blockers = sorted(blockers, key=lambda b: _keyword_score(b) + b.effective_power / 1000.0)
-
-        if target.card_type == "LEADER":
-            if life <= 1:
-                # Facing lethal — always block
-                return sorted_blockers[0]
-            if life <= 2:
-                # Block with cheap blocker
-                if _keyword_score(sorted_blockers[0]) < 4.0:
-                    return sorted_blockers[0]
-                return None
-            if life >= 4:
-                # Life is a resource — don't block, take the hit
-                return None
-            # life == 3: block only if blocker survives
-            for b in sorted_blockers:
-                if b.effective_power >= attacker.effective_power:
-                    return b
-            return None
-        else:
-            # Character attack — protect high-value targets
-            target_value = _keyword_score(target) + target.effective_power / 1000.0
-            blocker_value = _keyword_score(sorted_blockers[0]) + sorted_blockers[0].effective_power / 1000.0
-            if target_value > blocker_value + 2.0:
-                return sorted_blockers[0]
-            return None
-
-    # --- Counter decision ---
-
-    async def choose_counters(
-        self,
-        state: GameState,
-        hand: list[GameCard],
-        attacker: GameCard,
-        target: GameCard,
-        power_gap: int,
-    ) -> list[GameCard]:
-        if power_gap <= 0:
-            return []
-
-        defender = state.defending_player
-        life = len(defender.life)
-        counter_cards = [c for c in hand if c.counter > 0]
-
-        if not counter_cards:
-            return []
-
-        if target.card_type == "LEADER":
-            if life >= 4:
-                # Plenty of life — take the hit, keep hand resources
-                return []
-            if life <= 1:
-                # Must counter — facing lethal
-                return self._select_counters(counter_cards, power_gap, defender)
-            if life <= 2:
-                # Counter with low-utility cards only
-                low_utility = [
-                    c for c in counter_cards
-                    if _card_utility(c, defender) < 3.0
-                ]
-                if low_utility:
-                    return self._select_counters(low_utility, power_gap, defender)
-                return []
-            # life == 3: counter if cheap
-            return self._select_counters(counter_cards, power_gap, defender, max_cards=2)
-        else:
-            # Character attack — counter to protect high-value targets
-            target_value = _keyword_score(target) + target.effective_power / 1000.0
-            if target_value >= 6.0:
-                return self._select_counters(counter_cards, power_gap, defender)
-            return []
+    # ------------------------------------------------------------------
+    # Internal: counter selection
+    # ------------------------------------------------------------------
 
     def _select_counters(
         self,
@@ -786,7 +952,6 @@ class MaxStressAgent:
         player: PlayerState,
         max_cards: int = 99,
     ) -> list[GameCard]:
-        """Pick minimum counters to meet power_gap, discarding lowest utility first."""
         sorted_cards = sorted(
             counter_cards,
             key=lambda c: _card_utility(c, player),
@@ -800,5 +965,219 @@ class MaxStressAgent:
             total += card.counter
             if total >= power_gap:
                 return selected
-        # Can't meet gap — don't waste partial counters
-        return []
+        return [] if total < power_gap else selected
+
+
+# ===================================================================
+# LLMAgent — Claude-powered, for Real mode
+# ===================================================================
+
+LLM_PROMPTS: dict[str, str] = {
+    "player_new": (
+        "You are simulating a NEW OPTCG player. You know the basic rules but make "
+        "common beginner mistakes:\n"
+        "- You sometimes attack even when your power is lower (bad habit)\n"
+        "- You often play all affordable cards immediately without planning\n"
+        "- You counter almost every attack even at high life\n"
+        "- You forget to attach DON!! before attacking sometimes\n\n"
+        "Play naturally as a beginner would — not perfectly, but not randomly.\n"
+    ),
+    "player_amateur": (
+        "You are simulating an AMATEUR OPTCG player with decent competitive experience.\n"
+        "- You understand when to take life vs counter\n"
+        "- You attach DON!! to attackers before attacking for power advantage\n"
+        "- You prefer to KO rested characters when profitable\n"
+        "- You sometimes miss optimal plays but never make obvious blunders\n\n"
+        "Play at a solid intermediate level.\n"
+    ),
+    "player_pro": (
+        "You are simulating a PROFESSIONAL OPTCG tournament player.\n"
+        "- Calculate every decision for maximum expected value\n"
+        "- Manage DON!! resources perfectly: boost attackers, reserve for plays\n"
+        "- Take early life on purpose (life is a resource)\n"
+        "- Recognize lethal opportunities and set up multi-turn kill sequences\n"
+        "- Counter only when EV-positive; use minimum counter cards\n\n"
+        "Play at the highest competitive level.\n"
+    ),
+    "bot_easy": (
+        "You are a casual OPTCG bot. Play simply and predictably:\n"
+        "- Play the highest-cost affordable card each turn\n"
+        "- Attack the opponent's leader when you can\n"
+        "- Counter most attacks to protect your life\n"
+        "- Don't overthink — simple plays are fine\n\n"
+        "Be a gentle opponent for beginners.\n"
+    ),
+    "bot_medium": (
+        "You are a competitive OPTCG bot with strong fundamentals:\n"
+        "- Develop board efficiently before attacking\n"
+        "- Always attach DON!! to attackers before attacking\n"
+        "- Only attack when you have power advantage\n"
+        "- Use counter cards wisely — take early life, defend late game\n"
+        "- KO high-value rested characters when possible\n\n"
+        "Play optimally but not unfairly.\n"
+    ),
+    "bot_hard": (
+        "You are an EXPERT OPTCG bot that plays near-perfectly:\n"
+        "- Calculate exact lethal sequences when possible\n"
+        "- Optimize DON!! distribution across attackers for maximum damage\n"
+        "- Bait counters with weak attacks before committing strong ones\n"
+        "- Never waste attacks on targets you can't beat\n"
+        "- Manage hand resources and board state for long-term advantage\n\n"
+        "Play at the absolute highest level. Show no mercy.\n"
+    ),
+}
+
+LLM_BASE_RULES = """Game rules:
+- Play characters/events by paying DON!! cost
+- Attach DON!! to boost power (+1000 each) — ONLY to ACTIVE cards, BEFORE attacking
+- Attack opponent's Leader to remove Life, attack rested characters to KO them
+- NEVER attack if your power < target's power (guaranteed failure)
+- Characters enter RESTED when played (can't attack until next turn, unless Rush)
+- Win by removing all opponent Life then hitting their Leader one more time
+
+Respond with ONLY valid JSON: {"action_index": N}
+No explanation, no extra text."""
+
+
+class LLMAgent:
+    """LLM-powered agent for Real mode simulation.
+
+    Parameters
+    ----------
+    role : "player" | "bot"
+    level : "new" | "amateur" | "pro"  (player)
+            "easy" | "medium" | "hard" (bot)
+    model : Claude model ID
+    """
+
+    def __init__(
+        self,
+        role: str = "player",
+        level: str = "amateur",
+        model: str = HAIKU_MODEL,
+    ) -> None:
+        self.client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+        self.model = model
+        self.role = role
+        self.level = level
+        prompt_key = f"{role}_{level}"
+        self._system = (
+            LLM_PROMPTS.get(prompt_key, LLM_PROMPTS["bot_medium"])
+            + "\n"
+            + LLM_BASE_RULES
+        )
+        self._fallback = HeuristicAgent(role=role, level=level)
+
+    async def choose_main_action(
+        self, state: GameState, legal_actions: list[GameAction]
+    ) -> int:
+        if len(legal_actions) <= 1:
+            return 0
+
+        prompt = self._build_prompt(state, legal_actions)
+        choice = await self._ask_llm(prompt, len(legal_actions))
+        action = legal_actions[choice]
+
+        # Validate LLM choice — reject obviously bad decisions
+        player = state.active_player
+        opponent = state.defending_player
+
+        if action.action_type == ActionType.ATTACK:
+            attacker = _find_card(action.source_id, player)
+            target = _find_card(action.target_id, opponent)
+            if (
+                attacker
+                and target
+                and attacker.effective_power < target.effective_power
+            ):
+                return await self._fallback.choose_main_action(state, legal_actions)
+
+        if action.action_type == ActionType.ATTACH_DON:
+            target = _find_card(action.target_id, player)
+            if target and target.state == CardState.RESTED:
+                return await self._fallback.choose_main_action(state, legal_actions)
+
+        return choice
+
+    async def choose_blockers(
+        self,
+        state: GameState,
+        blockers: list[GameCard],
+        attacker: GameCard,
+        target: GameCard,
+    ) -> GameCard | None:
+        if not blockers:
+            return None
+        # Delegate to heuristic for simplicity
+        return await self._fallback.choose_blockers(state, blockers, attacker, target)
+
+    async def choose_counters(
+        self,
+        state: GameState,
+        hand: list[GameCard],
+        attacker: GameCard,
+        target: GameCard,
+        power_gap: int,
+    ) -> list[GameCard]:
+        # Delegate to heuristic
+        return await self._fallback.choose_counters(
+            state, hand, attacker, target, power_gap
+        )
+
+    def _build_prompt(self, state: GameState, legal_actions: list[GameAction]) -> str:
+        player = state.active_player
+        opponent = state.defending_player
+
+        lines = [
+            f"Turn {state.turn} | Your life: {len(player.life)} | Opp life: {len(opponent.life)} | DON: {player.don_field}",
+            f"Hand ({len(player.hand)}):",
+        ]
+        for card in player.hand:
+            kw = f" [{', '.join(card.keywords)}]" if card.keywords else ""
+            lines.append(f"  {card.name} (Cost:{card.cost} P:{card.power}{kw})")
+
+        lines.append("Your field:")
+        lines.append(
+            f"  Leader: {player.leader.name} P:{player.leader.effective_power} "
+            f"{'ACTIVE' if player.leader.state == CardState.ACTIVE else 'RESTED'}"
+        )
+        for card in player.field:
+            status = "ACTIVE" if card.state == CardState.ACTIVE else "RESTED"
+            lines.append(f"  {card.name} P:{card.effective_power} {status}")
+
+        lines.append("Opp field:")
+        lines.append(
+            f"  Leader: {opponent.leader.name} P:{opponent.leader.effective_power}"
+        )
+        for card in opponent.field:
+            status = "ACTIVE" if card.state == CardState.ACTIVE else "RESTED"
+            blocker = " [Blocker]" if "Blocker" in card.keywords else ""
+            lines.append(f"  {card.name} P:{card.effective_power} {status}{blocker}")
+
+        lines.append("Legal actions:")
+        for i, a in enumerate(legal_actions):
+            lines.append(f"  [{i}] {a.description}")
+
+        return "\n".join(lines)
+
+    async def _ask_llm(self, prompt: str, num_options: int) -> int:
+        try:
+            response = await self.client.messages.create(
+                model=self.model,
+                system=self._system,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=50,
+            )
+            block = response.content[0]
+            if not isinstance(block, anthropic.types.TextBlock):
+                return 0
+            text = block.text.strip()
+            data = json.loads(text)
+            idx = int(data.get("action_index", 0))
+            return max(0, min(idx, num_options - 1))
+        except (json.JSONDecodeError, KeyError, IndexError, ValueError) as e:
+            logger.debug(f"LLM parse error: {e}")
+            return 0
+        except Exception as e:
+            logger.warning(f"LLM call failed: {e}")
+            return 0
