@@ -764,6 +764,7 @@ async def _qc_review(
             model="claude-sonnet-4-20250514",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=2048,
+            timeout=90,
         )
 
         raw_text = response.content[0].text.strip()

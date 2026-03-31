@@ -64,6 +64,7 @@ class ClaudeProvider:
             messages=messages,
             tools=anthropic_tools,
             max_tokens=4096,
+            timeout=90,
         )
 
         content = []
