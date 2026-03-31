@@ -143,6 +143,19 @@ def validate_deck(leader: dict, cards: list[dict]) -> ValidationReport:
         report.add(CheckResult("NO_LEADER_IN_DECK", "FAIL", f"{len(leaders_in_deck)} LEADER cards found in deck", {"leaders": [c["id"] for c in leaders_in_deck]}))
         report.is_legal = False
 
+    # 6. BANNED_CARDS
+    banned_in_deck = [c for c in cards if c.get("banned")]
+    if not banned_in_deck:
+        report.add(CheckResult("BANNED_CARDS", "PASS", "No banned cards in deck"))
+    else:
+        names = [f"{c['id']} ({c.get('name', '')})" for c in banned_in_deck]
+        report.add(CheckResult(
+            "BANNED_CARDS", "FAIL",
+            f"Banned cards found: {', '.join(names)}",
+            {"banned_ids": [c["id"] for c in banned_in_deck]},
+        ))
+        report.is_legal = False
+
     # === QUALITY CHECKS (WARNING = legal but weak) ===
 
     # 6. COST_CURVE

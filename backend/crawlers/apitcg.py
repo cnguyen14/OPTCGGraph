@@ -14,6 +14,12 @@ logger = logging.getLogger(__name__)
 CACHE_DIR = CRAWL_CACHE_DIR / "apitcg"
 
 
+def _get_api_key() -> str:
+    """Get ApiTCG API key (runtime override > env var)."""
+    from backend.api.routes_settings import get_active_api_key
+    return get_active_api_key("apitcg") or APITCG_API_KEY
+
+
 async def crawl_apitcg() -> list[dict]:
     """Crawl all cards from apitcg.com. Returns list of normalized card dicts."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -59,7 +65,7 @@ async def _fetch_page(client: httpx.AsyncClient, page: int, retries: int = 3) ->
             resp = await client.get(
                 APITCG_BASE_URL,
                 params={"page": page},
-                headers={"Authorization": f"Bearer {APITCG_API_KEY}"},
+                headers={"Authorization": f"Bearer {_get_api_key()}"},
             )
             if resp.status_code == 200:
                 return resp.json()

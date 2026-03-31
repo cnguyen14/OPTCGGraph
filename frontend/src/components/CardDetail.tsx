@@ -31,6 +31,12 @@ export default function CardDetail({ card, onClose }: Props) {
             &times;
           </button>
 
+          {card.banned && (
+            <div className="mb-3 px-3 py-2 rounded-lg bg-red-950/50 border border-red-700/40 text-xs text-red-400 font-medium">
+              BANNED — This card is not legal for tournament play
+            </div>
+          )}
+
           <h2 className="text-xl font-bold mb-1 pr-8">{card.name}</h2>
           <p className="text-sm text-gray-400 mb-3">{card.id} &middot; {card.rarity} &middot; {card.card_type}</p>
 

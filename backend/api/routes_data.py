@@ -1,10 +1,13 @@
 """Data management API endpoints."""
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, BackgroundTasks, Depends
 from neo4j import AsyncDriver
 
 from backend.graph.connection import get_driver
-from backend.graph.queries import get_db_stats
+from backend.graph.queries import get_db_stats, get_banned_cards
+from backend.storage.redis_client import get_redis
 
 router = APIRouter(prefix="/api/data", tags=["data"])
 
@@ -16,7 +19,6 @@ async def _get_driver() -> AsyncDriver:
 @router.post("/crawl")
 async def trigger_crawl(background_tasks: BackgroundTasks):
     """Trigger a full crawl pipeline in the background."""
-    # Import here to avoid circular imports
     from backend.crawlers.apitcg import crawl_apitcg
     from backend.crawlers.optcgapi import crawl_optcgapi
     from backend.crawlers.merge import merge_cards
@@ -31,7 +33,16 @@ async def trigger_crawl(background_tasks: BackgroundTasks):
         merged = merge_cards(apitcg_cards, optcgapi_cards)
         driver = await gd()
         await create_indexes(driver)
-        await load_cards(driver, merged)
+        count = await load_cards(driver, merged)
+
+        # Track crawl metadata in Redis
+        r = await get_redis()
+        now = datetime.now(timezone.utc).isoformat()
+        await r.set("crawl:apitcg:last_run", now)
+        await r.set("crawl:apitcg:count", str(len(apitcg_cards)))
+        await r.set("crawl:optcgapi:last_run", now)
+        await r.set("crawl:optcgapi:count", str(len(optcgapi_cards)))
+        await r.set("crawl:cards:total", str(count))
 
     background_tasks.add_task(_run_crawl)
     return {"status": "crawl_started"}
@@ -46,6 +57,7 @@ async def update_prices(background_tasks: BackgroundTasks):
     async def _update():
         cards = await crawl_optcgapi()
         driver = await gd()
+        count = 0
         async with driver.session() as session:
             for card in cards:
                 if card.get("market_price") is not None:
@@ -59,9 +71,65 @@ async def update_prices(background_tasks: BackgroundTasks):
                         market_price=card.get("market_price"),
                         inventory_price=card.get("inventory_price"),
                     )
+                    count += 1
+
+        # Track in Redis
+        r = await get_redis()
+        now = datetime.now(timezone.utc).isoformat()
+        await r.set("crawl:optcgapi:last_run", now)
+        await r.set("crawl:optcgapi:count", str(count))
 
     background_tasks.add_task(_update)
     return {"status": "price_update_started"}
+
+
+@router.post("/crawl-banned")
+async def crawl_banned(background_tasks: BackgroundTasks):
+    """Crawl official banned card list and apply to Neo4j."""
+    from backend.crawlers.banned_cards import crawl_banned_cards
+    from backend.graph.builder import apply_ban_list
+    from backend.graph.connection import get_driver as gd
+
+    async def _run():
+        banned = await crawl_banned_cards()
+        driver = await gd()
+        count = await apply_ban_list(driver, banned)
+
+        # Track in Redis
+        r = await get_redis()
+        now = datetime.now(timezone.utc).isoformat()
+        await r.set("crawl:banned:last_run", now)
+        await r.set("crawl:banned:count", str(count))
+
+    background_tasks.add_task(_run)
+    return {"status": "ban_crawl_started"}
+
+
+@router.get("/crawl-status")
+async def crawl_status():
+    """Get last crawl timestamps and counts for all sources."""
+    r = await get_redis()
+
+    async def _source_status(key: str) -> dict:
+        last_run = await r.get(f"crawl:{key}:last_run")
+        count = await r.get(f"crawl:{key}:count")
+        return {
+            "last_run": last_run,
+            "count": int(count) if count else 0,
+        }
+
+    return {
+        "apitcg": await _source_status("apitcg"),
+        "optcgapi": await _source_status("optcgapi"),
+        "limitlesstcg": await _source_status("limitlesstcg"),
+        "banned": await _source_status("banned"),
+    }
+
+
+@router.get("/banned-cards")
+async def banned_cards(driver: AsyncDriver = Depends(_get_driver)):
+    """Get list of all banned cards."""
+    return await get_banned_cards(driver)
 
 
 @router.get("/stats")

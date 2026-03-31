@@ -44,6 +44,8 @@ async def execute_tool(tool_name: str, tool_input: dict, driver: AsyncDriver) ->
             return await _recommend_meta_cards(driver, tool_input)
         elif tool_name == "suggest_card_swap":
             return await _suggest_card_swap(driver, tool_input)
+        elif tool_name == "get_banned_cards":
+            return await _get_banned_cards(driver)
         else:
             return {"error": f"Unknown tool: {tool_name}"}
     except Exception as e:
@@ -406,4 +408,15 @@ async def _suggest_card_swap(driver: AsyncDriver, params: dict) -> dict:
         "add_id": incoming.get("id", ""),
         "add_name": incoming.get("name", ""),
         "reason": "Swap recommended: lower tournament value card replaced",
+    }
+
+
+async def _get_banned_cards(driver: AsyncDriver) -> dict:
+    """Get the official banned card list from the knowledge graph."""
+    from backend.graph.queries import get_banned_cards
+    banned = await get_banned_cards(driver)
+    return {
+        "banned_cards": banned,
+        "total": len(banned),
+        "note": "These cards are banned from official tournament play. NEVER include them in any deck.",
     }

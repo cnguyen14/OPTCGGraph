@@ -9,6 +9,7 @@ from backend.agent.providers import LLMProvider, LLMResponse
 from backend.agent.tools import AGENT_TOOLS
 from backend.agent.tool_executor import execute_tool
 from backend.ai.game_rules import build_system_prompt
+from backend.graph.queries import get_banned_cards
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,9 @@ async def run_agent(
     messages = list(conversation_history or [])
     messages.append({"role": "user", "content": user_message})
 
-    system = build_system_prompt(current_deck, selected_leader)
+    # Fetch banned cards to inject into system prompt
+    banned_cards = await get_banned_cards(driver)
+    system = await build_system_prompt(current_deck, selected_leader, banned_cards)
 
     # Use tools based on provider tier (Tier 1-2 get tools, Tier 3 chat-only)
     tools = AGENT_TOOLS if provider.tier <= 2 else []
@@ -138,7 +141,8 @@ async def run_agent_streaming(
     messages = list(conversation_history or [])
     messages.append({"role": "user", "content": user_message})
 
-    system = build_system_prompt(current_deck, selected_leader)
+    banned_cards = await get_banned_cards(driver)
+    system = await build_system_prompt(current_deck, selected_leader, banned_cards)
     tools = AGENT_TOOLS if provider.tier <= 2 else []
 
     all_tool_calls: list[dict] = []

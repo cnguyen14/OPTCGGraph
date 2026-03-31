@@ -37,9 +37,11 @@ async def chat(req: ChatRequest, driver: AsyncDriver = Depends(_get_driver)):
             "total_cost": len(req.deck_card_ids),
         }
 
-    # Get provider from session config
+    # Get provider from session config, with runtime API key support
+    from backend.api.routes_settings import get_active_api_key
     config = session.model_config
-    provider = get_provider(config["provider"], config["model"])
+    api_key = get_active_api_key(config["provider"])
+    provider = get_provider(config["provider"], config["model"], api_key=api_key or None)
 
     # Create queue for real-time event streaming
     queue: asyncio.Queue = asyncio.Queue()
@@ -89,8 +91,10 @@ async def chat_sync(req: ChatRequest, driver: AsyncDriver = Depends(_get_driver)
             "total_cost": len(req.deck_card_ids),
         }
 
+    from backend.api.routes_settings import get_active_api_key
     config = session.model_config
-    provider = get_provider(config["provider"], config["model"])
+    api_key = get_active_api_key(config["provider"])
+    provider = get_provider(config["provider"], config["model"], api_key=api_key or None)
 
     result = await run_agent(
         user_message=req.message,

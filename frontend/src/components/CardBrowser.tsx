@@ -329,8 +329,16 @@ export default function CardBrowser({ onCardSelect }: CardBrowserProps) {
               <div
                 key={card.id}
                 onClick={() => onCardSelect(card)}
-                className="bg-gray-800 rounded-lg overflow-hidden cursor-pointer transition-transform hover:scale-105 hover:ring-2 hover:ring-blue-500"
+                className="bg-gray-800 rounded-lg overflow-hidden cursor-pointer transition-transform hover:scale-105 hover:ring-2 hover:ring-blue-500 relative"
               >
+                {card.banned && (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+                    <div className="absolute inset-0 bg-red-900/30" />
+                    <span className="relative -rotate-25 text-lg font-black text-red-500 tracking-widest uppercase px-3 py-1 border-3 border-red-500 rounded bg-black/60">
+                      BANNED
+                    </span>
+                  </div>
+                )}
                 {!imgErrors.has(card.id) && card.image_small ? (
                   <img
                     src={card.image_small}
@@ -396,27 +404,41 @@ export default function CardBrowser({ onCardSelect }: CardBrowserProps) {
                     className="border-b border-gray-800/50 hover:bg-gray-800 cursor-pointer transition-colors"
                   >
                     <td className="py-1.5 px-2">
-                      {!imgErrors.has(card.id) && card.image_small ? (
-                        <img
-                          src={card.image_small}
-                          alt={card.name}
-                          className="w-10 h-14 object-cover rounded"
-                          loading="lazy"
-                          onError={() => handleImgError(card.id)}
-                        />
-                      ) : (
-                        <div
-                          className="w-10 h-14 rounded flex items-center justify-center"
-                          style={{ backgroundColor: COLOR_MAP[splitColors(card.colors?.length ? card.colors : card.color ? [card.color] : [])[0]] ?? '#374151' }}
-                        >
-                          <span className="text-white text-[8px] text-center leading-tight">
-                            {card.code}
-                          </span>
-                        </div>
-                      )}
+                      <div className="relative w-10 h-14">
+                        {!imgErrors.has(card.id) && card.image_small ? (
+                          <img
+                            src={card.image_small}
+                            alt={card.name}
+                            className="w-10 h-14 object-cover rounded"
+                            loading="lazy"
+                            onError={() => handleImgError(card.id)}
+                          />
+                        ) : (
+                          <div
+                            className="w-10 h-14 rounded flex items-center justify-center"
+                            style={{ backgroundColor: COLOR_MAP[splitColors(card.colors?.length ? card.colors : card.color ? [card.color] : [])[0]] ?? '#374151' }}
+                          >
+                            <span className="text-white text-[8px] text-center leading-tight">
+                              {card.code}
+                            </span>
+                          </div>
+                        )}
+                        {card.banned && (
+                          <div className="absolute inset-0 bg-red-900/40 rounded flex items-center justify-center">
+                            <span className="text-[6px] font-black text-red-400 uppercase tracking-wider">BAN</span>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="py-1.5 px-2 text-gray-400 font-mono text-xs">{card.code}</td>
-                    <td className="py-1.5 px-2 text-white">{card.name}</td>
+                    <td className="py-1.5 px-2 text-white">
+                      {card.name}
+                      {card.banned && (
+                        <span className="ml-2 px-1.5 py-0.5 text-[10px] font-black bg-red-700 text-white rounded uppercase tracking-wider border border-red-500">
+                          BANNED
+                        </span>
+                      )}
+                    </td>
                     <td className="py-1.5 px-2 text-gray-300">{card.card_type}</td>
                     <td className="py-1.5 px-2 text-gray-300">{card.cost ?? '-'}</td>
                     <td className="py-1.5 px-2 text-gray-300">{card.power ?? '-'}</td>

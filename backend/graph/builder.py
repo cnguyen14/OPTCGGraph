@@ -351,3 +351,41 @@ async def compute_card_meta_stats(driver: AsyncDriver) -> int:
 
     logger.info(f"Computed meta stats for {pick_updated} cards")
     return pick_updated
+
+
+async def apply_ban_list(driver: AsyncDriver, banned_cards: list[dict]) -> int:
+    """Apply banned card list to Neo4j. Sets banned=true on matching Card nodes.
+
+    Args:
+        driver: Neo4j async driver
+        banned_cards: List of dicts with card_id, status, reason
+
+    Returns:
+        Number of cards marked as banned.
+    """
+    async with driver.session() as session:
+        # Clear all existing bans
+        await session.run(
+            "MATCH (c:Card) WHERE c.banned = true SET c.banned = false, c.ban_reason = ''"
+        )
+
+        # Apply new bans
+        marked = 0
+        for entry in banned_cards:
+            card_id = entry.get("card_id", "")
+            reason = entry.get("reason", "Officially banned by Bandai")
+            result = await session.run(
+                """
+                MATCH (c:Card {id: $id})
+                SET c.banned = true, c.ban_reason = $reason
+                RETURN c.id AS id
+                """,
+                id=card_id,
+                reason=reason,
+            )
+            record = await result.single()
+            if record:
+                marked += 1
+
+    logger.info(f"Marked {marked} cards as banned (out of {len(banned_cards)} in list)")
+    return marked

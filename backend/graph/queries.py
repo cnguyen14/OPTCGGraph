@@ -125,8 +125,8 @@ async def search_cards(
     params: dict = {"limit": limit, "offset": offset}
 
     if keyword:
-        conditions.append("(c.id CONTAINS $keyword OR c.name CONTAINS $keyword OR c.ability CONTAINS $keyword)")
-        params["keyword"] = keyword
+        conditions.append("(toLower(c.id) CONTAINS $keyword OR toLower(c.name) CONTAINS $keyword OR toLower(c.ability) CONTAINS $keyword)")
+        params["keyword"] = keyword.lower()
     if cost_min is not None:
         conditions.append("c.cost >= $cost_min")
         params["cost_min"] = cost_min
@@ -262,7 +262,7 @@ async def get_deck_synergies(driver: AsyncDriver, card_ids: list[str]) -> dict:
 
 
 async def get_db_stats(driver: AsyncDriver) -> dict:
-    """Get database statistics."""
+    """Get database statistics including node and edge counts."""
     async with driver.session() as session:
         result = await session.run(
             """
@@ -277,4 +277,35 @@ async def get_db_stats(driver: AsyncDriver) -> dict:
         record = await result.single()
         if record is None:
             return {}
-        return dict(record)
+
+        stats = dict(record)
+
+        # Edge counts — separate queries to avoid OPTIONAL MATCH chaining issues
+        edge_result = await session.run(
+            """
+            CALL { MATCH ()-[s:SYNERGY]-() RETURN count(s)/2 AS synergy_edges }
+            CALL { MATCH ()-[m:MECHANICAL_SYNERGY]-() RETURN count(m)/2 AS mech_synergy_edges }
+            CALL { MATCH ()-[ci:CURVES_INTO]-() RETURN count(ci) AS curves_into_edges }
+            CALL { MATCH (c:Card) WHERE c.banned = true RETURN count(c) AS banned_cards }
+            RETURN synergy_edges, mech_synergy_edges, curves_into_edges, banned_cards
+            """
+        )
+        edge_record = await edge_result.single()
+        if edge_record:
+            stats.update(dict(edge_record))
+
+        return stats
+
+
+async def get_banned_cards(driver: AsyncDriver) -> list[dict]:
+    """Get all banned cards from the database."""
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (c:Card) WHERE c.banned = true
+            RETURN c.id AS id, c.name AS name, c.ban_reason AS ban_reason,
+                   c.image_small AS image_small, c.card_type AS card_type
+            ORDER BY c.id
+            """
+        )
+        return [dict(r) async for r in result]

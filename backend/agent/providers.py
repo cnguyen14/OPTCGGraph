@@ -43,8 +43,8 @@ class LLMProvider(Protocol):
 class ClaudeProvider:
     """Direct Anthropic API — lowest latency, highest accuracy."""
 
-    def __init__(self, model: str = "claude-sonnet-4-20250514"):
-        self.client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    def __init__(self, model: str = "claude-sonnet-4-20250514", api_key: str | None = None):
+        self.client = anthropic.AsyncAnthropic(api_key=api_key or ANTHROPIC_API_KEY)
         self.model = model
 
     async def chat(self, system: str, messages: list[dict], tools: list[dict]) -> LLMResponse:
@@ -98,8 +98,8 @@ class OpenRouterProvider:
     TIER_1 = ["openai/gpt-4o", "google/gemini-pro", "anthropic/claude"]
     TIER_2 = ["google/gemini-flash", "meta-llama/llama-3.1-70b"]
 
-    def __init__(self, model: str = "openai/gpt-4o"):
-        self.api_key = OPENROUTER_API_KEY
+    def __init__(self, model: str = "openai/gpt-4o", api_key: str | None = None):
+        self.api_key = api_key or OPENROUTER_API_KEY
         self.model = model
         self._tier = self._detect_tier(model)
 
@@ -160,9 +160,13 @@ class OpenRouterProvider:
         return self.model
 
 
-def get_provider(provider_name: str = "claude", model: str | None = None) -> LLMProvider:
+def get_provider(
+    provider_name: str = "claude",
+    model: str | None = None,
+    api_key: str | None = None,
+) -> LLMProvider:
     """Factory to get the right LLM provider."""
     if provider_name == "claude":
-        return ClaudeProvider(model=model or "claude-sonnet-4-20250514")
+        return ClaudeProvider(model=model or "claude-sonnet-4-20250514", api_key=api_key)
     else:
-        return OpenRouterProvider(model=model or "openai/gpt-4o")
+        return OpenRouterProvider(model=model or "openai/gpt-4o", api_key=api_key)

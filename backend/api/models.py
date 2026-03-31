@@ -25,6 +25,8 @@ class CardResponse(BaseModel):
     families: list[str] = Field(default_factory=list)
     set_name: str = ""
     keywords: list[str] = Field(default_factory=list)
+    banned: bool = False
+    ban_reason: str = ""
 
 
 class SynergyPartner(BaseModel):
@@ -114,6 +116,10 @@ class StatsResponse(BaseModel):
     families: int = 0
     sets: int = 0
     keywords: int = 0
+    synergy_edges: int = 0
+    mech_synergy_edges: int = 0
+    curves_into_edges: int = 0
+    banned_cards: int = 0
 
 
 class DeckSynergyEdge(BaseModel):

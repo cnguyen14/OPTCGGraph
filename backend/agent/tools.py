@@ -180,6 +180,14 @@ AGENT_TOOLS = [
         },
     },
     {
+        "name": "get_banned_cards",
+        "description": "Get the official Bandai banned card list. Returns all cards currently banned from tournament play. ALWAYS check this before building a deck or recommending cards. Banned cards must NEVER be included in any deck.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
         "name": "suggest_card_swap",
         "description": "Suggest which card to remove from a full deck (50 cards) when adding a new card. Analyzes tournament pick rates, role coverage, and cost curve impact. Returns a 1-in-1-out recommendation.",
         "parameters": {

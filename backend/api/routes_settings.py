@@ -1,17 +1,30 @@
-"""Settings API endpoints."""
+"""Settings API endpoints — includes BYOK (Bring Your Own Key) support."""
 
+import logging
+import os
+
+import anthropic
+import httpx
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from backend.api.models import ModelSwitchRequest
-from backend.config import DEFAULT_PROVIDER, DEFAULT_MODEL
+from backend.config import DEFAULT_PROVIDER, DEFAULT_MODEL, NEO4J_URI, REDIS_URL, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, APITCG_API_KEY
+from backend.graph.connection import verify_connection
+from backend.storage.redis_client import verify_redis
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
-# In-memory settings (per-process, will be per-session later)
-_current_settings = {
+# In-memory settings (per-process)
+_current_settings: dict = {
     "provider": DEFAULT_PROVIDER,
     "model": DEFAULT_MODEL,
 }
+
+# Runtime API keys (overrides env vars when set via BYOK)
+_runtime_keys: dict[str, str] = {}
 
 AVAILABLE_MODELS = {
     "claude": [
@@ -27,6 +40,17 @@ AVAILABLE_MODELS = {
 }
 
 
+def get_active_api_key(provider: str) -> str:
+    """Get the active API key for a provider (runtime override > env var)."""
+    if provider == "claude":
+        return _runtime_keys.get("anthropic", "") or ANTHROPIC_API_KEY
+    elif provider == "openrouter":
+        return _runtime_keys.get("openrouter", "") or OPENROUTER_API_KEY
+    elif provider == "apitcg":
+        return _runtime_keys.get("apitcg", "") or APITCG_API_KEY
+    return ""
+
+
 @router.get("/models")
 async def get_models():
     return {
@@ -40,3 +64,203 @@ async def switch_model(req: ModelSwitchRequest):
     _current_settings["provider"] = req.provider
     _current_settings["model"] = req.model
     return {"status": "ok", "current": _current_settings}
+
+
+# --- BYOK Endpoints ---
+
+
+class ApiKeyRequest(BaseModel):
+    provider: str  # "anthropic" or "openrouter"
+    api_key: str
+
+
+class TestKeyRequest(BaseModel):
+    provider: str
+    api_key: str
+
+
+@router.put("/api-key")
+async def save_api_key(req: ApiKeyRequest):
+    """Save a runtime API key (overrides env var)."""
+    if req.provider not in ("anthropic", "openrouter", "apitcg"):
+        return {"status": "error", "message": f"Unknown provider: {req.provider}"}
+    _runtime_keys[req.provider] = req.api_key
+    logger.info(f"Runtime API key set for {req.provider}")
+    return {"status": "ok", "provider": req.provider}
+
+
+@router.delete("/api-key/{provider}")
+async def remove_api_key(provider: str):
+    """Remove a runtime API key (fall back to env var)."""
+    _runtime_keys.pop(provider, None)
+    return {"status": "ok", "provider": provider}
+
+
+@router.post("/test-key")
+async def test_api_key(req: TestKeyRequest):
+    """Test an API key by making a lightweight request to the provider."""
+    if req.provider == "anthropic":
+        return await _test_anthropic_key(req.api_key)
+    elif req.provider == "openrouter":
+        return await _test_openrouter_key(req.api_key)
+    elif req.provider == "apitcg":
+        return await _test_apitcg_key(req.api_key)
+    return {"status": "error", "message": f"Unknown provider: {req.provider}"}
+
+
+@router.get("/provider-models/{provider}")
+async def list_provider_models(provider: str, api_key: str | None = None):
+    """List available models from a provider using the given or stored API key."""
+    key = api_key or get_active_api_key(provider)
+    if not key:
+        return {"status": "error", "message": "No API key available", "models": []}
+
+    if provider == "claude":
+        return await _list_claude_models(key)
+    elif provider == "openrouter":
+        return await _list_openrouter_models(key)
+    return {"status": "error", "message": f"Unknown provider: {provider}", "models": []}
+
+
+# --- Provider-specific implementations ---
+
+
+async def _test_anthropic_key(api_key: str) -> dict:
+    """Test an Anthropic API key by listing models."""
+    try:
+        client = anthropic.AsyncAnthropic(api_key=api_key)
+        # Use a minimal API call to test the key
+        response = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1,
+            messages=[{"role": "user", "content": "hi"}],
+        )
+        return {"status": "ok", "message": "API key is valid"}
+    except anthropic.AuthenticationError:
+        return {"status": "error", "message": "Invalid API key"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+async def _test_apitcg_key(api_key: str) -> dict:
+    """Test an ApiTCG API key by fetching a single page."""
+    try:
+        from backend.config import APITCG_BASE_URL
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                APITCG_BASE_URL,
+                headers={"Authorization": f"Bearer {api_key}"},
+                params={"page": 1},
+            )
+            if resp.status_code == 401:
+                return {"status": "error", "message": "Invalid API key"}
+            if resp.status_code == 403:
+                return {"status": "error", "message": "Access denied"}
+            resp.raise_for_status()
+            return {"status": "ok", "message": "API key is valid"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+async def _test_openrouter_key(api_key: str) -> dict:
+    """Test an OpenRouter API key by fetching models."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                "https://openrouter.ai/api/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if resp.status_code == 401:
+                return {"status": "error", "message": "Invalid API key"}
+            resp.raise_for_status()
+            return {"status": "ok", "message": "API key is valid"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+async def _list_claude_models(api_key: str) -> dict:
+    """List available Claude models from Anthropic API."""
+    try:
+        client = anthropic.AsyncAnthropic(api_key=api_key)
+        models_page = await client.models.list(limit=100)
+        models = []
+        for m in models_page.data:
+            model_id = m.id
+            # Filter to usable chat models
+            if not any(prefix in model_id for prefix in ("claude-", )):
+                continue
+            # Determine tier and display name
+            display_name = m.display_name if hasattr(m, "display_name") else model_id
+            tier = 1 if any(k in model_id for k in ("opus", "sonnet")) else 2
+            models.append({"id": model_id, "name": display_name, "tier": tier})
+
+        # Sort: tier 1 first, then by name
+        models.sort(key=lambda x: (x["tier"], x["name"]))
+        return {"status": "ok", "models": models}
+    except anthropic.AuthenticationError:
+        return {"status": "error", "message": "Invalid API key", "models": []}
+    except Exception as e:
+        logger.error(f"Failed to list Claude models: {e}")
+        # Fallback to hardcoded list
+        return {"status": "ok", "models": AVAILABLE_MODELS["claude"]}
+
+
+async def _list_openrouter_models(api_key: str) -> dict:
+    """List available models from OpenRouter API."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                "https://openrouter.ai/api/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        models = []
+        # Filter to popular/useful models
+        POPULAR_PREFIXES = (
+            "openai/gpt-4", "openai/o",
+            "anthropic/claude", "google/gemini",
+            "meta-llama/llama", "mistralai/",
+            "deepseek/", "qwen/",
+        )
+        for m in data.get("data", []):
+            model_id = m.get("id", "")
+            if not any(model_id.startswith(p) for p in POPULAR_PREFIXES):
+                continue
+            display_name = m.get("name", model_id)
+            # Detect tier
+            tier = 1
+            if any(k in model_id for k in ("flash", "mini", "haiku", "llama-3.1-8b")):
+                tier = 2
+            models.append({"id": model_id, "name": display_name, "tier": tier})
+
+        models.sort(key=lambda x: (x["tier"], x["name"]))
+        return {"status": "ok", "models": models}
+    except Exception as e:
+        logger.error(f"Failed to list OpenRouter models: {e}")
+        return {"status": "ok", "models": AVAILABLE_MODELS["openrouter"]}
+
+
+@router.get("/status")
+async def system_status():
+    """Get system status: service health + API key presence."""
+    neo4j_ok = await verify_connection()
+    redis_ok = await verify_redis()
+
+    return {
+        "neo4j": neo4j_ok,
+        "redis": redis_ok,
+        "neo4j_uri": NEO4J_URI,
+        "redis_url": REDIS_URL,
+        "api_keys": {
+            "anthropic": bool(get_active_api_key("claude")),
+            "openrouter": bool(get_active_api_key("openrouter")),
+            "apitcg": bool(get_active_api_key("apitcg")),
+        },
+        "runtime_keys": {
+            "anthropic": "anthropic" in _runtime_keys,
+            "openrouter": "openrouter" in _runtime_keys,
+            "apitcg": "apitcg" in _runtime_keys,
+        },
+    }

@@ -1,4 +1,14 @@
-import type { CardSearchParams, CardSearchResponse, Facets } from '../types';
+import type {
+  CardSearchParams,
+  CardSearchResponse,
+  Facets,
+  SystemStatus,
+  CrawlStatus,
+  BannedCard,
+  ModelsResponse,
+  TestKeyResult,
+  ProviderModelsResult,
+} from '../types';
 
 const BASE_URL = '/api';
 
@@ -125,8 +135,18 @@ export async function chatSync(
   return resp.json();
 }
 
-export async function fetchModels() {
+export async function fetchModels(): Promise<ModelsResponse> {
   const resp = await fetch(`${BASE_URL}/settings/models`);
+  return resp.json();
+}
+
+export async function fetchSystemStatus(): Promise<SystemStatus> {
+  const resp = await fetch(`${BASE_URL}/settings/status`);
+  return resp.json();
+}
+
+export async function fetchHealth(): Promise<{ status: string; neo4j: boolean; redis: boolean }> {
+  const resp = await fetch('/health');
   return resp.json();
 }
 
@@ -216,6 +236,7 @@ export async function startBattle(
   numGames: number = 10,
   agentType: string = 'heuristic',
   llmModel?: string,
+  p1AgentType: string = 'intermediate',
 ): Promise<{ sim_id: string }> {
   const resp = await fetch(`${BASE_URL}/simulator/battle`, {
     method: 'POST',
@@ -227,6 +248,7 @@ export async function startBattle(
       deck2_card_ids: deck2CardIds,
       num_games: numGames,
       agent_type: agentType,
+      p1_agent_type: p1AgentType,
       ...(llmModel ? { llm_model: llmModel } : {}),
     }),
   });
@@ -317,4 +339,66 @@ export async function deleteSavedDeck(id: string): Promise<void> {
     headers: { 'X-Client-Id': getClientId() },
   });
   if (!resp.ok) throw new Error(await resp.text());
+}
+
+// === Dashboard / Settings API ===
+
+export async function fetchCrawlStatus(): Promise<CrawlStatus> {
+  const resp = await fetch(`${BASE_URL}/data/crawl-status`);
+  return resp.json();
+}
+
+export async function triggerCrawl(): Promise<{ status: string }> {
+  const resp = await fetch(`${BASE_URL}/data/crawl`, { method: 'POST' });
+  return resp.json();
+}
+
+export async function triggerPriceUpdate(): Promise<{ status: string }> {
+  const resp = await fetch(`${BASE_URL}/data/update-prices`, { method: 'POST' });
+  return resp.json();
+}
+
+export async function triggerBanCrawl(): Promise<{ status: string }> {
+  const resp = await fetch(`${BASE_URL}/data/crawl-banned`, { method: 'POST' });
+  return resp.json();
+}
+
+export async function fetchBannedCards(): Promise<BannedCard[]> {
+  const resp = await fetch(`${BASE_URL}/data/banned-cards`);
+  return resp.json();
+}
+
+// === BYOK (Bring Your Own Key) API ===
+
+export async function saveApiKey(provider: string, apiKey: string): Promise<{ status: string }> {
+  const resp = await fetch(`${BASE_URL}/settings/api-key`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, api_key: apiKey }),
+  });
+  return resp.json();
+}
+
+export async function removeApiKey(provider: string): Promise<{ status: string }> {
+  const resp = await fetch(`${BASE_URL}/settings/api-key/${provider}`, { method: 'DELETE' });
+  return resp.json();
+}
+
+export async function testApiKey(provider: string, apiKey: string): Promise<TestKeyResult> {
+  const resp = await fetch(`${BASE_URL}/settings/test-key`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, api_key: apiKey }),
+  });
+  return resp.json();
+}
+
+export async function fetchProviderModels(
+  provider: string,
+  apiKey?: string,
+): Promise<ProviderModelsResult> {
+  const params = new URLSearchParams();
+  if (apiKey) params.set('api_key', apiKey);
+  const resp = await fetch(`${BASE_URL}/settings/provider-models/${provider}?${params}`);
+  return resp.json();
 }

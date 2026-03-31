@@ -20,6 +20,8 @@ export interface Card {
   families: string[];
   set_name: string;
   keywords: string[];
+  banned?: boolean;
+  ban_reason?: string;
 }
 
 export interface SynergyPartner {
@@ -292,4 +294,64 @@ export interface SavedDeckListItem {
   card_count: number;
   created_at: string;
   updated_at: string;
+}
+
+// Settings / Dashboard types
+export interface SystemStatus {
+  neo4j: boolean;
+  redis: boolean;
+  neo4j_uri: string;
+  redis_url: string;
+  api_keys: {
+    anthropic: boolean;
+    openrouter: boolean;
+    apitcg: boolean;
+  };
+  runtime_keys: {
+    anthropic: boolean;
+    openrouter: boolean;
+    apitcg: boolean;
+  };
+}
+
+export interface TestKeyResult {
+  status: 'ok' | 'error';
+  message: string;
+}
+
+export interface ProviderModelsResult {
+  status: 'ok' | 'error';
+  message?: string;
+  models: ModelInfo[];
+}
+
+export interface CrawlSourceStatus {
+  last_run: string | null;
+  count: number;
+}
+
+export interface CrawlStatus {
+  apitcg: CrawlSourceStatus;
+  optcgapi: CrawlSourceStatus;
+  limitlesstcg: CrawlSourceStatus;
+  banned: CrawlSourceStatus;
+}
+
+export interface BannedCard {
+  id: string;
+  name: string;
+  ban_reason: string;
+  image_small?: string;
+  card_type?: string;
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  tier: number;
+}
+
+export interface ModelsResponse {
+  current: { provider: string; model: string };
+  available: Record<string, ModelInfo[]>;
 }

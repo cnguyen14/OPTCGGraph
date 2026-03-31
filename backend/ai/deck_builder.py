@@ -192,6 +192,7 @@ async def _get_candidates(driver: AsyncDriver, leader_id: str, leader_colors: se
             MATCH (c:Card)-[:HAS_COLOR]->(color:Color)
             WHERE color.name IN $colors
               AND c.card_type IN ['CHARACTER', 'EVENT', 'STAGE']
+              AND (c.banned IS NULL OR c.banned = false)
             OPTIONAL MATCH (c)-[:HAS_KEYWORD]->(k:Keyword)
             OPTIONAL MATCH (c)-[led:LED_BY]->(:Card {id: $leader_id})
             OPTIONAL MATCH (c)-[syn:SYNERGY]-(:Card)-[:LED_BY]->(:Card {id: $leader_id})
@@ -481,6 +482,9 @@ def _fix_violations(
 
     # Fix: remove LEADER cards
     fixed = [c for c in fixed if c.get("card_type") != "LEADER"]
+
+    # Fix: remove banned cards
+    fixed = [c for c in fixed if not c.get("banned")]
 
     # Fix: remove wrong-color cards
     fixed = [c for c in fixed if set(c.get("colors", [])) & leader_colors]

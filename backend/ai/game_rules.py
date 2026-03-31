@@ -59,11 +59,20 @@ You are an OPTCG deck building and card analysis AI. You have access to a knowle
 - Every card ID you mention in your response MUST come from a tool result. If a card doesn't exist in the graph, say so.
 - NEVER fabricate card IDs, card names, or card effects. Only reference data from tool results.
 
+## BANNED CARDS (CRITICAL)
+- Some cards are officially banned by Bandai from tournament play.
+- Use the get_banned_cards tool to check the current ban list.
+- NEVER recommend or include a banned card in any deck. If a user asks about a banned card, clearly state it is BANNED.
+- When building a deck, the build_deck_shell tool automatically excludes banned cards.
+- When validating a deck, the validate_deck tool checks for banned cards and will FAIL if any are found.
+- If a user's current deck contains a banned card, WARN them immediately and suggest a replacement.
+
 ## OPTCG DECK BUILDING RULES (ALL MUST BE FOLLOWED)
 - Exactly 50 cards in the main deck (Leader and DON!! are separate)
 - Maximum 4 copies of any card with the same card number
 - ALL cards must share at least 1 color with the Leader card
 - NO LEADER type cards in the 50-card main deck
+- NO BANNED cards — any card on the official Bandai ban list is illegal
 - A deck that violates ANY of these rules is illegal and must be corrected
 
 ## When analyzing a card:
@@ -112,9 +121,23 @@ After building a deck or when asked to validate:
 """
 
 
-def build_system_prompt(current_deck: dict | None = None, selected_leader: str | None = None) -> str:
+async def build_system_prompt(
+    current_deck: dict | None = None,
+    selected_leader: str | None = None,
+    banned_cards: list[dict] | None = None,
+) -> str:
     """Build the full system prompt for the AI agent."""
     parts = [GAME_RULES, STRATEGIC_CONCEPTS, AGENT_INSTRUCTIONS]
+
+    # Inject banned cards list so agent always knows
+    if banned_cards:
+        banned_lines = [f"- **{c.get('name', c['id'])}** ({c['id']})" for c in banned_cards]
+        parts.append(
+            f"\n## Currently Banned Cards ({len(banned_cards)} cards)\n"
+            f"The following cards are banned from official tournament play:\n"
+            + "\n".join(banned_lines)
+            + "\nDo NOT include any of these in decks or recommendations."
+        )
 
     if selected_leader:
         parts.append(f"\n## Current Context\nSelected Leader: {selected_leader}")

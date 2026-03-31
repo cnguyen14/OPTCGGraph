@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useDeckState } from './hooks/useDeckState';
-import GraphExplorer from './components/GraphExplorer';
+import SettingsPage from './components/SettingsPage';
 import CardBrowser from './components/CardBrowser';
 import DeckBuilder from './components/deck-builder/DeckBuilder';
 import MetaExplorer from './components/MetaExplorer';
@@ -10,10 +10,30 @@ import SimulatorPage from './components/simulator/SimulatorPage';
 import MyDecksPage from './components/MyDecksPage';
 import type { Card } from './types';
 
-type Tab = 'graph' | 'cards' | 'deck' | 'mydecks' | 'meta' | 'simulator';
+type Tab = 'cards' | 'deck' | 'mydecks' | 'meta' | 'simulator' | 'settings';
+
+const VALID_TABS: Tab[] = ['cards', 'deck', 'mydecks', 'meta', 'simulator', 'settings'];
+
+function getTabFromHash(): Tab {
+  const hash = window.location.hash.slice(1);
+  // Backward compat: old #graph → cards
+  if (hash === 'graph') return 'cards';
+  return VALID_TABS.includes(hash as Tab) ? (hash as Tab) : 'cards';
+}
 
 function App() {
-  const [activeTab, setActiveTab] = useState<Tab>('graph');
+  const [activeTab, setActiveTabState] = useState<Tab>(getTabFromHash);
+
+  const setActiveTab = useCallback((tab: Tab) => {
+    setActiveTabState(tab);
+    window.location.hash = tab;
+  }, []);
+
+  useEffect(() => {
+    const onHashChange = () => setActiveTabState(getTabFromHash());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
   const [selectedCard, setSelectedCard] = useState<Card | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
 
@@ -57,12 +77,12 @@ function App() {
         </div>
         <nav className="flex gap-1">
           {[
-            { key: 'graph' as Tab, label: 'Graph Explorer' },
             { key: 'cards' as Tab, label: 'Cards' },
             { key: 'deck' as Tab, label: 'Deck Builder' },
             { key: 'mydecks' as Tab, label: 'My Decks' },
             { key: 'meta' as Tab, label: 'Meta Explorer' },
             { key: 'simulator' as Tab, label: 'Simulator' },
+            { key: 'settings' as Tab, label: 'Settings' },
           ].map(tab => (
             <button
               key={tab.key}
@@ -81,8 +101,8 @@ function App() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-hidden">
-        {activeTab === 'graph' && (
-          <GraphExplorer onCardSelect={setSelectedCard} />
+        {activeTab === 'settings' && (
+          <SettingsPage />
         )}
         {activeTab === 'cards' && (
           <CardBrowser onCardSelect={setSelectedCard} />
