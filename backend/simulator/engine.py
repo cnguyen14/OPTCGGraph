@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 class Agent(Protocol):
     """Interface for AI agents that make game decisions."""
 
+    async def choose_mulligan(self, hand: list[GameCard]) -> bool:
+        """Return True to mulligan (redraw entire hand). One chance only."""
+        ...
+
     async def choose_main_action(
         self, state: GameState, legal_actions: list[GameAction]
     ) -> int:
@@ -122,6 +126,9 @@ class GameEngine:
         if self.state is None:
             raise RuntimeError("Game not initialized. Call init_game() first.")
 
+        # Mulligan phase — each player gets one chance to redraw
+        await self._mulligan_phase(p1_agent, p2_agent)
+
         agents = {"p1": p1_agent, "p2": p2_agent}
 
         while not self.state.is_game_over():
@@ -201,10 +208,27 @@ class GameEngine:
 
     # --- Phase implementations ---
 
+    async def _mulligan_phase(self, p1_agent: Agent, p2_agent: Agent) -> None:
+        """Each player gets one chance to mulligan (redraw entire hand).
+
+        OPTCG rule: return all cards to deck, shuffle, draw 5 new cards.
+        """
+        for player_id, agent in [("p1", p1_agent), ("p2", p2_agent)]:
+            player = self.state.p1 if player_id == "p1" else self.state.p2
+            if await agent.choose_mulligan(list(player.hand)):
+                player.deck.extend(player.hand)
+                player.hand.clear()
+                self.rng.shuffle(player.deck)
+                for _ in range(5):
+                    if player.deck:
+                        player.hand.append(player.deck.pop(0))
+                self.state.log(player_id, "setup", "mulligan")
+
     def _refresh_phase(self) -> None:
         """Unrest all cards, detach DON!! back to field, reset power mods."""
         self.state.phase = Phase.REFRESH
         player = self.state.active_player
+        opponent = self.state.defending_player
 
         # Return rested DON!! (spent on card costs) back to active pool
         player.don_field += player.don_rested
@@ -224,6 +248,10 @@ class GameEngine:
         # Also return DON!! from leader
         player.don_field += player.leader.attached_don
         player.leader.attached_don = 0
+
+        # Resolve passive Stage effects (activated each turn while on field)
+        for stage in player.stages:
+            self.effects.resolve_passive(self, stage, player, opponent)
 
     def _draw_phase(self) -> None:
         """Draw 1 card (skip turn 1 for P1)."""
@@ -304,19 +332,25 @@ class GameEngine:
         opponent = self.state.defending_player
         actions: list[GameAction] = []
 
-        # Play cards from hand
+        # Play cards from hand (must match leader color and be affordable)
+        leader_colors = set(player.leader.colors) if player.leader.colors else set()
         for card in player.hand:
-            if (
-                card.card_type in ("CHARACTER", "EVENT", "STAGE")
-                and card.cost <= player.don_field
-            ):
-                actions.append(
-                    GameAction(
-                        action_type=ActionType.PLAY_CARD,
-                        source_id=card.instance_id,
-                        description=f"Play {card.name} (cost {card.cost})",
-                    )
+            if card.card_type not in ("CHARACTER", "EVENT", "STAGE"):
+                continue
+            if card.cost > player.don_field:
+                continue
+            # Color restriction: card must share at least one color with leader
+            # Skip check if leader or card has no color data (backward compat)
+            if leader_colors and card.colors:
+                if not leader_colors.intersection(card.colors):
+                    continue
+            actions.append(
+                GameAction(
+                    action_type=ActionType.PLAY_CARD,
+                    source_id=card.instance_id,
+                    description=f"Play {card.name} (cost {card.cost})",
                 )
+            )
 
         # Attach DON!! to characters or leader
         if player.don_field > 0:

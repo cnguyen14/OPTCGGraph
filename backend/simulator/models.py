@@ -121,7 +121,7 @@ class GameCard:
     keywords: list[str] = dataclass_field(default_factory=list)
     ability_text: str = ""
     trigger_effect: str = ""
-    color: str = ""
+    colors: list[str] = dataclass_field(default_factory=list)
     effects: list[EffectTemplate] = dataclass_field(default_factory=list)
     state: CardState = CardState.ACTIVE
     attached_don: int = 0

@@ -36,6 +36,7 @@ def parse_effects(
     kw_lower = {k.lower() for k in keywords}
     ability = ability_text.lower() if ability_text else ""
     condition: EffectCondition | None = None  # Reused across effect blocks
+    is_once_per_turn = "once per turn" in ability
 
     # --- Passive / static abilities ---
 
@@ -67,6 +68,8 @@ def parse_effects(
 
     if "ko" in kw_lower:
         condition = _parse_ko_condition(ability, cost)
+        # On-attack KO effects are typically once per turn
+        once = is_once_per_turn or trigger == EffectTrigger.ON_ATTACK
         effects.append(
             EffectTemplate(
                 type=EffectType.KO,
@@ -74,6 +77,7 @@ def parse_effects(
                 target="opponent_character",
                 condition=condition,
                 count=1,
+                once_per_turn=once,
             )
         )
 
@@ -81,6 +85,7 @@ def parse_effects(
 
     if "bounce" in kw_lower:
         condition = _parse_bounce_condition(ability)
+        once = is_once_per_turn or trigger == EffectTrigger.ON_ATTACK
         effects.append(
             EffectTemplate(
                 type=EffectType.BOUNCE,
@@ -88,6 +93,7 @@ def parse_effects(
                 target="opponent_character",
                 condition=condition,
                 count=1,
+                once_per_turn=once,
             )
         )
 
@@ -95,17 +101,26 @@ def parse_effects(
 
     if "draw" in kw_lower:
         amount = _parse_draw_amount(ability)
+        # Detect once-per-turn from ability text
+        once = "once per turn" in ability
         if card_type == "LEADER":
+            # Leader draw-on-attack is typically once per turn
             effects.append(
                 EffectTemplate(
                     type=EffectType.DRAW,
                     trigger=EffectTrigger.ON_ATTACK,
                     amount=amount,
+                    once_per_turn=True,
                 )
             )
         else:
             effects.append(
-                EffectTemplate(type=EffectType.DRAW, trigger=trigger, amount=amount)
+                EffectTemplate(
+                    type=EffectType.DRAW,
+                    trigger=trigger,
+                    amount=amount,
+                    once_per_turn=once,
+                )
             )
 
     # --- Search effect ---
@@ -119,6 +134,7 @@ def parse_effects(
                 target="own_deck",
                 condition=condition,
                 amount=5,  # Look at top 5 by default
+                once_per_turn=is_once_per_turn,
             )
         )
 
@@ -471,6 +487,70 @@ def _parse_trigger_effect(trigger_text: str, cost: int) -> list[EffectTemplate]:
                 trigger=EffectTrigger.TRIGGER,
                 target="opponent_character",
                 condition=condition,
+            )
+        )
+
+    # Trigger: bounce / return to hand
+    if "return" in trigger_lower and (
+        "hand" in trigger_lower or "owner" in trigger_lower
+    ):
+        condition = None
+        m = re.search(r"cost\s*(?:of\s*)?(\d+)\s*or\s*less", trigger_lower)
+        if m:
+            condition = EffectCondition(cost_lte=int(m.group(1)))
+        templates.append(
+            EffectTemplate(
+                type=EffectType.BOUNCE,
+                trigger=EffectTrigger.TRIGGER,
+                target="opponent_character",
+                condition=condition,
+                count=1,
+            )
+        )
+
+    # Trigger: power boost (e.g. "+2000 to your Leader")
+    m = re.search(r"\+\s*(\d+)", trigger_lower)
+    if m and ("power" in trigger_lower or "leader" in trigger_lower):
+        value = int(m.group(1))
+        if value < 100:
+            value *= 1000
+        templates.append(
+            EffectTemplate(
+                type=EffectType.POWER_BOOST,
+                trigger=EffectTrigger.TRIGGER,
+                target="self",  # Applied to owner's leader
+                amount=value,
+            )
+        )
+
+    # Trigger: bottom deck (send to bottom of deck)
+    if "bottom" in trigger_lower and "deck" in trigger_lower:
+        condition = None
+        m_cost = re.search(r"cost\s*(?:of\s*)?(\d+)\s*or\s*less", trigger_lower)
+        if m_cost:
+            condition = EffectCondition(cost_lte=int(m_cost.group(1)))
+        templates.append(
+            EffectTemplate(
+                type=EffectType.BOTTOM_DECK,
+                trigger=EffectTrigger.TRIGGER,
+                target="opponent_character",
+                condition=condition,
+                count=1,
+            )
+        )
+
+    # Trigger: trash from hand
+    if "trash" in trigger_lower and "hand" in trigger_lower:
+        amount = 1
+        m_amount = re.search(r"trash\s+(\d+)", trigger_lower)
+        if m_amount:
+            amount = int(m_amount.group(1))
+        templates.append(
+            EffectTemplate(
+                type=EffectType.TRASH_FROM_HAND,
+                trigger=EffectTrigger.TRIGGER,
+                target="opponent_hand",
+                count=amount,
             )
         )
 

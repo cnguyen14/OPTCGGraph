@@ -39,6 +39,13 @@ async def _load_game_card(
         card_type=card_type,
         cost=cost,
     )
+    if effects:
+        logger.debug(
+            "Card %s: %d effects parsed (%s)",
+            card_id,
+            len(effects),
+            ", ".join(e.type.value for e in effects),
+        )
 
     return GameCard(
         instance_id=instance_id,
@@ -51,7 +58,7 @@ async def _load_game_card(
         keywords=keywords,
         ability_text=ability_text,
         trigger_effect=trigger_effect,
-        color=data.get("color", ""),
+        colors=data.get("colors", []) or [],
         effects=effects,
     )
 

@@ -111,6 +111,30 @@ class EffectHandler:
         for tmpl in templates:
             self._resolve_template(engine, tmpl, card, player, opponent)
 
+    def resolve_passive(
+        self,
+        engine: GameEngine,
+        card: GameCard,
+        player: PlayerState,
+        opponent: PlayerState,
+    ) -> None:
+        """Resolve passive effects (Stage cards, activated each turn).
+
+        Only processes effects that produce per-turn value (draw, power boost).
+        Static passives like Blocker/Rush are handled by has_keyword checks.
+        """
+        templates = card.get_effects_by_trigger(EffectTrigger.PASSIVE)
+        for tmpl in templates:
+            # Skip static keyword effects — they don't need resolution
+            if tmpl.type in (
+                EffectType.BLOCKER,
+                EffectType.RUSH,
+                EffectType.DOUBLE_ATTACK,
+                EffectType.BANISH,
+            ):
+                continue
+            self._resolve_template(engine, tmpl, card, player, opponent)
+
     # --- Keyword queries (used by engine and agents) ---
 
     def has_keyword(self, card: GameCard, keyword: str) -> bool:
@@ -170,6 +194,13 @@ class EffectHandler:
 
         handler = handlers.get(tmpl.type)
         if handler:
+            logger.debug(
+                "Effect fired: %s [%s] from %s (player %s)",
+                tmpl.type.value,
+                tmpl.trigger.value,
+                source.name,
+                player.player_id,
+            )
             handler(engine, tmpl, source, player, opponent)
 
     # --- Individual effect resolvers ---
@@ -490,7 +521,7 @@ class EffectHandler:
             return False
         if condition.card_type is not None and target.card_type != condition.card_type:
             return False
-        if condition.color is not None and target.color != condition.color:
+        if condition.color is not None and condition.color not in target.colors:
             return False
         if condition.is_active is not None:
             expected = CardState.ACTIVE if condition.is_active else CardState.RESTED

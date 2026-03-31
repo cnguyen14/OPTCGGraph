@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
+import random
 import uuid
 from typing import Any
 
@@ -93,6 +93,7 @@ async def stream_simulation(sim_id: str) -> StreamingResponse:
                 p1_level=req.get("p1_level", "amateur"),
                 p2_level=req.get("p2_level", "medium"),
                 llm_model=req.get("llm_model"),
+                base_seed=random.randint(0, 2**31),
             )
 
             sim_data["status"] = "running"

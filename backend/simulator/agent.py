@@ -442,6 +442,42 @@ class HeuristicAgent:
         self._archetype: str | None = None  # Detected lazily on first turn
 
     # ------------------------------------------------------------------
+    # Mulligan decision
+    # ------------------------------------------------------------------
+
+    async def choose_mulligan(self, hand: list[GameCard]) -> bool:
+        """Decide whether to mulligan (redraw entire hand).
+
+        Evaluates hand quality based on early-game playability.
+        """
+        prof = self.profile
+        costs = [c.cost for c in hand]
+        if not costs:
+            return False
+
+        avg_cost = sum(costs) / len(costs)
+        low_cost_count = sum(1 for c in costs if c <= 3)
+        has_on_play = any(_has_on_play_effect(c) for c in hand)
+
+        # No early plays at all — always mulligan
+        if low_cost_count == 0:
+            return True
+
+        # Hand is too expensive on average
+        if avg_cost > 5.5:
+            return True
+
+        # Beginners mulligan erratically
+        if prof["mistake_rate"] > 0.10:
+            return self.rng.random() < 0.25
+
+        # Skilled players: mulligan if hand lacks early plays AND effects
+        if low_cost_count <= 1 and not has_on_play:
+            return self.rng.random() < 0.5
+
+        return False
+
+    # ------------------------------------------------------------------
     # Main phase
     # ------------------------------------------------------------------
 
@@ -538,6 +574,25 @@ class HeuristicAgent:
         adjustments. Replaces the rigid heuristic ordering.
         """
         archetype = self._archetype or "midrange"
+
+        # Check if we have unplayed affordable cards with on-play effects
+        has_unplayed_on_play = any(
+            c.card_type in ("CHARACTER", "EVENT", "STAGE")
+            and c.cost <= player.don_field
+            and _has_on_play_effect(c)
+            for c in player.hand
+        )
+        # Check if there are affordable cards at all
+        has_playable_cards = any(
+            c.card_type in ("CHARACTER", "EVENT", "STAGE")
+            and c.cost <= player.don_field
+            for c in player.hand
+        )
+        # Check if we have unattached DON and active attackers
+        has_active_attackers = player.leader.state == CardState.ACTIVE or any(
+            c.state == CardState.ACTIVE for c in player.characters
+        )
+
         scored: list[tuple[int, float]] = []
         for i, action in enumerate(legal_actions):
             if action.action_type == ActionType.PASS:
@@ -546,18 +601,35 @@ class HeuristicAgent:
 
             score = _estimate_action_value(action, state, player, opponent)
 
+            # --- Play-before-attack sequencing ---
+            # Smart agents should develop board and attach DON BEFORE attacking
+            if action.action_type == ActionType.ATTACK:
+                # Penalize attacking if we still have playable on-play effects
+                if has_unplayed_on_play:
+                    score *= 0.4
+                # Penalize attacking if we have DON to attach to attackers
+                elif player.don_field > 0 and has_active_attackers:
+                    score *= 0.6
+                # Penalize attacking if we have affordable cards to play first
+                elif has_playable_cards and self._cards_played_this_turn == 0:
+                    score *= 0.7
+
+            # --- DON before attack ---
+            if action.action_type == ActionType.ATTACH_DON:
+                # Boost DON attachment score when we have active attackers
+                if has_active_attackers and self._attacks_made_this_turn == 0:
+                    score *= 1.3
+
             # Archetype adjustments
             if archetype == "aggro":
-                # Aggro: boost attack value, penalize non-attack plays
                 if action.action_type == ActionType.ATTACK:
                     score *= 1.3
                 elif action.action_type == ActionType.PLAY_CARD:
                     card = player.find_card_in_hand(action.source_id)
                     if card and card.cost > 5:
-                        score *= 0.7  # Aggro shouldn't play expensive cards
+                        score *= 0.7
 
             elif archetype == "control":
-                # Control: boost removal/bounce value, less rush to attack leader
                 if action.action_type == ActionType.PLAY_CARD:
                     card = player.find_card_in_hand(action.source_id)
                     if card and _has_on_play_effect(card):
@@ -565,7 +637,6 @@ class HeuristicAgent:
                 if action.action_type == ActionType.ATTACK:
                     target = _find_card(action.target_id, opponent)
                     if target and target.card_type == "LEADER":
-                        # Control is less aggressive on leader early
                         if len(opponent.life) >= 4 and state.turn <= 5:
                             score *= 0.8
 
@@ -702,12 +773,13 @@ class HeuristicAgent:
         """Pro/hard counter logic: weigh the cost of countering vs taking the hit.
 
         Key insight: countering costs a card from hand. Is that worth saving 1 life?
-        - Life at 0 → taking hit loses the game → always counter if possible
-        - Life at 1 → critical → counter with low-utility cards
-        - Life at 2 → dangerous → counter if cheap (1 card)
-        - Life at 3+ → take the hit, keep the hand card
-        - Aggro decks: take life more aggressively (life is cheap, speed matters)
-        - Control decks: protect life harder (they need time)
+        - Life at 0 → taking hit loses the game → always counter
+        - Life at 1 → critical → always counter
+        - Life at 2 → counter with lowest-utility cards
+        - Life at 3 → counter only with low-value expendable cards
+        - Life at 4+ → take the hit (cards are more valuable)
+        - Aggro decks: more willing to take hits for tempo
+        - Control decks: counter more at life 3
         """
         player = state.defending_player
 
@@ -718,30 +790,43 @@ class HeuristicAgent:
             )
             return self._select_counters(sorted_by_utility, power_gap, player)
 
-        # Critical life (1): counter with lowest-utility cards
+        # Critical life (1): always counter
         if life == 1:
             sorted_by_utility = sorted(
                 counter_cards, key=lambda c: _card_utility(c, player)
             )
             return self._select_counters(sorted_by_utility, power_gap, player)
 
-        # Dangerous (2): counter only if we can do it with 1 low-utility card
+        # Dangerous (2): counter with lowest-utility cards
         if life == 2:
-            # Aggro takes hits to preserve tempo
             if archetype == "aggro":
+                # Aggro: counter with only expendable cards
+                low_utility = [
+                    c for c in counter_cards if _card_utility(c, player) < 3.0
+                ]
+                if low_utility:
+                    return self._select_counters(
+                        low_utility, power_gap, player, max_cards=2
+                    )
                 return []
-            low_utility = [c for c in counter_cards if _card_utility(c, player) < 2.5]
-            if low_utility and low_utility[0].counter >= power_gap:
-                return [low_utility[0]]
+            # Midrange/Control: always counter at life 2
+            sorted_by_utility = sorted(
+                counter_cards, key=lambda c: _card_utility(c, player)
+            )
+            return self._select_counters(sorted_by_utility, power_gap, player)
+
+        # Life 3: counter with expendable low-utility cards only
+        if life == 3:
+            if archetype == "aggro":
+                return []  # Aggro takes the hit for tempo
+            low_utility = [c for c in counter_cards if _card_utility(c, player) < 3.0]
+            if low_utility:
+                return self._select_counters(
+                    low_utility, power_gap, player, max_cards=2
+                )
             return []
 
-        # Life 3+: generally take the hit (cards are more valuable than life)
-        # Exception: if opponent is at low life themselves, they might win fast
-        opp_life = len(state.p2.life if player.player_id == "p1" else state.p1.life)
-        if opp_life <= 1 and life == 3:
-            # Race situation: don't counter, we need to finish them off
-            return []
-
+        # Life 4+: take the hit — cards are more valuable than life
         return []
 
     # ------------------------------------------------------------------
@@ -1067,6 +1152,10 @@ class LLMAgent:
             + LLM_BASE_RULES
         )
         self._fallback = HeuristicAgent(role=role, level=level)
+
+    async def choose_mulligan(self, hand: list[GameCard]) -> bool:
+        """Delegate mulligan decision to heuristic fallback."""
+        return await self._fallback.choose_mulligan(hand)
 
     async def choose_main_action(
         self, state: GameState, legal_actions: list[GameAction]
