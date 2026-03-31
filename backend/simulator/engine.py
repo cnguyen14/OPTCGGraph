@@ -14,12 +14,14 @@ from .effects import EffectHandler
 from .models import (
     ActionType,
     CardState,
+    DecisionPoint,
     GameAction,
     GameCard,
     GameResult,
     GameState,
     Phase,
     PlayerState,
+    TurnSnapshot,
 )
 
 logger = logging.getLogger(__name__)
@@ -69,6 +71,22 @@ class GameEngine:
         self.state: GameState = None  # type: ignore[assignment]
         self._cards_played_p1: dict[str, int] = {}
         self._cards_played_p2: dict[str, int] = {}
+        # Enhanced data collection
+        self._cards_drawn_p1: dict[str, int] = {}
+        self._cards_drawn_p2: dict[str, int] = {}
+        self._damage_p1: int = 0  # Life cards taken from P2
+        self._damage_p2: int = 0  # Life cards taken from P1
+        self._effects_p1: int = 0
+        self._effects_p2: int = 0
+        self._p1_mulligan: bool = False
+        self._p2_mulligan: bool = False
+        self._win_condition: str = ""
+        self._turn_snapshots: list[TurnSnapshot] = []
+        self.decision_points: list[DecisionPoint] = []
+        self._cards_koed: dict[str, int] = {}  # card_id -> times KO'd
+        self._cards_countered: dict[str, int] = {}  # card_id -> times used as counter
+        self._cards_blocked: dict[str, int] = {}  # card_id -> times used as blocker
+        self._card_play_turns: dict[str, list[int]] = {}  # card_id -> [turn played]
 
     def init_game(
         self,
@@ -118,6 +136,21 @@ class GameEngine:
         self.state.log("system", "setup", "game_initialized", first_player=first)
         self._cards_played_p1 = {}
         self._cards_played_p2 = {}
+        self._cards_drawn_p1 = {}
+        self._cards_drawn_p2 = {}
+        self._damage_p1 = 0
+        self._damage_p2 = 0
+        self._effects_p1 = 0
+        self._effects_p2 = 0
+        self._p1_mulligan = False
+        self._p2_mulligan = False
+        self._win_condition = ""
+        self._turn_snapshots = []
+        self.decision_points = []
+        self._cards_koed = {}
+        self._cards_countered = {}
+        self._cards_blocked = {}
+        self._card_play_turns = {}
 
         return self.state
 
@@ -125,6 +158,11 @@ class GameEngine:
         """Run a complete game, returning the result."""
         if self.state is None:
             raise RuntimeError("Game not initialized. Call init_game() first.")
+
+        # Wire decision collectors to agents (if they support it)
+        for agent in (p1_agent, p2_agent):
+            if hasattr(agent, "set_decision_collector"):
+                agent.set_decision_collector(self.decision_points)  # type: ignore[union-attr]
 
         # Mulligan phase — each player gets one chance to redraw
         await self._mulligan_phase(p1_agent, p2_agent)
@@ -142,6 +180,30 @@ class GameEngine:
             self._refresh_phase()
             self._draw_phase()
             self._don_phase()
+
+            # Capture turn snapshot for timeline analysis
+            self._turn_snapshots.append(
+                TurnSnapshot(
+                    turn=self.state.turn,
+                    active_player=self.state.active_player_id,
+                    p1_life=len(self.state.p1.life),
+                    p2_life=len(self.state.p2.life),
+                    p1_hand_size=len(self.state.p1.hand),
+                    p2_hand_size=len(self.state.p2.hand),
+                    p1_field_count=len(self.state.p1.field),
+                    p2_field_count=len(self.state.p2.field),
+                    p1_field_power=sum(
+                        c.effective_power for c in self.state.p1.characters
+                    ),
+                    p2_field_power=sum(
+                        c.effective_power for c in self.state.p2.characters
+                    ),
+                    p1_don_available=self.state.p1.don_field,
+                    p2_don_available=self.state.p2.don_field,
+                    p1_deck_remaining=len(self.state.p1.deck),
+                    p2_deck_remaining=len(self.state.p2.deck),
+                )
+            )
 
             # Log turn start AFTER refresh/draw/DON so DON values are accurate
             self.state.log(
@@ -190,10 +252,13 @@ class GameEngine:
             # Check deck-out
             if not self.state.active_player.deck:
                 self.state.winner = self.state.defending_player.player_id
+                self._win_condition = "deck_out"
                 self.state.log(self.state.active_player_id, "game", "deck_out")
 
         if self.state.winner is None:
             self.state.winner = "draw"
+            if not self._win_condition:
+                self._win_condition = "timeout"
 
         return GameResult(
             winner=self.state.winner,
@@ -204,6 +269,15 @@ class GameEngine:
             p1_cards_played=dict(self._cards_played_p1),
             p2_cards_played=dict(self._cards_played_p2),
             game_log=[e.to_dict() for e in self.state.game_log],
+            decision_points=list(self.decision_points),
+            turn_snapshots=list(self._turn_snapshots),
+            p1_mulligan=self._p1_mulligan,
+            p2_mulligan=self._p2_mulligan,
+            win_condition=self._win_condition,
+            p1_total_damage_dealt=self._damage_p1,
+            p2_total_damage_dealt=self._damage_p2,
+            p1_effects_fired=self._effects_p1,
+            p2_effects_fired=self._effects_p2,
         )
 
     # --- Phase implementations ---
@@ -222,6 +296,10 @@ class GameEngine:
                 for _ in range(5):
                     if player.deck:
                         player.hand.append(player.deck.pop(0))
+                if player_id == "p1":
+                    self._p1_mulligan = True
+                else:
+                    self._p2_mulligan = True
                 self.state.log(player_id, "setup", "mulligan")
 
     def _refresh_phase(self) -> None:
@@ -265,6 +343,13 @@ class GameEngine:
         if player.deck:
             card = player.deck.pop(0)
             player.hand.append(card)
+            # Track times drawn
+            tracker = (
+                self._cards_drawn_p1
+                if player.player_id == "p1"
+                else self._cards_drawn_p2
+            )
+            tracker[card.card_id] = tracker.get(card.card_id, 0) + 1
             self.state.log(player.player_id, "draw", "draw_card", card_name=card.name)
 
     def _don_phase(self) -> None:
@@ -472,11 +557,12 @@ class GameEngine:
                 card_type=card.card_type,
             )
 
-        # Track cards played
+        # Track cards played + turn timing
         tracker = (
             self._cards_played_p1 if player.player_id == "p1" else self._cards_played_p2
         )
         tracker[card.card_id] = tracker.get(card.card_id, 0) + 1
+        self._card_play_turns.setdefault(card.card_id, []).append(self.state.turn)
 
     def _attach_don(self, action: GameAction, player: PlayerState) -> None:
         """Attach 1 DON!! from field pool to a card."""
@@ -559,6 +645,9 @@ class GameEngine:
             if blocker and blocker in available_blockers:
                 target = blocker
                 blocker.state = CardState.RESTED
+                self._cards_blocked[blocker.card_id] = (
+                    self._cards_blocked.get(blocker.card_id, 0) + 1
+                )
                 self.state.log(
                     defender_player.player_id,
                     "combat",
@@ -582,6 +671,9 @@ class GameEngine:
                 counter_total += ccard.counter
                 defender_player.hand.remove(ccard)
                 defender_player.trash.append(ccard)
+                self._cards_countered[ccard.card_id] = (
+                    self._cards_countered.get(ccard.card_id, 0) + 1
+                )
                 self.state.log(
                     defender_player.player_id,
                     "combat",
@@ -596,12 +688,24 @@ class GameEngine:
         if attacker.effective_power >= defense_power:
             # Attack succeeds
             if target == defender_player.leader:
+                # Track damage dealt
+                if attacker_player.player_id == "p1":
+                    self._damage_p1 += 1
+                else:
+                    self._damage_p2 += 1
                 self._deal_life_damage(attacker, defender_player, attacker_player)
                 # Double Attack
                 if self.effects.has_double_attack(attacker) and defender_player.life:
+                    if attacker_player.player_id == "p1":
+                        self._damage_p1 += 1
+                    else:
+                        self._damage_p2 += 1
                     self._deal_life_damage(attacker, defender_player, attacker_player)
             else:
                 # KO the character
+                self._cards_koed[target.card_id] = (
+                    self._cards_koed.get(target.card_id, 0) + 1
+                )
                 self.effects.resolve_on_ko(
                     self, target, defender_player, attacker_player
                 )
@@ -637,6 +741,7 @@ class GameEngine:
         if not defender.life:
             # No life left — this attack wins the game
             self.state.winner = attacker_player.player_id
+            self._win_condition = "lethal"
             self.state.log(
                 attacker_player.player_id,
                 "combat",
@@ -659,6 +764,15 @@ class GameEngine:
         if life_card.trigger_effect:
             opponent = self.state.p1 if defender.player_id == "p2" else self.state.p2
             self.effects.resolve_trigger(self, life_card, defender, opponent)
+
+    # --- Data collection helpers ---
+
+    def track_effect_fired(self, player_id: str) -> None:
+        """Increment effect counter for a player (called by EffectHandler)."""
+        if player_id == "p1":
+            self._effects_p1 += 1
+        else:
+            self._effects_p2 += 1
 
     # --- Utility ---
 

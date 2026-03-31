@@ -268,6 +268,97 @@ class GameState:
 
 
 @dataclass
+class DecisionPoint:
+    """A single decision made by an agent during gameplay.
+
+    Captures game state + all legal actions + chosen action for ML training.
+    """
+
+    turn: int
+    phase: str  # "main", "mulligan", "blocker", "counter"
+    player_id: str
+    # Game state snapshot
+    player_life: int
+    opponent_life: int
+    player_hand_size: int
+    player_field_power: int
+    player_don_available: int
+    opponent_field_power: int
+    opponent_hand_size: int
+    # Decision details
+    num_legal_actions: int
+    action_scores: list[float] = dataclass_field(default_factory=list)
+    chosen_action_index: int = 0
+    chosen_action_type: str = ""
+    chosen_action_desc: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "turn": self.turn,
+            "phase": self.phase,
+            "player": self.player_id,
+            "life": self.player_life,
+            "opp_life": self.opponent_life,
+            "hand_size": self.player_hand_size,
+            "field_power": self.player_field_power,
+            "don": self.player_don_available,
+            "opp_field_power": self.opponent_field_power,
+            "opp_hand_size": self.opponent_hand_size,
+            "num_actions": self.num_legal_actions,
+            "scores": self.action_scores,
+            "chosen": self.chosen_action_index,
+            "action": self.chosen_action_type,
+            "desc": self.chosen_action_desc,
+        }
+
+
+@dataclass
+class TurnSnapshot:
+    """Board state snapshot at start of a turn for timeline analysis."""
+
+    turn: int
+    active_player: str
+    p1_life: int
+    p2_life: int
+    p1_hand_size: int
+    p2_hand_size: int
+    p1_field_count: int
+    p2_field_count: int
+    p1_field_power: int
+    p2_field_power: int
+    p1_don_available: int
+    p2_don_available: int
+    p1_deck_remaining: int
+    p2_deck_remaining: int
+    p1_board_eval: float = 0.0
+    p2_board_eval: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "turn": self.turn,
+            "active": self.active_player,
+            "p1": {
+                "life": self.p1_life,
+                "hand": self.p1_hand_size,
+                "field": self.p1_field_count,
+                "power": self.p1_field_power,
+                "don": self.p1_don_available,
+                "deck": self.p1_deck_remaining,
+                "eval": round(self.p1_board_eval, 1),
+            },
+            "p2": {
+                "life": self.p2_life,
+                "hand": self.p2_hand_size,
+                "field": self.p2_field_count,
+                "power": self.p2_field_power,
+                "don": self.p2_don_available,
+                "deck": self.p2_deck_remaining,
+                "eval": round(self.p2_board_eval, 1),
+            },
+        }
+
+
+@dataclass
 class GameResult:
     """Result of a completed game."""
 
@@ -281,6 +372,16 @@ class GameResult:
     )  # card_id -> times played
     p2_cards_played: dict[str, int] = dataclass_field(default_factory=dict)
     game_log: list[dict[str, Any]] = dataclass_field(default_factory=list)
+    # Enhanced data collection
+    decision_points: list[DecisionPoint] = dataclass_field(default_factory=list)
+    turn_snapshots: list[TurnSnapshot] = dataclass_field(default_factory=list)
+    p1_mulligan: bool = False
+    p2_mulligan: bool = False
+    win_condition: str = ""  # "lethal", "deck_out", "timeout"
+    p1_total_damage_dealt: int = 0
+    p2_total_damage_dealt: int = 0
+    p1_effects_fired: int = 0
+    p2_effects_fired: int = 0
 
 
 @dataclass
@@ -317,8 +418,14 @@ class CardStat:
     times_played: int = 0
     times_in_winning_game: int = 0
     total_games: int = 0
-    damage_contributed: int = 0  # Successful attacks
+    damage_contributed: int = 0  # Successful attacks on leader
     times_koed: int = 0
+    avg_turn_played: float = 0.0
+    times_countered_with: int = 0  # Used as counter card
+    times_blocked_with: int = 0  # Used as blocker
+    effects_triggered: int = 0  # On-play/on-attack effects fired
+    _turn_played_sum: int = 0  # Internal: for computing avg_turn_played
+    _turn_played_count: int = 0
 
     @property
     def play_rate(self) -> float:
@@ -327,3 +434,8 @@ class CardStat:
     @property
     def win_correlation(self) -> float:
         return self.times_in_winning_game / max(self.times_played, 1)
+
+    def record_play_turn(self, turn: int) -> None:
+        self._turn_played_sum += turn
+        self._turn_played_count += 1
+        self.avg_turn_played = self._turn_played_sum / self._turn_played_count

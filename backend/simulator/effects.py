@@ -201,6 +201,7 @@ class EffectHandler:
                 source.name,
                 player.player_id,
             )
+            engine.track_effect_fired(player.player_id)
             handler(engine, tmpl, source, player, opponent)
 
     # --- Individual effect resolvers ---

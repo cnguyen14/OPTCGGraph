@@ -22,6 +22,7 @@ from backend.config import ANTHROPIC_API_KEY
 from .models import (
     ActionType,
     CardState,
+    DecisionPoint,
     EffectTrigger,
     EffectType,
     GameAction,
@@ -440,6 +441,46 @@ class HeuristicAgent:
         self._attacks_made_this_turn = 0
         self._last_turn = -1
         self._archetype: str | None = None  # Detected lazily on first turn
+        self._decision_collector: list[DecisionPoint] | None = None
+
+    def set_decision_collector(self, collector: list[DecisionPoint]) -> None:
+        """Set a collector list for decision point logging."""
+        self._decision_collector = collector
+
+    def _log_decision(
+        self,
+        state: GameState,
+        legal_actions: list[GameAction],
+        chosen_idx: int,
+        scores: list[float] | None = None,
+    ) -> None:
+        """Log a decision point for training data export."""
+        if self._decision_collector is None:
+            return
+        player = state.active_player
+        opponent = state.defending_player
+        action = legal_actions[chosen_idx] if chosen_idx < len(legal_actions) else None
+        self._decision_collector.append(
+            DecisionPoint(
+                turn=state.turn,
+                phase="main",
+                player_id=player.player_id,
+                player_life=len(player.life),
+                opponent_life=len(opponent.life),
+                player_hand_size=len(player.hand),
+                player_field_power=sum(c.effective_power for c in player.characters),
+                player_don_available=player.don_field,
+                opponent_field_power=sum(
+                    c.effective_power for c in opponent.characters
+                ),
+                opponent_hand_size=len(opponent.hand),
+                num_legal_actions=len(legal_actions),
+                action_scores=scores or [],
+                chosen_action_index=chosen_idx,
+                chosen_action_type=(action.action_type.value if action else "pass"),
+                chosen_action_desc=(action.description if action else "pass"),
+            )
+        )
 
     # ------------------------------------------------------------------
     # Mulligan decision
@@ -533,33 +574,29 @@ class HeuristicAgent:
         plays_first = self.rng.random() < prof["play_before_attack"]
         has_attacks = len(attack_actions) > 0
 
+        chosen: int | None = None
         if plays_first:
-            r = self._try_play_card(play_actions, player)
-            if r is not None:
-                return r
-            r = self._try_attach_don(
-                don_actions, player, opponent, can_attack=has_attacks
-            )
-            if r is not None:
-                return r
-            r = self._try_attack(attack_actions, player, opponent, state)
-            if r is not None:
-                return r
+            chosen = self._try_play_card(play_actions, player)
+            if chosen is None:
+                chosen = self._try_attach_don(
+                    don_actions, player, opponent, can_attack=has_attacks
+                )
+            if chosen is None:
+                chosen = self._try_attack(attack_actions, player, opponent, state)
         else:
-            r = self._try_attach_don(
+            chosen = self._try_attach_don(
                 don_actions, player, opponent, can_attack=has_attacks
             )
-            if r is not None:
-                return r
-            r = self._try_attack(attack_actions, player, opponent, state)
-            if r is not None:
-                return r
-            r = self._try_play_card(play_actions, player)
-            if r is not None:
-                return r
+            if chosen is None:
+                chosen = self._try_attack(attack_actions, player, opponent, state)
+            if chosen is None:
+                chosen = self._try_play_card(play_actions, player)
 
-        # Pass
-        return len(legal_actions) - 1
+        if chosen is None:
+            chosen = len(legal_actions) - 1  # Pass
+
+        self._log_decision(state, legal_actions, chosen)
+        return chosen
 
     def _choose_by_scoring(
         self,
@@ -649,10 +686,13 @@ class HeuristicAgent:
 
         if scored:
             best_idx_val, best_score_val = max(scored, key=lambda x: x[1])
-            # Only pass if all scored actions are negative
+            all_scores = [s for _, s in sorted(scored, key=lambda x: x[0])]
             if best_score_val <= 0:
-                return len(legal_actions) - 1
-            return best_idx_val
+                chosen = len(legal_actions) - 1
+            else:
+                chosen = best_idx_val
+            self._log_decision(state, legal_actions, chosen, all_scores)
+            return chosen
 
         return len(legal_actions) - 1
 
