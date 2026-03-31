@@ -35,18 +35,51 @@ logger = logging.getLogger(__name__)
 # Strategy templates: target card counts per role/cost
 STRATEGY_TEMPLATES = {
     "aggro": {
-        "cost_targets": {(0, 2): (14, 18), (3, 5): (18, 22), (6, 9): (8, 10), (10, 99): (0, 2)},
-        "role_targets": {"blockers": 4, "removal": 4, "draw_search": 4, "rush": 6, "finishers": 2},
+        "cost_targets": {
+            (0, 2): (14, 18),
+            (3, 5): (18, 22),
+            (6, 9): (8, 10),
+            (10, 99): (0, 2),
+        },
+        "role_targets": {
+            "blockers": 4,
+            "removal": 4,
+            "draw_search": 4,
+            "rush": 6,
+            "finishers": 2,
+        },
         "type_targets": {"CHARACTER": (38, 42), "EVENT": (6, 10), "STAGE": (0, 2)},
     },
     "midrange": {
-        "cost_targets": {(0, 2): (10, 14), (3, 5): (18, 22), (6, 9): (10, 14), (10, 99): (0, 2)},
-        "role_targets": {"blockers": 6, "removal": 6, "draw_search": 6, "rush": 4, "finishers": 4},
+        "cost_targets": {
+            (0, 2): (10, 14),
+            (3, 5): (18, 22),
+            (6, 9): (10, 14),
+            (10, 99): (0, 2),
+        },
+        "role_targets": {
+            "blockers": 6,
+            "removal": 6,
+            "draw_search": 6,
+            "rush": 4,
+            "finishers": 4,
+        },
         "type_targets": {"CHARACTER": (36, 40), "EVENT": (8, 12), "STAGE": (0, 4)},
     },
     "control": {
-        "cost_targets": {(0, 2): (8, 10), (3, 5): (16, 20), (6, 9): (14, 18), (10, 99): (2, 4)},
-        "role_targets": {"blockers": 8, "removal": 8, "draw_search": 8, "rush": 2, "finishers": 6},
+        "cost_targets": {
+            (0, 2): (8, 10),
+            (3, 5): (16, 20),
+            (6, 9): (14, 18),
+            (10, 99): (2, 4),
+        },
+        "role_targets": {
+            "blockers": 8,
+            "removal": 8,
+            "draw_search": 8,
+            "rush": 2,
+            "finishers": 6,
+        },
         "type_targets": {"CHARACTER": (32, 38), "EVENT": (10, 16), "STAGE": (2, 4)},
     },
 }
@@ -76,7 +109,9 @@ def _apply_playstyle_hints(template: dict, hints: str) -> dict:
         t["cost_targets"][(0, 2)] = (16, 20)
         t["type_targets"]["CHARACTER"] = (40, 44)
     if "card_advantage" in hint_set or "value" in hint_set:
-        t["role_targets"]["draw_search"] = max(t["role_targets"].get("draw_search", 0), 8)
+        t["role_targets"]["draw_search"] = max(
+            t["role_targets"].get("draw_search", 0), 8
+        )
     if "defensive" in hint_set or "blockers" in hint_set:
         t["role_targets"]["blockers"] = max(t["role_targets"].get("blockers", 0), 10)
     if "removal_heavy" in hint_set:
@@ -117,9 +152,13 @@ async def build_deck(
     # 2. Get ALL eligible candidates from Neo4j
     candidates = await _get_candidates(driver, leader_id, leader_colors)
     if not candidates:
-        return {"error": f"No eligible cards found for leader {leader_id} colors {leader_colors}"}
+        return {
+            "error": f"No eligible cards found for leader {leader_id} colors {leader_colors}"
+        }
 
-    logger.info(f"Found {len(candidates)} candidates for {leader_id} ({strategy}, hints={playstyle_hints})")
+    logger.info(
+        f"Found {len(candidates)} candidates for {leader_id} ({strategy}, hints={playstyle_hints})"
+    )
 
     # 3. Categorize candidates by role
     categorized = _categorize(candidates)
@@ -137,7 +176,9 @@ async def build_deck(
     # 6. QC Review — LLM reviews card choices + ability synergy
     qc_review_result: dict = {"verdict": "SKIP", "reasoning": "QC not run"}
     try:
-        deck, qc_review_result = await _qc_review(leader, deck, candidates, strategy, report, playstyle_hints)
+        deck, qc_review_result = await _qc_review(
+            leader, deck, candidates, strategy, report, playstyle_hints
+        )
         if qc_review_result.get("swaps_applied", 0) > 0:
             # Re-validate after QC swaps
             report = validate_deck(leader, deck)
@@ -161,10 +202,16 @@ async def build_deck(
             "ability": leader.get("ability", ""),
         },
         "cards": [
-            {"id": c["id"], "name": c.get("name", ""), "cost": c.get("cost"),
-             "power": c.get("power"), "counter": c.get("counter"),
-             "card_type": c.get("card_type", ""), "keywords": c.get("keywords", []),
-             "market_price": c.get("market_price")}
+            {
+                "id": c["id"],
+                "name": c.get("name", ""),
+                "cost": c.get("cost"),
+                "power": c.get("power"),
+                "counter": c.get("counter"),
+                "card_type": c.get("card_type", ""),
+                "keywords": c.get("keywords", []),
+                "market_price": c.get("market_price"),
+            }
             for c in deck
         ],
         "total_cards": len(deck),
@@ -180,13 +227,15 @@ async def build_deck(
     }
 
 
-async def _get_candidates(driver: AsyncDriver, leader_id: str, leader_colors: set[str]) -> list[dict]:
+async def _get_candidates(
+    driver: AsyncDriver, leader_id: str, leader_colors: set[str]
+) -> list[dict]:
     """Get all eligible cards: matching leader colors, non-LEADER, with synergy scoring."""
     color_list = list(leader_colors)
 
     async with driver.session() as session:
         # Get cards matching any of the leader's colors + not LEADER type
-        # Score by: LED_BY connection, SYNERGY connection, family overlap
+        # Score by: LED_BY, SYNERGY (family), MECHANICAL_SYNERGY (keyword) connections
         result = await session.run(
             """
             MATCH (c:Card)-[:HAS_COLOR]->(color:Color)
@@ -196,12 +245,19 @@ async def _get_candidates(driver: AsyncDriver, leader_id: str, leader_colors: se
             OPTIONAL MATCH (c)-[:HAS_KEYWORD]->(k:Keyword)
             OPTIONAL MATCH (c)-[led:LED_BY]->(:Card {id: $leader_id})
             OPTIONAL MATCH (c)-[syn:SYNERGY]-(:Card)-[:LED_BY]->(:Card {id: $leader_id})
+            OPTIONAL MATCH (c)-[msyn:MECHANICAL_SYNERGY]-(:Card)-[:LED_BY]->(:Card {id: $leader_id})
+            OPTIONAL MATCH (c)-[dsyn:SYNERGY]-(:Card {id: $leader_id})
+            OPTIONAL MATCH (c)-[dmsyn:MECHANICAL_SYNERGY]-(:Card {id: $leader_id})
             WITH c,
                  collect(DISTINCT k.name) AS keywords,
                  collect(DISTINCT color.name) AS colors,
                  CASE WHEN led IS NOT NULL THEN 3 ELSE 0 END AS led_score,
-                 CASE WHEN syn IS NOT NULL THEN 1 ELSE 0 END AS syn_score
-            RETURN c, keywords, colors, (led_score + syn_score) AS relevance,
+                 CASE WHEN syn IS NOT NULL THEN 1.5 ELSE 0 END AS syn_score,
+                 CASE WHEN msyn IS NOT NULL THEN 1.0 ELSE 0 END AS msyn_score,
+                 CASE WHEN dsyn IS NOT NULL THEN 2.0 ELSE 0 END AS direct_syn,
+                 CASE WHEN dmsyn IS NOT NULL THEN 1.0 ELSE 0 END AS direct_msyn
+            RETURN c, keywords, colors,
+                   (led_score + syn_score + msyn_score + direct_syn + direct_msyn) AS relevance,
                    c.tournament_pick_rate AS tournament_pick_rate,
                    c.top_cut_rate AS top_cut_rate,
                    c.avg_copies AS avg_copies
@@ -231,8 +287,15 @@ async def _get_candidates(driver: AsyncDriver, leader_id: str, leader_colors: se
 def _categorize(candidates: list[dict]) -> dict[str, list[dict]]:
     """Categorize candidates by gameplay role based on keywords and stats."""
     buckets: dict[str, list[dict]] = {
-        "blockers": [], "removal": [], "draw_search": [], "rush": [],
-        "finishers": [], "counter_cards": [], "characters": [], "events": [], "stages": [],
+        "blockers": [],
+        "removal": [],
+        "draw_search": [],
+        "rush": [],
+        "finishers": [],
+        "counter_cards": [],
+        "characters": [],
+        "events": [],
+        "stages": [],
     }
 
     for card in candidates:
@@ -354,9 +417,12 @@ def _fill_deck(
         tier_share = max(1, round(char_core_sets * target_min / total_weight))
         tier_share = min(tier_share, char_sets_remaining)
 
-        pool = [c for c in candidates
-                if cost_min <= (c.get("cost") or 0) <= cost_max
-                and c.get("card_type") == "CHARACTER"]
+        pool = [
+            c
+            for c in candidates
+            if cost_min <= (c.get("cost") or 0) <= cost_max
+            and c.get("card_type") == "CHARACTER"
+        ]
         pool.sort(key=lambda c: -_score_card(c))
 
         selected = 0
@@ -376,7 +442,9 @@ def _fill_deck(
     events_needed = max(0, event_target - type_count("EVENT"))
 
     if events_needed > 0:
-        event_pool = sorted(categorized.get("events", []), key=lambda c: -_score_card(c))
+        event_pool = sorted(
+            categorized.get("events", []), key=lambda c: -_score_card(c)
+        )
         for card in event_pool:
             if events_needed <= 0 or len(deck) >= 50:
                 break
@@ -394,7 +462,9 @@ def _fill_deck(
     stages_needed = max(0, stage_target - type_count("STAGE"))
 
     if stages_needed > 0:
-        stage_pool = sorted(categorized.get("stages", []), key=lambda c: -_score_card(c))
+        stage_pool = sorted(
+            categorized.get("stages", []), key=lambda c: -_score_card(c)
+        )
         for card in stage_pool:
             if stages_needed <= 0 or len(deck) >= 50:
                 break
@@ -407,7 +477,8 @@ def _fill_deck(
     role_targets = template["role_targets"]
     for role, target_count in role_targets.items():
         current_role = sum(
-            1 for c in deck
+            1
+            for c in deck
             if set(c.get("keywords", [])) & set(ROLE_KEYWORDS.get(role, []))
         )
         if current_role >= target_count:
@@ -428,9 +499,12 @@ def _fill_deck(
         if current >= target_min:
             continue
         needed = target_min - current
-        pool = [c for c in candidates
-                if cost_min <= (c.get("cost") or 0) <= cost_max
-                and c.get("card_type") != "LEADER"]
+        pool = [
+            c
+            for c in candidates
+            if cost_min <= (c.get("cost") or 0) <= cost_max
+            and c.get("card_type") != "LEADER"
+        ]
         pool.sort(key=lambda c: (-(c.get("counter") or 0), -_score_card(c)))
         for card in pool:
             if needed <= 0 or len(deck) >= 50:
@@ -450,8 +524,10 @@ def _fill_deck(
 
     # === Phase 6: Pad to 50 with extra copies of best cards ===
     if len(deck) < 50:
-        existing = sorted(set(c["id"] for c in deck),
-                          key=lambda cid: -max(_score_card(c) for c in deck if c["id"] == cid))
+        existing = sorted(
+            set(c["id"] for c in deck),
+            key=lambda cid: -max(_score_card(c) for c in deck if c["id"] == cid),
+        )
         for cid in existing:
             if len(deck) >= 50:
                 break
@@ -501,10 +577,13 @@ def _fix_violations(
     # Pad back to 50 from candidates
     if len(fixed) < 50:
         used = Counter(c["id"] for c in fixed)
-        pool = [c for c in candidates
-                if c.get("card_type") != "LEADER"
-                and set(c.get("colors", [])) & leader_colors
-                and used[c["id"]] < 4]
+        pool = [
+            c
+            for c in candidates
+            if c.get("card_type") != "LEADER"
+            and set(c.get("colors", [])) & leader_colors
+            and used[c["id"]] < 4
+        ]
         pool.sort(key=lambda c: (-(c.get("counter") or 0), -c.get("relevance", 0)))
         for card in pool:
             if len(fixed) >= 50:
@@ -610,18 +689,19 @@ def _build_deck_summary(leader: dict, deck: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _build_replacement_pool(candidates: list[dict], deck_ids: set[str], limit: int = 30) -> str:
+def _build_replacement_pool(
+    candidates: list[dict], deck_ids: set[str], limit: int = 30
+) -> str:
     """Build list of top candidates NOT in the deck for QC to choose from."""
-    pool = [
-        c for c in candidates
-        if c["id"] not in deck_ids
-    ]
+    pool = [c for c in candidates if c["id"] not in deck_ids]
     # Sort by tournament performance
-    pool.sort(key=lambda c: (
-        -(c.get("top_cut_rate") or 0),
-        -(c.get("tournament_pick_rate") or 0),
-        -_score_card(c),
-    ))
+    pool.sort(
+        key=lambda c: (
+            -(c.get("top_cut_rate") or 0),
+            -(c.get("tournament_pick_rate") or 0),
+            -_score_card(c),
+        )
+    )
 
     lines = []
     for c in pool[:limit]:
@@ -672,7 +752,9 @@ async def _qc_review(
         playstyle_context=playstyle_context,
         total_cards=len(deck),
         deck_summary=_build_deck_summary(leader, deck),
-        validation_summary=validation_report.summary if hasattr(validation_report, "summary") else str(validation_report),
+        validation_summary=validation_report.summary
+        if hasattr(validation_report, "summary")
+        else str(validation_report),
         replacement_pool=_build_replacement_pool(candidates, deck_ids),
     )
 
@@ -693,7 +775,10 @@ async def _qc_review(
 
     except (json.JSONDecodeError, IndexError, KeyError) as e:
         logger.warning(f"QC review parse error: {e}")
-        return deck, {"verdict": "SKIP", "reasoning": f"Failed to parse QC response: {e}"}
+        return deck, {
+            "verdict": "SKIP",
+            "reasoning": f"Failed to parse QC response: {e}",
+        }
     except anthropic.APIError as e:
         logger.warning(f"QC review API error: {e}")
         return deck, {"verdict": "SKIP", "reasoning": f"API error: {e}"}

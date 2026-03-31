@@ -7,8 +7,14 @@ AGENT_TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "cypher": {"type": "string", "description": "Valid Cypher query to execute"},
-                "params": {"type": "object", "description": "Query parameters (optional)"},
+                "cypher": {
+                    "type": "string",
+                    "description": "Valid Cypher query to execute",
+                },
+                "params": {
+                    "type": "object",
+                    "description": "Query parameters (optional)",
+                },
             },
             "required": ["cypher"],
         },
@@ -19,20 +25,35 @@ AGENT_TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "card_id": {"type": "string", "description": "Card ID, e.g. 'OP03-070'"},
+                "card_id": {
+                    "type": "string",
+                    "description": "Card ID, e.g. 'OP03-070'",
+                },
             },
             "required": ["card_id"],
         },
     },
     {
         "name": "find_synergies",
-        "description": "Find all cards that synergize with a given card via shared families or keywords.",
+        "description": "Find cards that synergize with a given card. Returns SYNERGY partners (shared family+color). Set include_mechanical=true to also get MECHANICAL_SYNERGY partners (shared keywords+color).",
         "parameters": {
             "type": "object",
             "properties": {
                 "card_id": {"type": "string"},
-                "max_hops": {"type": "integer", "default": 1, "description": "1=direct, 2=2-hop network"},
-                "color_filter": {"type": "string", "description": "Filter by color (optional)"},
+                "max_hops": {
+                    "type": "integer",
+                    "default": 1,
+                    "description": "1=direct, 2=2-hop network",
+                },
+                "color_filter": {
+                    "type": "string",
+                    "description": "Filter by color (optional)",
+                },
+                "include_mechanical": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Include MECHANICAL_SYNERGY (keyword-based) edges",
+                },
             },
             "required": ["card_id"],
         },
@@ -44,7 +65,10 @@ AGENT_TOOLS = [
             "type": "object",
             "properties": {
                 "target_card_id": {"type": "string", "description": "Card to counter"},
-                "user_color": {"type": "string", "description": "User's deck color for filtering"},
+                "user_color": {
+                    "type": "string",
+                    "description": "User's deck color for filtering",
+                },
             },
             "required": ["target_card_id"],
         },
@@ -55,7 +79,11 @@ AGENT_TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "card_ids": {"type": "array", "items": {"type": "string"}, "description": "List of card IDs"},
+                "card_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of card IDs",
+                },
             },
             "required": ["card_ids"],
         },
@@ -78,8 +106,14 @@ AGENT_TOOLS = [
             "type": "object",
             "properties": {
                 "leader_id": {"type": "string", "description": "Leader card ID"},
-                "budget_max": {"type": "number", "description": "Max total price in USD (optional)"},
-                "strategy": {"type": "string", "enum": ["aggro", "midrange", "control"]},
+                "budget_max": {
+                    "type": "number",
+                    "description": "Max total price in USD (optional)",
+                },
+                "strategy": {
+                    "type": "string",
+                    "enum": ["aggro", "midrange", "control"],
+                },
                 "playstyle_hints": {
                     "type": "string",
                     "description": "Comma-separated playstyle preferences from user (e.g. 'rush,low_curve,card_advantage'). Get these from analyze_leader_playstyles results.",
@@ -102,9 +136,14 @@ AGENT_TOOLS = [
                 "action": {
                     "type": "string",
                     "enum": [
-                        "highlight_nodes", "show_card_detail", "show_comparison",
-                        "animate_synergy_path", "update_deck_list", "show_mana_curve",
-                        "focus_subgraph", "clear_highlights",
+                        "highlight_nodes",
+                        "show_card_detail",
+                        "show_comparison",
+                        "animate_synergy_path",
+                        "update_deck_list",
+                        "show_mana_curve",
+                        "focus_subgraph",
+                        "clear_highlights",
                     ],
                 },
                 "payload": {"type": "object", "description": "Action-specific data"},
@@ -119,7 +158,11 @@ AGENT_TOOLS = [
             "type": "object",
             "properties": {
                 "leader_id": {"type": "string", "description": "Leader card ID"},
-                "card_ids": {"type": "array", "items": {"type": "string"}, "description": "List of 50 card IDs in the deck"},
+                "card_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of 50 card IDs in the deck",
+                },
             },
             "required": ["leader_id", "card_ids"],
         },
@@ -131,7 +174,11 @@ AGENT_TOOLS = [
             "type": "object",
             "properties": {
                 "leader_id": {"type": "string", "description": "Leader card ID"},
-                "card_ids": {"type": "array", "items": {"type": "string"}, "description": "List of card IDs in the deck"},
+                "card_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of card IDs in the deck",
+                },
             },
             "required": ["leader_id", "card_ids"],
         },
@@ -150,7 +197,10 @@ AGENT_TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "leader_id": {"type": "string", "description": "Leader card ID, e.g. 'OP12-061'"},
+                "leader_id": {
+                    "type": "string",
+                    "description": "Leader card ID, e.g. 'OP12-061'",
+                },
             },
             "required": ["leader_id"],
         },
@@ -162,7 +212,11 @@ AGENT_TOOLS = [
             "type": "object",
             "properties": {
                 "leader_id": {"type": "string", "description": "Leader card ID"},
-                "deck_card_ids": {"type": "array", "items": {"type": "string"}, "description": "Card IDs in user's deck"},
+                "deck_card_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Card IDs in user's deck",
+                },
             },
             "required": ["leader_id", "deck_card_ids"],
         },
@@ -174,7 +228,11 @@ AGENT_TOOLS = [
             "type": "object",
             "properties": {
                 "leader_id": {"type": "string", "description": "Leader card ID"},
-                "limit": {"type": "integer", "default": 10, "description": "Number of cards to return"},
+                "limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Number of cards to return",
+                },
             },
             "required": ["leader_id"],
         },
@@ -193,9 +251,19 @@ AGENT_TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "deck_card_ids": {"type": "array", "items": {"type": "string"}, "description": "Current deck card IDs"},
-                "incoming_card_id": {"type": "string", "description": "Card the user wants to add"},
-                "leader_id": {"type": "string", "description": "Leader card ID (optional)"},
+                "deck_card_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Current deck card IDs",
+                },
+                "incoming_card_id": {
+                    "type": "string",
+                    "description": "Card the user wants to add",
+                },
+                "leader_id": {
+                    "type": "string",
+                    "description": "Leader card ID (optional)",
+                },
             },
             "required": ["deck_card_ids", "incoming_card_id"],
         },

@@ -75,9 +75,15 @@ You are an OPTCG deck building and card analysis AI. You have access to a knowle
 - NO BANNED cards — any card on the official Bandai ban list is illegal
 - A deck that violates ANY of these rules is illegal and must be corrected
 
+## SYNERGY TYPES IN THE KNOWLEDGE GRAPH
+- **SYNERGY** edge: Cards sharing ≥1 family AND ≥1 color. Weight = shared families count. PRIMARY signal — family synergy reflects intentional design groupings (e.g., "Straw Hat Crew" cards are designed to work together).
+- **MECHANICAL_SYNERGY** edge: Cards sharing ≥2 keywords AND ≥1 color. Weight = shared keywords count. SECONDARY signal — identifies cards with similar gameplay mechanics (e.g., both have Blocker + Draw).
+- When using find_synergies, set include_mechanical=true to get BOTH types. Present SYNERGY partners first (stronger signal), then MECHANICAL_SYNERGY partners as "also consider."
+- Weight SYNERGY ~1.5x more than MECHANICAL_SYNERGY in deck recommendations.
+
 ## When analyzing a card:
 1. Call get_card to look up full data
-2. Call find_synergies to find partners
+2. Call find_synergies (with include_mechanical=true) to find partners
 3. Evaluate using game mechanics knowledge
 4. Reference actual card text from tool results
 
@@ -131,7 +137,9 @@ async def build_system_prompt(
 
     # Inject banned cards list so agent always knows
     if banned_cards:
-        banned_lines = [f"- **{c.get('name', c['id'])}** ({c['id']})" for c in banned_cards]
+        banned_lines = [
+            f"- **{c.get('name', c['id'])}** ({c['id']})" for c in banned_cards
+        ]
         parts.append(
             f"\n## Currently Banned Cards ({len(banned_cards)} cards)\n"
             f"The following cards are banned from official tournament play:\n"
@@ -146,8 +154,11 @@ async def build_system_prompt(
         cards = current_deck["cards"]
         # Count card IDs for readable format
         from collections import Counter
+
         card_counts = Counter(cards)
-        deck_summary = ", ".join(f"{cnt}x {cid}" for cid, cnt in card_counts.most_common())
+        deck_summary = ", ".join(
+            f"{cnt}x {cid}" for cid, cnt in card_counts.most_common()
+        )
         parts.append(
             f"\n## User's Current Deck ({len(cards)}/50 cards)\n"
             f"Leader: {current_deck.get('leader', 'Not set')}\n"
@@ -157,6 +168,8 @@ async def build_system_prompt(
             f"When they ask about their deck, reference these actual cards."
         )
     else:
-        parts.append("\n## User's Current Deck\nNo deck currently built. The user has not added any cards yet.")
+        parts.append(
+            "\n## User's Current Deck\nNo deck currently built. The user has not added any cards yet."
+        )
 
     return "\n".join(parts)

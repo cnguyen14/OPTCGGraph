@@ -29,7 +29,11 @@ async def execute_tool(tool_name: str, tool_input: dict, driver: AsyncDriver) ->
         elif tool_name == "build_deck_shell":
             return await _build_deck_shell(driver, tool_input)
         elif tool_name == "update_ui_state":
-            return {"action": tool_input.get("action"), "payload": tool_input.get("payload"), "status": "emitted"}
+            return {
+                "action": tool_input.get("action"),
+                "payload": tool_input.get("payload"),
+                "status": "emitted",
+            }
         elif tool_name == "validate_deck":
             return await _validate_deck(driver, tool_input)
         elif tool_name == "suggest_deck_fixes":
@@ -60,7 +64,10 @@ async def _execute_cypher(driver: AsyncDriver, params: dict) -> dict:
 
     # Safety: block write operations
     cypher_upper = cypher.upper().strip()
-    if any(kw in cypher_upper for kw in ["CREATE", "DELETE", "SET", "MERGE", "REMOVE", "DROP"]):
+    if any(
+        kw in cypher_upper
+        for kw in ["CREATE", "DELETE", "SET", "MERGE", "REMOVE", "DROP"]
+    ):
         return {"error": "Write operations are not allowed from agent queries"}
 
     async with driver.session() as session:
@@ -94,6 +101,7 @@ async def _find_synergies(driver: AsyncDriver, params: dict) -> dict:
         params["card_id"],
         params.get("max_hops", 1),
         params.get("color_filter"),
+        include_mechanical=params.get("include_mechanical", False),
     )
     return {"card_id": params["card_id"], "partners": partners, "total": len(partners)}
 
@@ -229,11 +237,13 @@ async def _get_meta_overview(driver: AsyncDriver) -> dict:
         )
         archetypes = []
         async for r in arch_r:
-            archetypes.append({
-                "archetype": r["archetype"],
-                "count": r["cnt"],
-                "share": round(r["cnt"] / total_decks, 3) if total_decks else 0,
-            })
+            archetypes.append(
+                {
+                    "archetype": r["archetype"],
+                    "count": r["cnt"],
+                    "share": round(r["cnt"] / total_decks, 3) if total_decks else 0,
+                }
+            )
 
         leader_r = await session.run(
             """
@@ -242,7 +252,10 @@ async def _get_meta_overview(driver: AsyncDriver) -> dict:
             ORDER BY cnt DESC LIMIT 10
             """
         )
-        leaders = [{"id": r["id"], "name": r["name"], "deck_count": r["cnt"]} async for r in leader_r]
+        leaders = [
+            {"id": r["id"], "name": r["name"], "deck_count": r["cnt"]}
+            async for r in leader_r
+        ]
 
     return {
         "total_decks": total_decks,
@@ -287,7 +300,9 @@ async def _get_leader_meta(driver: AsyncDriver, params: dict) -> dict:
         "leader_id": leader_id,
         "leader_name": rec["leader_name"] or "",
         "total_decks": rec["total_decks"],
-        "avg_placement": round(rec["avg_placement"], 1) if rec["avg_placement"] else None,
+        "avg_placement": round(rec["avg_placement"], 1)
+        if rec["avg_placement"]
+        else None,
         "top_cut_count": rec["top_cut_count"],
         "top_archetypes": rec["top_archetypes"] or [],
         "popular_cards": popular,
@@ -414,6 +429,7 @@ async def _suggest_card_swap(driver: AsyncDriver, params: dict) -> dict:
 async def _get_banned_cards(driver: AsyncDriver) -> dict:
     """Get the official banned card list from the knowledge graph."""
     from backend.graph.queries import get_banned_cards
+
     banned = await get_banned_cards(driver)
     return {
         "banned_cards": banned,

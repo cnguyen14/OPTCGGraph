@@ -42,8 +42,10 @@ async def suggest_fixes(
     report = validate_deck(leader, cards)
     suggestions: list[dict] = []
 
-    # Get candidate pool for replacements
-    replacements_pool = await _get_replacement_pool(driver, leader_colors, set(card_ids))
+    # Get candidate pool for replacements (synergy-aware: scores by connections to existing deck)
+    replacements_pool = await _get_replacement_pool(
+        driver, leader_colors, set(card_ids), set(card_ids)
+    )
 
     deck_ids = Counter(card_ids)
 
@@ -59,23 +61,25 @@ async def suggest_fixes(
                     exclude_ids=set(deck_ids.keys()),
                 )
                 if replacement:
-                    suggestions.append({
-                        "type": "rule_fix",
-                        "check_name": "COLOR_MATCH",
-                        "remove": {
-                            "id": v["id"],
-                            "name": v.get("name", ""),
-                            "reason": f"Color {v.get('card_colors', [])} doesn't match leader {list(leader_colors)}",
-                        },
-                        "add": {
-                            "id": replacement["id"],
-                            "name": replacement.get("name", ""),
-                            "cost": replacement.get("cost"),
-                            "counter": replacement.get("counter"),
-                            "benefit": _describe_card(replacement),
-                        },
-                        "priority": "high",
-                    })
+                    suggestions.append(
+                        {
+                            "type": "rule_fix",
+                            "check_name": "COLOR_MATCH",
+                            "remove": {
+                                "id": v["id"],
+                                "name": v.get("name", ""),
+                                "reason": f"Color {v.get('card_colors', [])} doesn't match leader {list(leader_colors)}",
+                            },
+                            "add": {
+                                "id": replacement["id"],
+                                "name": replacement.get("name", ""),
+                                "cost": replacement.get("cost"),
+                                "counter": replacement.get("counter"),
+                                "benefit": _describe_card(replacement),
+                            },
+                            "priority": "high",
+                        }
+                    )
 
         elif check.name == "COPY_LIMIT" and check.details.get("violations"):
             for cid, count in check.details["violations"].items():
@@ -89,23 +93,27 @@ async def suggest_fixes(
                         exclude_ids=set(deck_ids.keys()),
                     )
                     if replacement:
-                        suggestions.append({
-                            "type": "rule_fix",
-                            "check_name": "COPY_LIMIT",
-                            "remove": {
-                                "id": cid,
-                                "name": card_data.get("name", "") if card_data else cid,
-                                "reason": f"Exceeds 4-copy limit ({count} copies)",
-                            },
-                            "add": {
-                                "id": replacement["id"],
-                                "name": replacement.get("name", ""),
-                                "cost": replacement.get("cost"),
-                                "counter": replacement.get("counter"),
-                                "benefit": _describe_card(replacement),
-                            },
-                            "priority": "high",
-                        })
+                        suggestions.append(
+                            {
+                                "type": "rule_fix",
+                                "check_name": "COPY_LIMIT",
+                                "remove": {
+                                    "id": cid,
+                                    "name": card_data.get("name", "")
+                                    if card_data
+                                    else cid,
+                                    "reason": f"Exceeds 4-copy limit ({count} copies)",
+                                },
+                                "add": {
+                                    "id": replacement["id"],
+                                    "name": replacement.get("name", ""),
+                                    "cost": replacement.get("cost"),
+                                    "counter": replacement.get("counter"),
+                                    "benefit": _describe_card(replacement),
+                                },
+                                "priority": "high",
+                            }
+                        )
 
         elif check.name == "NO_LEADER_IN_DECK" and check.details.get("leaders"):
             for lid in check.details["leaders"]:
@@ -117,30 +125,38 @@ async def suggest_fixes(
                     exclude_ids=set(deck_ids.keys()),
                 )
                 if replacement:
-                    suggestions.append({
-                        "type": "rule_fix",
-                        "check_name": "NO_LEADER_IN_DECK",
-                        "remove": {
-                            "id": lid,
-                            "name": leader_card.get("name", "") if leader_card else lid,
-                            "reason": "LEADER cards cannot be in the main deck",
-                        },
-                        "add": {
-                            "id": replacement["id"],
-                            "name": replacement.get("name", ""),
-                            "cost": replacement.get("cost"),
-                            "counter": replacement.get("counter"),
-                            "benefit": _describe_card(replacement),
-                        },
-                        "priority": "high",
-                    })
+                    suggestions.append(
+                        {
+                            "type": "rule_fix",
+                            "check_name": "NO_LEADER_IN_DECK",
+                            "remove": {
+                                "id": lid,
+                                "name": leader_card.get("name", "")
+                                if leader_card
+                                else lid,
+                                "reason": "LEADER cards cannot be in the main deck",
+                            },
+                            "add": {
+                                "id": replacement["id"],
+                                "name": replacement.get("name", ""),
+                                "cost": replacement.get("cost"),
+                                "counter": replacement.get("counter"),
+                                "benefit": _describe_card(replacement),
+                            },
+                            "priority": "high",
+                        }
+                    )
 
     # === QUALITY IMPROVEMENTS (priority: medium/low) ===
 
     for check in report.warnings:
         if check.name == "COUNTER_DENSITY":
             # Find 0-counter cards in deck, suggest swapping for counter cards
-            zero_counter = [c for c in cards if (c.get("counter") or 0) == 0 and c.get("card_type") == "CHARACTER"]
+            zero_counter = [
+                c
+                for c in cards
+                if (c.get("counter") or 0) == 0 and c.get("card_type") == "CHARACTER"
+            ]
             zero_counter.sort(key=lambda c: c.get("cost") or 0)
             for card in zero_counter[:3]:  # Suggest up to 3 swaps
                 replacement = _find_replacement(
@@ -150,24 +166,28 @@ async def suggest_fixes(
                     min_counter=1000,
                     exclude_ids=set(deck_ids.keys()),
                 )
-                if replacement and (replacement.get("counter") or 0) > (card.get("counter") or 0):
-                    suggestions.append({
-                        "type": "quality_improvement",
-                        "check_name": "COUNTER_DENSITY",
-                        "remove": {
-                            "id": card["id"],
-                            "name": card.get("name", ""),
-                            "reason": f"0 counter value (cost {card.get('cost')})",
-                        },
-                        "add": {
-                            "id": replacement["id"],
-                            "name": replacement.get("name", ""),
-                            "cost": replacement.get("cost"),
-                            "counter": replacement.get("counter"),
-                            "benefit": _describe_card(replacement),
-                        },
-                        "priority": "medium",
-                    })
+                if replacement and (replacement.get("counter") or 0) > (
+                    card.get("counter") or 0
+                ):
+                    suggestions.append(
+                        {
+                            "type": "quality_improvement",
+                            "check_name": "COUNTER_DENSITY",
+                            "remove": {
+                                "id": card["id"],
+                                "name": card.get("name", ""),
+                                "reason": f"0 counter value (cost {card.get('cost')})",
+                            },
+                            "add": {
+                                "id": replacement["id"],
+                                "name": replacement.get("name", ""),
+                                "cost": replacement.get("cost"),
+                                "counter": replacement.get("counter"),
+                                "benefit": _describe_card(replacement),
+                            },
+                            "priority": "medium",
+                        }
+                    )
 
         elif check.name == "FOUR_COPY_CORE":
             # Find 3x cards → suggest promoting to 4x by removing a 1x card
@@ -175,7 +195,7 @@ async def suggest_fixes(
             one_copy = [cid for cid, cnt in deck_ids.items() if cnt == 1]
             one_copy_cards = [c for c in cards if c["id"] in one_copy]
             # Sort 1x cards by lowest impact (low relevance / low counter)
-            one_copy_cards.sort(key=lambda c: (c.get("counter") or 0))
+            one_copy_cards.sort(key=lambda c: c.get("counter") or 0)
 
             for promote_id in three_copy[:3]:
                 if not one_copy_cards:
@@ -183,23 +203,25 @@ async def suggest_fixes(
                 remove_card = one_copy_cards.pop(0)
                 promote_card = next((c for c in cards if c["id"] == promote_id), None)
                 if promote_card:
-                    suggestions.append({
-                        "type": "quality_improvement",
-                        "check_name": "FOUR_COPY_CORE",
-                        "remove": {
-                            "id": remove_card["id"],
-                            "name": remove_card.get("name", ""),
-                            "reason": f"1x card — low consistency, cost {remove_card.get('cost')}",
-                        },
-                        "add": {
-                            "id": promote_card["id"],
-                            "name": promote_card.get("name", ""),
-                            "cost": promote_card.get("cost"),
-                            "counter": promote_card.get("counter"),
-                            "benefit": f"Promote to 4x for consistency ({promote_card.get('name')})",
-                        },
-                        "priority": "medium",
-                    })
+                    suggestions.append(
+                        {
+                            "type": "quality_improvement",
+                            "check_name": "FOUR_COPY_CORE",
+                            "remove": {
+                                "id": remove_card["id"],
+                                "name": remove_card.get("name", ""),
+                                "reason": f"1x card — low consistency, cost {remove_card.get('cost')}",
+                            },
+                            "add": {
+                                "id": promote_card["id"],
+                                "name": promote_card.get("name", ""),
+                                "cost": promote_card.get("cost"),
+                                "counter": promote_card.get("counter"),
+                                "benefit": f"Promote to 4x for consistency ({promote_card.get('name')})",
+                            },
+                            "priority": "medium",
+                        }
+                    )
 
         elif check.name == "BLOCKER_COUNT":
             # Add blockers
@@ -212,23 +234,25 @@ async def suggest_fixes(
             )
             weakest = _find_weakest_card(cards, deck_ids, exclude_roles={"Blocker"})
             if replacement and weakest:
-                suggestions.append({
-                    "type": "quality_improvement",
-                    "check_name": "BLOCKER_COUNT",
-                    "remove": {
-                        "id": weakest["id"],
-                        "name": weakest.get("name", ""),
-                        "reason": f"No key role, cost {weakest.get('cost')}",
-                    },
-                    "add": {
-                        "id": replacement["id"],
-                        "name": replacement.get("name", ""),
-                        "cost": replacement.get("cost"),
-                        "counter": replacement.get("counter"),
-                        "benefit": _describe_card(replacement),
-                    },
-                    "priority": "low",
-                })
+                suggestions.append(
+                    {
+                        "type": "quality_improvement",
+                        "check_name": "BLOCKER_COUNT",
+                        "remove": {
+                            "id": weakest["id"],
+                            "name": weakest.get("name", ""),
+                            "reason": f"No key role, cost {weakest.get('cost')}",
+                        },
+                        "add": {
+                            "id": replacement["id"],
+                            "name": replacement.get("name", ""),
+                            "cost": replacement.get("cost"),
+                            "counter": replacement.get("counter"),
+                            "benefit": _describe_card(replacement),
+                        },
+                        "priority": "low",
+                    }
+                )
 
         elif check.name == "WIN_CONDITION":
             replacement = _find_replacement(
@@ -241,34 +265,47 @@ async def suggest_fixes(
             )
             weakest = _find_weakest_card(cards, deck_ids)
             if replacement and weakest:
-                suggestions.append({
-                    "type": "quality_improvement",
-                    "check_name": "WIN_CONDITION",
-                    "remove": {
-                        "id": weakest["id"],
-                        "name": weakest.get("name", ""),
-                        "reason": f"Low impact card, cost {weakest.get('cost')}",
-                    },
-                    "add": {
-                        "id": replacement["id"],
-                        "name": replacement.get("name", ""),
-                        "cost": replacement.get("cost"),
-                        "counter": replacement.get("counter"),
-                        "benefit": _describe_card(replacement),
-                    },
-                    "priority": "low",
-                })
+                suggestions.append(
+                    {
+                        "type": "quality_improvement",
+                        "check_name": "WIN_CONDITION",
+                        "remove": {
+                            "id": weakest["id"],
+                            "name": weakest.get("name", ""),
+                            "reason": f"Low impact card, cost {weakest.get('cost')}",
+                        },
+                        "add": {
+                            "id": replacement["id"],
+                            "name": replacement.get("name", ""),
+                            "cost": replacement.get("cost"),
+                            "counter": replacement.get("counter"),
+                            "benefit": _describe_card(replacement),
+                        },
+                        "priority": "low",
+                    }
+                )
 
     # Sort: rule_fix first, then by priority
     priority_order = {"high": 0, "medium": 1, "low": 2}
-    suggestions.sort(key=lambda s: (0 if s["type"] == "rule_fix" else 1, priority_order.get(s["priority"], 9)))
+    suggestions.sort(
+        key=lambda s: (
+            0 if s["type"] == "rule_fix" else 1,
+            priority_order.get(s["priority"], 9),
+        )
+    )
 
     return {"suggestions": suggestions, "validation": report.to_dict()}
 
 
-async def _get_replacement_pool(driver: AsyncDriver, leader_colors: set[str], exclude_ids: set[str]) -> list[dict]:
-    """Get pool of valid replacement cards matching leader colors."""
+async def _get_replacement_pool(
+    driver: AsyncDriver,
+    leader_colors: set[str],
+    exclude_ids: set[str],
+    deck_card_ids: set[str] | None = None,
+) -> list[dict]:
+    """Get pool of valid replacement cards matching leader colors, scored by synergy with deck."""
     color_list = list(leader_colors)
+    deck_ids_list = list(deck_card_ids) if deck_card_ids else []
 
     async with driver.session() as session:
         result = await session.run(
@@ -276,12 +313,20 @@ async def _get_replacement_pool(driver: AsyncDriver, leader_colors: set[str], ex
             MATCH (c:Card)-[:HAS_COLOR]->(color:Color)
             WHERE color.name IN $colors
               AND c.card_type IN ['CHARACTER', 'EVENT', 'STAGE']
+              AND (c.banned IS NULL OR c.banned = false)
             OPTIONAL MATCH (c)-[:HAS_KEYWORD]->(k:Keyword)
             WITH c, collect(DISTINCT k.name) AS keywords, collect(DISTINCT color.name) AS colors
-            RETURN c, keywords, colors
-            ORDER BY c.counter DESC, c.cost ASC
+            OPTIONAL MATCH (c)-[syn:SYNERGY]-(other:Card)
+            WHERE other.id IN $deck_ids
+            WITH c, keywords, colors, count(DISTINCT syn) AS syn_connections
+            OPTIONAL MATCH (c)-[msyn:MECHANICAL_SYNERGY]-(other2:Card)
+            WHERE other2.id IN $deck_ids
+            WITH c, keywords, colors, syn_connections, count(DISTINCT msyn) AS msyn_connections
+            RETURN c, keywords, colors, syn_connections, msyn_connections
+            ORDER BY (syn_connections * 1.5 + msyn_connections) DESC, c.counter DESC, c.cost ASC
             """,
             colors=color_list,
+            deck_ids=deck_ids_list,
         )
         pool = []
         seen = set()
@@ -289,6 +334,8 @@ async def _get_replacement_pool(driver: AsyncDriver, leader_colors: set[str], ex
             card = dict(record["c"])
             card["keywords"] = record["keywords"]
             card["colors"] = record["colors"]
+            card["syn_connections"] = record["syn_connections"]
+            card["msyn_connections"] = record["msyn_connections"]
             if card["id"] not in seen and card["id"] not in exclude_ids:
                 pool.append(card)
                 seen.add(card["id"])
@@ -317,12 +364,14 @@ def _find_replacement(
     if min_power is not None:
         candidates = [c for c in candidates if (c.get("power") or 0) >= min_power]
     if required_keyword:
-        candidates = [c for c in candidates if required_keyword in (c.get("keywords") or [])]
+        candidates = [
+            c for c in candidates if required_keyword in (c.get("keywords") or [])
+        ]
 
     if not candidates:
         return None
 
-    # Sort by best match
+    # Sort by best match (includes synergy with existing deck)
     def score(c):
         s = 0.0
         if target_cost is not None:
@@ -331,6 +380,8 @@ def _find_replacement(
         if prefer_counter:
             s += (c.get("counter") or 0) / 1000
         s += len(c.get("keywords") or []) * 0.3
+        s += c.get("syn_connections", 0) * 1.5
+        s += c.get("msyn_connections", 0) * 1.0
         return s
 
     candidates.sort(key=lambda c: -score(c))
@@ -349,7 +400,12 @@ def _find_weakest_card(
         # Skip if card fills an important role we want to keep
         if exclude_roles:
             has_excluded = False
-            role_map = {"Blocker": {"Blocker"}, "Rush": {"Rush"}, "Draw": {"Draw", "Search"}, "Removal": {"KO", "Bounce", "Trash"}}
+            role_map = {
+                "Blocker": {"Blocker"},
+                "Rush": {"Rush"},
+                "Draw": {"Draw", "Search"},
+                "Removal": {"KO", "Bounce", "Trash"},
+            }
             for role in exclude_roles:
                 if keywords & role_map.get(role, set()):
                     has_excluded = True
@@ -360,7 +416,7 @@ def _find_weakest_card(
         # Lower score = weaker card
         score = (card.get("counter") or 0) / 1000
         score += len(keywords) * 0.5
-        score += (1 if deck_ids[card["id"]] > 1 else 0)  # Prefer removing 1x cards
+        score += 1 if deck_ids[card["id"]] > 1 else 0  # Prefer removing 1x cards
         scored.append((score, card))
 
     if not scored:

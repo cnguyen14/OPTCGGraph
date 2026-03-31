@@ -53,7 +53,15 @@ async def get_synergies(
     partners = await get_card_synergies(driver, card_id, max_hops, color)
     return SynergyResponse(
         card_id=card_id,
-        partners=[SynergyPartner(**{k: (p.get(k) or SynergyPartner.model_fields[k].default) for k in SynergyPartner.model_fields}) for p in partners],
+        partners=[
+            SynergyPartner(
+                **{
+                    k: (p.get(k) or SynergyPartner.model_fields[k].default)
+                    for k in SynergyPartner.model_fields
+                }
+            )
+            for p in partners
+        ],
         total=len(partners),
     )
 
@@ -73,7 +81,7 @@ async def get_deck_candidates(
     limit: int = Query(50, ge=1, le=200),
     driver: AsyncDriver = Depends(_get_driver),
 ):
-    """Find deck candidate cards for a leader based on family + color synergy."""
+    """Find deck candidate cards for a leader based on family + color + synergy edges."""
     async with driver.session() as session:
         result = await session.run(
             """
@@ -82,9 +90,17 @@ async def get_deck_candidates(
             WHERE card.card_type IN ['CHARACTER', 'EVENT', 'STAGE']
             WITH l, card, collect(DISTINCT f.name) AS shared_families
             MATCH (l)-[:HAS_COLOR]->(c:Color)<-[:HAS_COLOR]-(card)
-            WITH card, shared_families, collect(DISTINCT c.name) AS shared_colors
-            RETURN card, shared_families, shared_colors
-            ORDER BY size(shared_families) DESC, card.cost ASC
+            WITH l, card, shared_families, collect(DISTINCT c.name) AS shared_colors
+            OPTIONAL MATCH (card)-[syn:SYNERGY]-(l)
+            OPTIONAL MATCH (card)-[msyn:MECHANICAL_SYNERGY]-(l)
+            WITH card, shared_families, shared_colors,
+                 COALESCE(syn.weight, 0) AS syn_weight,
+                 COALESCE(msyn.weight, 0) AS msyn_weight,
+                 msyn.shared_keywords AS shared_keywords
+            RETURN card, shared_families, shared_colors, shared_keywords,
+                   syn_weight, msyn_weight,
+                   (size(shared_families) + syn_weight * 1.5 + msyn_weight * 1.0) AS synergy_score
+            ORDER BY synergy_score DESC, card.cost ASC
             LIMIT $limit
             """,
             leader_id=leader_id,
@@ -96,6 +112,10 @@ async def get_deck_candidates(
                 **dict(r["card"]),
                 "shared_families": r["shared_families"],
                 "shared_colors": r["shared_colors"],
+                "shared_keywords": r["shared_keywords"] or [],
+                "synergy_score": r["synergy_score"],
+                "syn_weight": r["syn_weight"],
+                "msyn_weight": r["msyn_weight"],
             }
             for r in records
         ]
@@ -118,7 +138,9 @@ async def get_counters(
     driver: AsyncDriver = Depends(_get_driver),
 ):
     """Find cards that counter a specific card."""
-    color_clause = "AND (counter)-[:HAS_COLOR]->(:Color {name: $color})" if color else ""
+    color_clause = (
+        "AND (counter)-[:HAS_COLOR]->(:Color {name: $color})" if color else ""
+    )
     params: dict = {"target_id": against}
     if color:
         params["color"] = color
@@ -145,7 +167,10 @@ async def get_curve(
     driver: AsyncDriver = Depends(_get_driver),
 ):
     """Get mana curve distribution for cards matching filters."""
-    conditions = ["c.card_type IN ['CHARACTER', 'EVENT', 'STAGE']", "c.cost IS NOT NULL"]
+    conditions = [
+        "c.card_type IN ['CHARACTER', 'EVENT', 'STAGE']",
+        "c.cost IS NOT NULL",
+    ]
     params: dict = {}
     if color:
         conditions.append("(c)-[:HAS_COLOR]->(:Color {name: $color})")
@@ -168,7 +193,9 @@ async def get_curve(
         entries = []
         total = 0
         async for r in result:
-            entries.append(CurveEntry(cost=r["cost"], count=r["count"], cards=r["card_ids"][:10]))
+            entries.append(
+                CurveEntry(cost=r["cost"], count=r["count"], cards=r["card_ids"][:10])
+            )
             total += r["count"]
         return CurveResponse(curve=entries, total=total)
 

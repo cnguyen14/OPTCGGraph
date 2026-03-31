@@ -36,13 +36,18 @@ async def get_card_by_id(driver: AsyncDriver, card_id: str) -> dict | None:
 
 
 async def get_card_synergies(
-    driver: AsyncDriver, card_id: str, max_hops: int = 1, color_filter: str | None = None
+    driver: AsyncDriver,
+    card_id: str,
+    max_hops: int = 1,
+    color_filter: str | None = None,
+    include_mechanical: bool = False,
 ) -> list[dict]:
     """Find synergy partners for a card.
 
     For LEADERs: shows only CHARACTER/EVENT/STAGE that could go in a deck.
     For non-LEADERs: shows all synergy partners except other LEADERs.
-    Only uses SYNERGY edges (family+color based), not MECHANICAL_SYNERGY.
+    Uses SYNERGY edges (family+color). When include_mechanical=True, also
+    includes MECHANICAL_SYNERGY edges (keyword+color).
     """
     color_clause = ""
     query_params: dict = {"id": card_id}
@@ -50,19 +55,46 @@ async def get_card_synergies(
         color_clause = "AND (partner)-[:HAS_COLOR]->(:Color {name: $color})"
         query_params["color"] = color_filter
 
-    # Only use SYNERGY edges (family+color), exclude LEADER↔LEADER
-    query = f"""
-        MATCH (c:Card {{id: $id}})-[:SYNERGY*1..{max_hops}]-(partner:Card)
-        WHERE partner.id <> $id
-          AND partner.card_type IN ['CHARACTER', 'EVENT', 'STAGE']
-          {color_clause}
-        RETURN DISTINCT partner
-        LIMIT 50
-    """
+    rel_pattern = "SYNERGY|MECHANICAL_SYNERGY" if include_mechanical else "SYNERGY"
+
+    # Direct edges (1-hop) return rich metadata; multi-hop returns partners only
+    if max_hops == 1:
+        query = f"""
+            MATCH (c:Card {{id: $id}})-[r:{rel_pattern}]-(partner:Card)
+            WHERE partner.id <> $id
+              AND partner.card_type IN ['CHARACTER', 'EVENT', 'STAGE']
+              {color_clause}
+            RETURN DISTINCT partner,
+                   type(r) AS synergy_type,
+                   r.weight AS synergy_weight,
+                   r.shared_families AS shared_families,
+                   r.shared_keywords AS shared_keywords
+            ORDER BY r.weight DESC
+            LIMIT 50
+        """
+    else:
+        query = f"""
+            MATCH (c:Card {{id: $id}})-[:{rel_pattern}*1..{max_hops}]-(partner:Card)
+            WHERE partner.id <> $id
+              AND partner.card_type IN ['CHARACTER', 'EVENT', 'STAGE']
+              {color_clause}
+            RETURN DISTINCT partner
+            LIMIT 50
+        """
+
     async with driver.session() as session:
         result = await session.run(query, **query_params)
         records = [record async for record in result]
-        return [dict(r["partner"]) for r in records]
+        partners = []
+        for r in records:
+            p = dict(r["partner"])
+            if max_hops == 1:
+                p["synergy_type"] = r["synergy_type"]
+                p["synergy_weight"] = r["synergy_weight"]
+                p["shared_families"] = r["shared_families"] or []
+                p["shared_keywords"] = r["shared_keywords"] or []
+            partners.append(p)
+        return partners
 
 
 async def get_card_network(driver: AsyncDriver, card_id: str, hops: int = 2) -> dict:
@@ -125,7 +157,9 @@ async def search_cards(
     params: dict = {"limit": limit, "offset": offset}
 
     if keyword:
-        conditions.append("(toLower(c.id) CONTAINS $keyword OR toLower(c.name) CONTAINS $keyword OR toLower(c.ability) CONTAINS $keyword)")
+        conditions.append(
+            "(toLower(c.id) CONTAINS $keyword OR toLower(c.name) CONTAINS $keyword OR toLower(c.ability) CONTAINS $keyword)"
+        )
         params["keyword"] = keyword.lower()
     if cost_min is not None:
         conditions.append("c.cost >= $cost_min")
@@ -182,13 +216,15 @@ async def search_cards(
         cards = []
         async for record in data_result:
             card_node = record["c"]
-            cards.append({
-                **dict(card_node),
-                "colors": record["colors"],
-                "families": record["families"],
-                "set_name": record["set_name"],
-                "keywords": record["keywords"],
-            })
+            cards.append(
+                {
+                    **dict(card_node),
+                    "colors": record["colors"],
+                    "families": record["families"],
+                    "set_name": record["set_name"],
+                    "keywords": record["keywords"],
+                }
+            )
 
         return {"cards": cards, "total": total, "offset": offset, "limit": limit}
 
@@ -196,16 +232,24 @@ async def search_cards(
 async def get_facets(driver: AsyncDriver) -> dict:
     """Get available filter values for card search."""
     async with driver.session() as session:
-        colors_result = await session.run("MATCH (c:Color) RETURN c.name AS name ORDER BY c.name")
+        colors_result = await session.run(
+            "MATCH (c:Color) RETURN c.name AS name ORDER BY c.name"
+        )
         colors = [r["name"] async for r in colors_result]
 
-        types_result = await session.run("MATCH (c:Card) RETURN DISTINCT c.card_type AS name ORDER BY name")
+        types_result = await session.run(
+            "MATCH (c:Card) RETURN DISTINCT c.card_type AS name ORDER BY name"
+        )
         card_types = [r["name"] async for r in types_result]
 
-        families_result = await session.run("MATCH (f:Family) RETURN f.name AS name ORDER BY f.name")
+        families_result = await session.run(
+            "MATCH (f:Family) RETURN f.name AS name ORDER BY f.name"
+        )
         families = [r["name"] async for r in families_result]
 
-        sets_result = await session.run("MATCH (s:Set) RETURN DISTINCT s.id AS id, s.name AS name ORDER BY s.id")
+        sets_result = await session.run(
+            "MATCH (s:Set) RETURN DISTINCT s.id AS id, s.name AS name ORDER BY s.id"
+        )
         sets = [{"id": r["id"], "name": r["name"]} async for r in sets_result]
 
         rarities_result = await session.run(
@@ -214,7 +258,13 @@ async def get_facets(driver: AsyncDriver) -> dict:
         )
         rarities = [r["name"] async for r in rarities_result]
 
-        return {"colors": colors, "card_types": card_types, "families": families, "sets": sets, "rarities": rarities}
+        return {
+            "colors": colors,
+            "card_types": card_types,
+            "families": families,
+            "sets": sets,
+            "rarities": rarities,
+        }
 
 
 async def get_deck_synergies(driver: AsyncDriver, card_ids: list[str]) -> dict:
