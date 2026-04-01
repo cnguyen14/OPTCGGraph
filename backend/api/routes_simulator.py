@@ -90,14 +90,12 @@ async def _store_sim_history(
     deck_hash = hashlib.md5(json.dumps(sorted(deck1_card_ids)).encode()).hexdigest()[:12]
     redis_key = f"deck-sims:{leader_id}:{deck_hash}"
 
-    # Extract summary from result
-    summary = result.get("summary", {})
     entry = {
         "sim_id": sim_id,
-        "opponent_leader": req.get("deck2_leader_id", ""),
-        "win_rate": summary.get("p1_win_rate", 0.0),
-        "num_games": req.get("num_games", 0),
-        "avg_turns": summary.get("avg_turns", 0.0),
+        "opponent_leader": result.get("p2_leader", req.get("deck2_leader_id", "")),
+        "win_rate": result.get("p1_win_rate", 0.0),
+        "num_games": result.get("num_games", req.get("num_games", 0)),
+        "avg_turns": result.get("avg_turns", 0.0),
         "mode": req.get("mode", "virtual"),
         "model": req.get("llm_model", ""),
         "timestamp": datetime.now(timezone.utc).isoformat(),
