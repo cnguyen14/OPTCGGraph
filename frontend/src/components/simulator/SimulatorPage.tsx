@@ -127,16 +127,19 @@ export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds 
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-2">
               <label className="text-xs text-gray-400">Games:</label>
-              <select
+              <input
+                type="number"
+                min={1}
+                max={200}
                 value={numGames}
-                onChange={(e) => setNumGames(Number(e.target.value))}
-                className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white"
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  if (!isNaN(v) && v >= 1 && v <= 200) setNumGames(v);
+                }}
+                className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white w-16 text-center"
                 disabled={!isIdle}
-              >
-                {[5, 10, 20, 30, 50].map((n) => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </select>
+              />
+              <span className="text-[10px] text-gray-500">1-200</span>
             </div>
 
             <div className="flex items-center gap-2">

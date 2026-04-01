@@ -53,8 +53,8 @@ class BattleResponse(BaseModel):
 @router.post("/battle", response_model=BattleResponse)
 async def start_battle(req: BattleRequest) -> BattleResponse:
     """Start a battle simulation between two decks."""
-    if not (1 <= req.num_games <= 50):
-        raise HTTPException(400, "num_games must be between 1 and 50")
+    if not (1 <= req.num_games <= 200):
+        raise HTTPException(400, "num_games must be between 1 and 200")
     if req.mode not in VALID_MODES:
         raise HTTPException(
             400, f"mode must be one of: {', '.join(sorted(VALID_MODES))}"
