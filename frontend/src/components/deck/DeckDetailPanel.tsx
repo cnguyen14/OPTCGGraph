@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { analyzeDeck, getDeckSimHistory, improveDeck, fetchSimDetail, analyzeMatchup } from '../../lib/api';
+import { analyzeDeck, getDeckSimHistory, improveDeck, fetchSimDetail, analyzeMatchup, fetchCard } from '../../lib/api';
 import type { SimHistoryEntry, DeckImprovement, MatchupAnalysis } from '../../types';
 import SwapConfirmModal from './SwapConfirmModal';
 import type { SwapWithCandidates } from './SwapConfirmModal';
 
-type TabId = 'analysis' | 'history' | 'improve';
+type TabId = 'decklist' | 'analysis' | 'history' | 'improve';
 
 const CHECK_LABELS: Record<string, string> = {
   DECK_SIZE: 'Deck Size',
@@ -98,6 +98,185 @@ function useFetch<T>(fetcher: () => Promise<T>, deps: unknown[]) {
 
   return { data, loading, error, retry };
 }
+
+// ---------------------------------------------------------------------------
+// Tab 0: Deck List
+// ---------------------------------------------------------------------------
+
+interface DeckCard {
+  card_id: string;
+  name: string;
+  image_small: string;
+  card_type: string;
+  cost: number;
+  power: number;
+  counter: number;
+  quantity: number;
+}
+
+function DeckListTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[] }) {
+  const [cards, setCards] = useState<DeckCard[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      // Count quantities
+      const counts = new Map<string, number>();
+      for (const id of cardIds) {
+        counts.set(id, (counts.get(id) || 0) + 1);
+      }
+      // Fetch unique cards
+      const uniqueIds = [...counts.keys()];
+      const fetched: DeckCard[] = [];
+      // Also fetch leader
+      try {
+        const leaderData = await fetchCard(leaderId);
+        if (!cancelled && leaderData) {
+          fetched.push({
+            card_id: leaderData.id,
+            name: leaderData.name,
+            image_small: leaderData.image_small || '',
+            card_type: 'LEADER',
+            cost: leaderData.cost ?? 0,
+            power: leaderData.power ?? 0,
+            counter: 0,
+            quantity: 1,
+          });
+        }
+      } catch { /* skip leader if not found */ }
+      await Promise.all(
+        uniqueIds.map(async (id) => {
+          try {
+            const data = await fetchCard(id);
+            if (!cancelled && data) {
+              fetched.push({
+                card_id: data.id,
+                name: data.name,
+                image_small: data.image_small || '',
+                card_type: data.card_type || 'CHARACTER',
+                cost: data.cost ?? 0,
+                power: data.power ?? 0,
+                counter: data.counter ?? 0,
+                quantity: counts.get(id) || 1,
+              });
+            }
+          } catch { /* skip */ }
+        }),
+      );
+      if (!cancelled) {
+        // Sort: leader first, then by cost
+        fetched.sort((a, b) => {
+          if (a.card_type === 'LEADER') return -1;
+          if (b.card_type === 'LEADER') return 1;
+          return a.cost - b.cost || a.name.localeCompare(b.name);
+        });
+        setCards(fetched);
+        setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [leaderId, cardIds]);
+
+  if (loading) return <Spinner text="Loading deck cards..." />;
+
+  const totalCards = cards.reduce((sum, c) => sum + (c.card_type === 'LEADER' ? 0 : c.quantity), 0);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-gray-400">{totalCards} cards ({cards.length - 1} unique)</span>
+        <div className="flex gap-1">
+          <button
+            onClick={() => setViewMode('grid')}
+            className={`text-[10px] px-2 py-0.5 rounded ${viewMode === 'grid' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400'}`}
+          >Grid</button>
+          <button
+            onClick={() => setViewMode('list')}
+            className={`text-[10px] px-2 py-0.5 rounded ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400'}`}
+          >List</button>
+        </div>
+      </div>
+
+      {viewMode === 'grid' ? (
+        <div className="flex flex-wrap gap-1.5">
+          {cards.map((card) => (
+            <div
+              key={card.card_id}
+              className="relative cursor-pointer hover:scale-105 transition-transform"
+              onClick={() => card.image_small && setPreviewImage(card.image_small)}
+              title={`${card.card_id} ${card.name} | Cost ${card.cost} | Power ${card.power}`}
+            >
+              {card.image_small ? (
+                <img
+                  src={card.image_small}
+                  alt={card.name}
+                  className={`w-[56px] h-[78px] rounded object-cover border ${
+                    card.card_type === 'LEADER' ? 'border-yellow-500' : 'border-gray-700'
+                  }`}
+                />
+              ) : (
+                <div className="w-[56px] h-[78px] rounded border border-gray-700 bg-gray-800 flex items-center justify-center">
+                  <span className="text-[8px] text-gray-500 text-center px-0.5">{card.name}</span>
+                </div>
+              )}
+              {card.quantity > 1 && (
+                <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                  {card.quantity}
+                </span>
+              )}
+              {card.card_type === 'LEADER' && (
+                <span className="absolute bottom-0 left-0 right-0 bg-yellow-600/80 text-[7px] text-white text-center rounded-b">
+                  LEADER
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-1">
+          {cards.map((card) => (
+            <div
+              key={card.card_id}
+              className="flex items-center gap-2 bg-gray-800/50 rounded px-2 py-1.5 text-xs cursor-pointer hover:bg-gray-700/50"
+              onClick={() => card.image_small && setPreviewImage(card.image_small)}
+            >
+              {card.image_small ? (
+                <img src={card.image_small} alt="" className="w-8 h-[45px] rounded object-cover shrink-0" />
+              ) : (
+                <div className="w-8 h-[45px] rounded bg-gray-700 shrink-0" />
+              )}
+              <span className="text-[10px] text-gray-500 font-mono w-16 shrink-0">{card.card_id}</span>
+              <span className={`flex-1 truncate ${card.card_type === 'LEADER' ? 'text-yellow-400 font-semibold' : 'text-gray-300'}`}>
+                {card.name}
+              </span>
+              <span className="text-gray-500 w-8 text-right">{card.cost > 0 ? `C${card.cost}` : ''}</span>
+              <span className="text-gray-500 w-12 text-right">{card.power > 0 ? `${card.power}P` : ''}</span>
+              <span className="text-blue-400 font-semibold w-5 text-right">x{card.quantity}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Full image preview */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center cursor-pointer"
+          onClick={() => setPreviewImage(null)}
+        >
+          <img src={previewImage} alt="" className="max-h-[80vh] max-w-[90vw] rounded-xl shadow-2xl" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab 1: Analysis
+// ---------------------------------------------------------------------------
 
 function AnalysisTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[] }) {
   const { data, loading, error, retry } = useFetch(
@@ -771,6 +950,7 @@ function ImproveTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[]
 // ---------------------------------------------------------------------------
 
 const TABS: { id: TabId; label: string }[] = [
+  { id: 'decklist', label: 'Deck List' },
   { id: 'analysis', label: 'Analysis' },
   { id: 'history', label: 'Sim History' },
   { id: 'improve', label: 'Improve' },
@@ -784,7 +964,7 @@ export default function DeckDetailPanel({
   onClose,
   onOpenBuilder,
 }: DeckDetailPanelProps) {
-  const [activeTab, setActiveTab] = useState<TabId>('analysis');
+  const [activeTab, setActiveTab] = useState<TabId>('decklist');
   const [swapModalData, setSwapModalData] = useState<{ swaps: SwapWithCandidates[] } | null>(null);
 
   const handleApplySwaps = useCallback((swaps: SwapInput[]) => {
@@ -832,6 +1012,7 @@ export default function DeckDetailPanel({
 
       {/* Tab content */}
       <div className="p-4">
+        {activeTab === 'decklist' && <DeckListTab leaderId={leaderId} cardIds={cardIds} />}
         {activeTab === 'analysis' && <AnalysisTab leaderId={leaderId} cardIds={cardIds} />}
         {activeTab === 'history' && (
           <SimHistoryTab
