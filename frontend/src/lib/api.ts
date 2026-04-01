@@ -145,6 +145,11 @@ export async function fetchSystemStatus(): Promise<SystemStatus> {
   return resp.json();
 }
 
+export async function checkApiBalance(): Promise<{ has_balance: boolean; status: string; message: string }> {
+  const resp = await fetch(`${BASE_URL}/settings/balance`);
+  return resp.json();
+}
+
 export async function fetchHealth(): Promise<{ status: string; neo4j: boolean; redis: boolean }> {
   const resp = await fetch('/health');
   return resp.json();

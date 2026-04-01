@@ -139,7 +139,35 @@ async def _test_anthropic_key(api_key: str) -> dict:
     except anthropic.AuthenticationError:
         return {"status": "error", "message": "Invalid API key"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        error_msg = str(e)
+        if "credit balance is too low" in error_msg:
+            return {"status": "error", "message": "Credit balance too low"}
+        return {"status": "error", "message": error_msg}
+
+
+async def _check_anthropic_balance(api_key: str) -> dict:
+    """Check if Anthropic API key has sufficient balance.
+
+    Anthropic doesn't expose a balance endpoint, so we make a minimal
+    API call and check for the 'credit_balance_too_low' error.
+    """
+    if not api_key:
+        return {"has_balance": False, "status": "no_key", "message": "No API key configured"}
+    try:
+        client = anthropic.AsyncAnthropic(api_key=api_key)
+        await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1,
+            messages=[{"role": "user", "content": "hi"}],
+        )
+        return {"has_balance": True, "status": "ok", "message": "API key has sufficient balance"}
+    except anthropic.AuthenticationError:
+        return {"has_balance": False, "status": "invalid_key", "message": "Invalid API key"}
+    except Exception as e:
+        error_msg = str(e)
+        if "credit balance is too low" in error_msg:
+            return {"has_balance": False, "status": "no_balance", "message": "Credit balance too low. Please add credits at console.anthropic.com"}
+        return {"has_balance": False, "status": "error", "message": error_msg}
 
 
 async def _test_apitcg_key(api_key: str) -> dict:
@@ -264,3 +292,11 @@ async def system_status():
             "apitcg": "apitcg" in _runtime_keys,
         },
     }
+
+
+@router.get("/balance")
+async def check_balance():
+    """Check Claude API credit balance by making a minimal API call."""
+    api_key = get_active_api_key("claude")
+    result = await _check_anthropic_balance(api_key)
+    return result

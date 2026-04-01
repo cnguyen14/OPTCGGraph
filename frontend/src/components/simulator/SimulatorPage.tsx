@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSimulation } from '../../hooks/useSimulation';
+import { checkApiBalance } from '../../lib/api';
 import DeckSelector from './DeckSelector';
 import type { SelectedDeck } from './DeckSelector';
 import SimulationProgress from './SimulationProgress';
@@ -19,10 +20,21 @@ export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds 
   const [p1Level, setP1Level] = useState('amateur');
   const [p2Level, setP2Level] = useState('medium');
   const [llmModel, setLlmModel] = useState('claude-haiku-4-5-20251001');
+  const [hasBalance, setHasBalance] = useState<boolean | null>(null);
 
   const sim = useSimulation();
 
-  const canStart = deck1 && deck2 && deck1.cardIds.length === 50 && deck2.cardIds.length === 50;
+  // Check API balance when switching to Real mode
+  useEffect(() => {
+    if (mode === 'real') {
+      checkApiBalance()
+        .then((r) => setHasBalance(r.has_balance))
+        .catch(() => setHasBalance(false));
+    }
+  }, [mode]);
+
+  const canStart = deck1 && deck2 && deck1.cardIds.length === 50 && deck2.cardIds.length === 50
+    && !(mode === 'real' && hasBalance === false);
   const isIdle = sim.status === 'idle' || sim.status === 'error' || sim.status === 'complete';
 
   const handleStart = () => {
@@ -100,6 +112,15 @@ export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds 
                 ? 'Fast rule-based simulation. Free, instant results.'
                 : 'LLM-powered AI agents. More realistic, costs API credits.'}
             </span>
+            {mode === 'real' && hasBalance === false && (
+              <div className="mt-1 px-3 py-1.5 rounded-md bg-red-900/30 border border-red-700/40 text-xs text-red-400">
+                Insufficient Claude API balance. Please{' '}
+                <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener noreferrer" className="underline text-red-300 hover:text-red-200">
+                  add credits
+                </a>{' '}
+                or switch to Virtual (Free) mode.
+              </div>
+            )}
           </div>
 
           {/* Controls Row */}

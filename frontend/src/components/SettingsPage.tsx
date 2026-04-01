@@ -12,6 +12,7 @@ import {
   saveApiKey,
   removeApiKey,
   testApiKey,
+  checkApiBalance,
   fetchProviderModels,
 } from '../lib/api';
 import type {
@@ -386,24 +387,27 @@ export default function SettingsPage() {
   const [dbStats, setDbStats] = useState<Record<string, number> | null>(null);
   const [crawlStatus, setCrawlStatus] = useState<CrawlStatus | null>(null);
   const [bannedCards, setBannedCards] = useState<BannedCard[]>([]);
+  const [balance, setBalance] = useState<{ has_balance: boolean; status: string; message: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [sys, mdl, stats, crawl, banned] = await Promise.all([
+      const [sys, mdl, stats, crawl, banned, bal] = await Promise.all([
         fetchSystemStatus(),
         fetchModels(),
         fetchStats(),
         fetchCrawlStatus(),
         fetchBannedCards(),
+        checkApiBalance().catch(() => ({ has_balance: false, status: 'error', message: 'Failed to check' })),
       ]);
       setSysStatus(sys);
       setModels(mdl);
       setDbStats(stats);
       setCrawlStatus(crawl);
       setBannedCards(banned);
+      setBalance(bal);
     } catch (err) {
       console.error('Failed to load settings data:', err);
     } finally {
@@ -524,6 +528,37 @@ export default function SettingsPage() {
                 </span>
               </div>
             </div>
+          )}
+        </Section>
+
+        {/* Claude API Balance */}
+        <Section title="Claude API Balance">
+          {balance ? (
+            <div className={`flex items-center gap-3 p-3 rounded-lg ${
+              balance.has_balance
+                ? 'bg-green-900/20 border border-green-700/30'
+                : 'bg-red-900/20 border border-red-700/30'
+            }`}>
+              <div className={`w-3 h-3 rounded-full ${balance.has_balance ? 'bg-green-500' : 'bg-red-500'}`} />
+              <div>
+                <p className={`text-sm font-medium ${balance.has_balance ? 'text-green-400' : 'text-red-400'}`}>
+                  {balance.has_balance ? 'Balance Available' : 'Insufficient Balance'}
+                </p>
+                <p className="text-xs text-gray-400">{balance.message}</p>
+              </div>
+              {!balance.has_balance && (
+                <a
+                  href="https://console.anthropic.com/settings/billing"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-auto text-xs text-blue-400 hover:text-blue-300 underline"
+                >
+                  Add Credits
+                </a>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500">Checking balance...</p>
           )}
         </Section>
 
