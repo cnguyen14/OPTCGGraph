@@ -146,12 +146,28 @@ class SimulationRunner:
         # Create agents based on mode
         rng = random.Random(self.base_seed)
 
+        logger.info(
+            "=== Simulation Start === mode=%s p1=%s(%s) p2=%s(%s) "
+            "llm_model=%s num_games=%s seed=%s leader1=%s leader2=%s",
+            self.mode,
+            "player",
+            self.p1_level,
+            "bot",
+            self.p2_level,
+            self.llm_model,
+            num_games,
+            self.base_seed,
+            p1_leader.name,
+            p2_leader.name,
+        )
+
         if self.mode == "real":
             model = self.llm_model or "claude-haiku-4-5-20251001"
+            logger.info("Real mode: using LLM model=%s", model)
             p1_agent: Agent = LLMAgent(role="player", level=self.p1_level, model=model)
             p2_agent: Agent = LLMAgent(role="bot", level=self.p2_level, model=model)
         else:
-            # Virtual mode — rule-based agents
+            logger.info("Virtual mode: using HeuristicAgent (no LLM)")
             p1_rng = random.Random(rng.randint(0, 2**32))
             p2_rng = random.Random(rng.randint(0, 2**32))
             p1_agent = HeuristicAgent(role="player", level=self.p1_level, rng=p1_rng)
