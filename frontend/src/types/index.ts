@@ -411,3 +411,47 @@ export interface ModelsResponse {
   current: { provider: string; model: string };
   available: Record<string, ModelInfo[]>;
 }
+
+// Deck Analysis types
+export interface DeckAnalysis {
+  validation: {
+    checks: Array<{ name: string; status: 'pass' | 'fail' | 'warning'; message: string }>;
+    pass_count: number;
+    fail_count: number;
+    warning_count: number;
+  };
+  playstyle: string;
+  synergy_score: number;
+  suggestions: Array<{ type: string; remove?: string; add?: string; priority: string }>;
+  card_roles: {
+    blockers: number;
+    removal: number;
+    draw_search: number;
+    rush: number;
+    finishers: number;
+  };
+  cost_curve: Record<string, number>;
+}
+
+export interface SimHistoryEntry {
+  sim_id: string;
+  opponent_leader: string;
+  win_rate: number;
+  num_games: number;
+  avg_turns: number;
+  mode: string;
+  model: string | null;
+  timestamp: string;
+}
+
+export interface DeckImprovement {
+  action: string;
+  remove?: { card_id: string; card_name: string; reason: string };
+  add?: { card_id: string; card_name: string; reason: string };
+  impact: string;
+}
+
+export interface DeckImprovements {
+  improvements: DeckImprovement[];
+  summary: string;
+}

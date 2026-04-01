@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import random
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +16,12 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from backend.graph.connection import get_driver
+from backend.storage.redis_client import get_redis
 from backend.simulator.runner import SimulationRunner
+
+logger = logging.getLogger(__name__)
+
+SIM_HISTORY_TTL = 90 * 24 * 3600  # 90 days
 
 router = APIRouter(prefix="/api/simulator", tags=["simulator"])
 
@@ -73,6 +81,35 @@ async def start_battle(req: BattleRequest) -> BattleResponse:
     return BattleResponse(sim_id=sim_id)
 
 
+async def _store_sim_history(
+    sim_id: str, req: dict[str, Any], result: dict[str, Any]
+) -> None:
+    """Store a simulation result summary in Redis, keyed by deck composition."""
+    deck1_card_ids = req.get("deck1_card_ids", [])
+    leader_id = req.get("deck1_leader_id", "")
+    deck_hash = hashlib.md5(json.dumps(sorted(deck1_card_ids)).encode()).hexdigest()[:12]
+    redis_key = f"deck-sims:{leader_id}:{deck_hash}"
+
+    # Extract summary from result
+    summary = result.get("summary", {})
+    entry = {
+        "sim_id": sim_id,
+        "opponent_leader": req.get("deck2_leader_id", ""),
+        "win_rate": summary.get("p1_win_rate", 0.0),
+        "num_games": req.get("num_games", 0),
+        "avg_turns": summary.get("avg_turns", 0.0),
+        "mode": req.get("mode", "virtual"),
+        "model": req.get("llm_model", ""),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    r = await get_redis()
+    await r.lpush(redis_key, json.dumps(entry))
+    # Trim to keep last 100 entries
+    await r.ltrim(redis_key, 0, 99)
+    await r.expire(redis_key, SIM_HISTORY_TTL)
+
+
 @router.get("/status/{sim_id}")
 async def stream_simulation(sim_id: str) -> StreamingResponse:
     """Stream simulation progress via SSE."""
@@ -110,6 +147,12 @@ async def stream_simulation(sim_id: str) -> StreamingResponse:
                 if event["type"] == "complete":
                     sim_data["status"] = "complete"
                     sim_data["result"] = event["result"]
+
+                    # Store simulation summary in Redis for deck sim-history
+                    try:
+                        await _store_sim_history(sim_id, req, event["result"])
+                    except Exception:
+                        logger.warning("Failed to store sim history in Redis", exc_info=True)
 
                 yield f"data: {json.dumps(event)}\n\n"
 

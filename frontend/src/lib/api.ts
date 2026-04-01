@@ -395,6 +395,54 @@ export async function testApiKey(provider: string, apiKey: string): Promise<Test
   return resp.json();
 }
 
+// === Deck Analysis / Improve API ===
+
+import type { DeckAnalysis, SimHistoryEntry, DeckImprovements } from '../types';
+
+export async function analyzeDeck(
+  leaderId: string,
+  cardIds: string[],
+): Promise<DeckAnalysis> {
+  const resp = await fetch(`${BASE_URL}/deck/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ leader_id: leaderId, card_ids: cardIds }),
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+export async function getDeckSimHistory(
+  leaderId: string,
+  cardIds: string[],
+): Promise<{ simulations: SimHistoryEntry[] }> {
+  const resp = await fetch(`${BASE_URL}/deck/sim-history`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ leader_id: leaderId, card_ids: cardIds }),
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+export async function improveDeck(
+  leaderId: string,
+  cardIds: string[],
+  simCardStats?: Record<string, unknown>,
+): Promise<DeckImprovements> {
+  const resp = await fetch(`${BASE_URL}/deck/improve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      leader_id: leaderId,
+      card_ids: cardIds,
+      ...(simCardStats ? { sim_card_stats: simCardStats } : {}),
+    }),
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
 export async function fetchProviderModels(
   provider: string,
   apiKey?: string,

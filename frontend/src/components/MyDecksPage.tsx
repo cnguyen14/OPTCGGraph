@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { listSavedDecks, loadSavedDeck, deleteSavedDeck, searchCards } from '../lib/api';
 import type { SavedDeckListItem } from '../types';
+import DeckDetailPanel from './deck/DeckDetailPanel';
 
 interface Props {
   onLoadDeck: (leaderId: string, cardIds: string[]) => void;
@@ -17,6 +18,9 @@ export default function MyDecksPage({ onLoadDeck, onSimulateDeck, onNewDeck }: P
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [leaderImages, setLeaderImages] = useState<Record<string, string>>({});
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
+  const [expandedCardIds, setExpandedCardIds] = useState<string[]>([]);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const fetchDecks = () => {
     setLoading(true);
@@ -104,6 +108,32 @@ export default function MyDecksPage({ onLoadDeck, onSimulateDeck, onNewDeck }: P
     }
   };
 
+  const handleSelectDeck = async (deck: SavedDeckListItem) => {
+    if (selectedDeckId === deck.id) {
+      setSelectedDeckId(null);
+      setExpandedCardIds([]);
+      return;
+    }
+    setSelectedDeckId(deck.id);
+    try {
+      const full = await loadSavedDeck(deck.id);
+      const cardIds: string[] = [];
+      for (const entry of full.entries) {
+        for (let i = 0; i < entry.quantity; i++) {
+          cardIds.push(entry.card_id);
+        }
+      }
+      setExpandedCardIds(cardIds);
+      // Scroll to panel after a brief delay for rendering
+      setTimeout(() => {
+        panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 100);
+    } catch (err) {
+      console.error('Failed to load deck for detail panel:', err);
+      setExpandedCardIds([]);
+    }
+  };
+
   const filtered = decks
     .filter(
       (d) =>
@@ -170,81 +200,131 @@ export default function MyDecksPage({ onLoadDeck, onSimulateDeck, onNewDeck }: P
         {!loading && filtered.length > 0 && (
           <div className="space-y-3">
             {filtered.map((deck) => (
-              <div
-                key={deck.id}
-                className="rounded-xl border border-gray-700/50 bg-gray-900/50 p-4 hover:border-gray-600/50 transition-colors"
-              >
-                <div className="flex items-start gap-4">
-                  {/* Leader card image */}
-                  {deck.leader_id && leaderImages[deck.leader_id] ? (
-                    <img
-                      src={leaderImages[deck.leader_id]}
-                      alt="Leader"
-                      className="w-16 h-[88px] object-cover rounded-lg shrink-0 border border-gray-700/50"
-                    />
-                  ) : (
-                    <div className="w-16 h-[88px] bg-gray-800 rounded-lg shrink-0 border border-gray-700/50 flex items-center justify-center">
-                      <span className="text-[10px] text-gray-500 text-center px-1">{deck.leader_id ?? 'No leader'}</span>
+              <div key={deck.id} className="space-y-0">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleSelectDeck(deck)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleSelectDeck(deck);
+                    }
+                  }}
+                  className={`rounded-xl border p-4 transition-colors cursor-pointer ${
+                    selectedDeckId === deck.id
+                      ? 'border-blue-600/50 bg-gray-900/70 ring-1 ring-blue-600/20'
+                      : 'border-gray-700/50 bg-gray-900/50 hover:border-gray-600/50'
+                  }`}
+                >
+                  <div className="flex items-start gap-4">
+                    {/* Leader card image */}
+                    {deck.leader_id && leaderImages[deck.leader_id] ? (
+                      <img
+                        src={leaderImages[deck.leader_id]}
+                        alt="Leader"
+                        className="w-16 h-[88px] object-cover rounded-lg shrink-0 border border-gray-700/50"
+                      />
+                    ) : (
+                      <div className="w-16 h-[88px] bg-gray-800 rounded-lg shrink-0 border border-gray-700/50 flex items-center justify-center">
+                        <span className="text-[10px] text-gray-500 text-center px-1">{deck.leader_id ?? 'No leader'}</span>
+                      </div>
+                    )}
+
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-sm font-semibold text-white truncate">{deck.name}</h3>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
+                        {deck.leader_id && (
+                          <span className="truncate max-w-[180px]">Leader: {deck.leader_id}</span>
+                        )}
+                        <span className={deck.card_count === 50 ? 'text-green-400' : 'text-yellow-400'}>
+                          {deck.card_count} cards
+                        </span>
+                        <span>Updated: {formatDate(deck.updated_at)}</span>
+                      </div>
+                      {deck.description && (
+                        <p className="text-xs text-gray-500 mt-1.5 line-clamp-2">{deck.description}</p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => handleLoad(deck)}
+                        disabled={!deck.leader_id || actionLoading === deck.id}
+                        className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg transition-colors disabled:opacity-40"
+                      >
+                        {actionLoading === deck.id ? '...' : 'Load'}
+                      </button>
+                      <button
+                        onClick={() => handleSimulate(deck)}
+                        disabled={!deck.leader_id || deck.card_count !== 50 || actionLoading === deck.id}
+                        className="px-3 py-1.5 text-xs bg-blue-900/40 hover:bg-blue-800/50 text-blue-400 hover:text-blue-300 rounded-lg transition-colors disabled:opacity-40"
+                        title={deck.card_count !== 50 ? 'Deck must have exactly 50 cards' : ''}
+                      >
+                        Simulate
+                      </button>
+                      {confirmDeleteId === deck.id ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleDelete(deck.id)}
+                            disabled={deletingId === deck.id}
+                            className="px-2 py-1.5 text-xs bg-red-900/40 hover:bg-red-800/50 text-red-400 rounded-lg transition-colors"
+                          >
+                            {deletingId === deck.id ? '...' : 'Confirm'}
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="px-2 py-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmDeleteId(deck.id)}
+                          className="px-3 py-1.5 text-xs text-gray-500 hover:text-red-400 rounded-lg transition-colors"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expandable detail panel */}
+                <div
+                  className={`overflow-hidden transition-all duration-300 ease-in-out ${
+                    selectedDeckId === deck.id ? 'max-h-[2000px] opacity-100 mt-2' : 'max-h-0 opacity-0'
+                  }`}
+                >
+                  {selectedDeckId === deck.id && deck.leader_id && expandedCardIds.length > 0 && (
+                    <div ref={panelRef}>
+                      <DeckDetailPanel
+                        deckId={deck.id}
+                        leaderId={deck.leader_id}
+                        cardIds={expandedCardIds}
+                        deckName={deck.name}
+                        onClose={() => {
+                          setSelectedDeckId(null);
+                          setExpandedCardIds([]);
+                        }}
+                      />
                     </div>
                   )}
-
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-semibold text-white truncate">{deck.name}</h3>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
-                      {deck.leader_id && (
-                        <span className="truncate max-w-[180px]">Leader: {deck.leader_id}</span>
+                  {selectedDeckId === deck.id && (!deck.leader_id || expandedCardIds.length === 0) && (
+                    <div className="rounded-xl border border-gray-700/50 bg-gray-900/80 p-6 text-center">
+                      {!deck.leader_id ? (
+                        <p className="text-sm text-gray-500">
+                          This deck has no leader. Set a leader in the Deck Builder to see analysis.
+                        </p>
+                      ) : (
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                          <span className="text-sm text-gray-400">Loading deck data...</span>
+                        </div>
                       )}
-                      <span className={deck.card_count === 50 ? 'text-green-400' : 'text-yellow-400'}>
-                        {deck.card_count} cards
-                      </span>
-                      <span>Updated: {formatDate(deck.updated_at)}</span>
                     </div>
-                    {deck.description && (
-                      <p className="text-xs text-gray-500 mt-1.5 line-clamp-2">{deck.description}</p>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      onClick={() => handleLoad(deck)}
-                      disabled={!deck.leader_id || actionLoading === deck.id}
-                      className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg transition-colors disabled:opacity-40"
-                    >
-                      {actionLoading === deck.id ? '...' : 'Load'}
-                    </button>
-                    <button
-                      onClick={() => handleSimulate(deck)}
-                      disabled={!deck.leader_id || deck.card_count !== 50 || actionLoading === deck.id}
-                      className="px-3 py-1.5 text-xs bg-blue-900/40 hover:bg-blue-800/50 text-blue-400 hover:text-blue-300 rounded-lg transition-colors disabled:opacity-40"
-                      title={deck.card_count !== 50 ? 'Deck must have exactly 50 cards' : ''}
-                    >
-                      Simulate
-                    </button>
-                    {confirmDeleteId === deck.id ? (
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleDelete(deck.id)}
-                          disabled={deletingId === deck.id}
-                          className="px-2 py-1.5 text-xs bg-red-900/40 hover:bg-red-800/50 text-red-400 rounded-lg transition-colors"
-                        >
-                          {deletingId === deck.id ? '...' : 'Confirm'}
-                        </button>
-                        <button
-                          onClick={() => setConfirmDeleteId(null)}
-                          className="px-2 py-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => setConfirmDeleteId(deck.id)}
-                        className="px-3 py-1.5 text-xs text-gray-500 hover:text-red-400 rounded-lg transition-colors"
-                      >
-                        Delete
-                      </button>
-                    )}
-                  </div>
+                  )}
                 </div>
               </div>
             ))}
