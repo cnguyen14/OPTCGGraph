@@ -1209,6 +1209,46 @@ class LLMAgent:
             + LLM_BASE_RULES
         )
         self._fallback = HeuristicAgent(role=role, level=level)
+        self._decision_collector: list[DecisionPoint] | None = None
+
+    def set_decision_collector(self, collector: list[DecisionPoint]) -> None:
+        """Set collector for both LLM and fallback agents."""
+        self._decision_collector = collector
+        self._fallback.set_decision_collector(collector)
+
+    def _log_decision(
+        self,
+        state: GameState,
+        legal_actions: list[GameAction],
+        chosen_idx: int,
+    ) -> None:
+        """Log a decision point (reuse HeuristicAgent pattern)."""
+        if self._decision_collector is None:
+            return
+        player = state.active_player
+        opponent = state.defending_player
+        action = legal_actions[chosen_idx] if chosen_idx < len(legal_actions) else None
+        self._decision_collector.append(
+            DecisionPoint(
+                turn=state.turn,
+                phase="main",
+                player_id=player.player_id,
+                player_life=len(player.life),
+                opponent_life=len(opponent.life),
+                player_hand_size=len(player.hand),
+                player_field_power=sum(c.effective_power for c in player.characters),
+                player_don_available=player.don_field,
+                opponent_field_power=sum(
+                    c.effective_power for c in opponent.characters
+                ),
+                opponent_hand_size=len(opponent.hand),
+                num_legal_actions=len(legal_actions),
+                action_scores=[],
+                chosen_action_index=chosen_idx,
+                chosen_action_type=(action.action_type.value if action else "pass"),
+                chosen_action_desc=(action.description if action else "pass"),
+            )
+        )
 
     async def choose_mulligan(self, hand: list[GameCard]) -> bool:
         """Delegate mulligan decision to heuristic fallback."""
@@ -1218,6 +1258,7 @@ class LLMAgent:
         self, state: GameState, legal_actions: list[GameAction]
     ) -> int:
         if len(legal_actions) <= 1:
+            self._log_decision(state, legal_actions, 0)
             return 0
 
         prompt = self._build_prompt(state, legal_actions)
@@ -1236,13 +1277,16 @@ class LLMAgent:
                 and target
                 and attacker.effective_power < target.effective_power
             ):
-                return await self._fallback.choose_main_action(state, legal_actions)
+                result = await self._fallback.choose_main_action(state, legal_actions)
+                return result
 
         if action.action_type == ActionType.ATTACH_DON:
             target = _find_card(action.target_id, player)
             if target and target.state == CardState.RESTED:
-                return await self._fallback.choose_main_action(state, legal_actions)
+                result = await self._fallback.choose_main_action(state, legal_actions)
+                return result
 
+        self._log_decision(state, legal_actions, choice)
         return choice
 
     async def choose_blockers(
