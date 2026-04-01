@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import random
 import uuid
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from backend.graph.connection import get_driver
@@ -104,6 +105,7 @@ async def stream_simulation(sim_id: str) -> StreamingResponse:
                 deck2_leader_id=req["deck2_leader_id"],
                 deck2_card_ids=req["deck2_card_ids"],
                 num_games=req["num_games"],
+                sim_id=sim_id,
             ):
                 if event["type"] == "complete":
                     sim_data["status"] = "complete"
@@ -138,3 +140,30 @@ async def get_result(sim_id: str) -> dict[str, Any]:
         raise HTTPException(400, f"Simulation status: {sim_data['status']}")
 
     return sim_data["result"]
+
+
+@router.get("/export/{sim_id}/{file_type}")
+async def export_simulation_data(sim_id: str, file_type: str) -> FileResponse:
+    """Download exported simulation data files.
+
+    file_type: "decisions", "games", "snapshots", or "metadata"
+    """
+    file_map = {
+        "decisions": "decisions.jsonl",
+        "games": "games.jsonl",
+        "snapshots": "snapshots.jsonl",
+        "metadata": "metadata.json",
+    }
+    if file_type not in file_map:
+        raise HTTPException(400, f"file_type must be one of: {', '.join(file_map)}")
+
+    file_path = Path("data/simulations") / sim_id / file_map[file_type]
+    if not file_path.exists():
+        raise HTTPException(404, f"Export file not found: {file_type}")
+
+    media = "application/json" if file_type == "metadata" else "application/x-ndjson"
+    return FileResponse(
+        path=str(file_path),
+        filename=file_map[file_type],
+        media_type=media,
+    )

@@ -239,9 +239,16 @@ export interface SimulationProgress {
 export interface CardPerformance {
   card_id: string;
   card_name: string;
+  times_drawn: number;
   times_played: number;
   total_games: number;
   times_in_winning_game: number;
+  damage_contributed: number;
+  times_koed: number;
+  avg_turn_played: number;
+  times_countered_with: number;
+  times_blocked_with: number;
+  effects_triggered: number;
 }
 
 export interface GameReplayEntry {
@@ -252,12 +259,59 @@ export interface GameReplayEntry {
   details: Record<string, unknown>;
 }
 
+export interface TurnSnapshot {
+  turn: number;
+  active: string;
+  p1: {
+    life: number;
+    hand: number;
+    field: number;
+    power: number;
+    don: number;
+    deck: number;
+    eval: number;
+  };
+  p2: {
+    life: number;
+    hand: number;
+    field: number;
+    power: number;
+    don: number;
+    deck: number;
+    eval: number;
+  };
+}
+
 export interface SampleGame {
   winner: string;
   turns: number;
   p1_life: number;
   p2_life: number;
+  win_condition: string;
+  p1_mulligan: boolean;
+  p2_mulligan: boolean;
+  p1_effects: number;
+  p2_effects: number;
+  p1_damage: number;
+  p2_damage: number;
+  decision_count: number;
+  turn_snapshots: TurnSnapshot[];
   game_log: GameReplayEntry[];
+}
+
+export interface EnhancedStats {
+  mulligan_rate_p1: number;
+  mulligan_rate_p2: number;
+  mulligan_win_rate: number;
+  win_by_lethal: number;
+  win_by_deckout: number;
+  win_by_timeout: number;
+  first_player_win_rate: number;
+  avg_effects_per_game: number;
+  avg_p1_damage: number;
+  avg_p2_damage: number;
+  total_decisions: number;
+  avg_decisions_per_game: number;
 }
 
 export interface SimulationResult {
@@ -271,6 +325,8 @@ export interface SimulationResult {
   p1_win_rate: number;
   p2_win_rate: number;
   card_stats: Record<string, CardPerformance>;
+  enhanced_stats?: EnhancedStats;
+  export_path?: string;
   sample_games: SampleGame[];
 }
 

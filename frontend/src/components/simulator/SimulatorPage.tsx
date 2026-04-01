@@ -4,7 +4,7 @@ import DeckSelector from './DeckSelector';
 import type { SelectedDeck } from './DeckSelector';
 import SimulationProgress from './SimulationProgress';
 import LiveGameFeed from './LiveGameFeed';
-import ResultsDashboard from './ResultsDashboard';
+import SimulatorDashboard from './SimulatorDashboard';
 
 interface Props {
   currentDeckLeaderId?: string;
@@ -222,16 +222,13 @@ export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds 
 
         {/* Results */}
         {sim.status === 'complete' && sim.result && (
-          <>
-            <ResultsDashboard result={sim.result} />
-            <LiveGameFeed
-              gameResults={sim.gameResults}
-              p1Leader={sim.p1Leader}
-              p2Leader={sim.p2Leader}
-              totalGames={sim.progress.total}
-              isRunning={false}
-            />
-          </>
+          <SimulatorDashboard
+            result={sim.result}
+            gameResults={sim.gameResults}
+            simId={sim.simId}
+            p1Leader={sim.p1Leader}
+            p2Leader={sim.p2Leader}
+          />
         )}
       </div>
     </div>

@@ -9,6 +9,14 @@ export interface GameProgressEntry {
   p1Life: number;
   p2Life: number;
   firstPlayer: string;
+  winCondition: string;
+  p1Mulligan: boolean;
+  p2Mulligan: boolean;
+  p1EffectsFired: number;
+  p2EffectsFired: number;
+  p1Damage: number;
+  p2Damage: number;
+  decisionCount: number;
   gameLog: Array<{
     turn: number;
     player: string;
@@ -130,6 +138,14 @@ export function useSimulation() {
                   p1Life: data.p1_life ?? 0,
                   p2Life: data.p2_life ?? 0,
                   firstPlayer: data.first_player ?? 'p1',
+                  winCondition: data.win_condition ?? 'unknown',
+                  p1Mulligan: data.p1_mulligan ?? false,
+                  p2Mulligan: data.p2_mulligan ?? false,
+                  p1EffectsFired: data.p1_effects_fired ?? 0,
+                  p2EffectsFired: data.p2_effects_fired ?? 0,
+                  p1Damage: data.p1_damage ?? 0,
+                  p2Damage: data.p2_damage ?? 0,
+                  decisionCount: data.decision_count ?? 0,
                   gameLog: data.game_log ?? [],
                 }],
               }));

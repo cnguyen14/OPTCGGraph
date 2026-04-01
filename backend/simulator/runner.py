@@ -11,6 +11,7 @@ from neo4j import AsyncDriver
 from backend.graph.queries import get_card_by_id
 
 from .agent import HeuristicAgent, LLMAgent
+from .data_export import SimulationDataExporter
 from .engine import Agent, GameEngine
 from .models import CardStat, GameCard, GameResult, SimulationResult
 from .template_parser import parse_effects
@@ -114,6 +115,7 @@ class SimulationRunner:
         self.p2_level = p2_level
         self.llm_model = llm_model
         self.base_seed = base_seed
+        self.exporter = SimulationDataExporter()
 
     async def run(
         self,
@@ -122,6 +124,7 @@ class SimulationRunner:
         deck2_leader_id: str,
         deck2_card_ids: list[str],
         num_games: int = 10,
+        sim_id: str = "",
     ) -> AsyncIterator[dict[str, Any]]:
         """Run simulation, yielding progress events via SSE."""
         yield {"type": "loading", "message": "Loading decks from database..."}
@@ -188,11 +191,20 @@ class SimulationRunner:
                 "p1_life": result.p1_life_remaining,
                 "p2_life": result.p2_life_remaining,
                 "first_player": result.first_player,
+                "win_condition": result.win_condition,
+                "p1_mulligan": result.p1_mulligan,
+                "p2_mulligan": result.p2_mulligan,
+                "p1_effects_fired": result.p1_effects_fired,
+                "p2_effects_fired": result.p2_effects_fired,
+                "p1_damage": result.p1_total_damage_dealt,
+                "p2_damage": result.p2_total_damage_dealt,
+                "decision_count": len(result.decision_points),
                 "game_log": result.game_log[:200],
             }
 
         # Aggregate stats
         card_stats = self._aggregate_card_stats(results)
+        enhanced = self._aggregate_enhanced_stats(results)
         avg_turns = sum(r.turns for r in results) / max(len(results), 1)
 
         sim_result = SimulationResult(
@@ -207,6 +219,29 @@ class SimulationRunner:
             sample_games=results[:3],
         )
 
+        # Export data to JSONL
+        export_path = ""
+        if sim_id:
+            try:
+                export_dir = self.exporter.export_simulation(
+                    sim_id=sim_id,
+                    results=results,
+                    metadata={
+                        "p1_leader": p1_leader.name,
+                        "p1_leader_id": deck1_leader_id,
+                        "p2_leader": p2_leader.name,
+                        "p2_leader_id": deck2_leader_id,
+                        "num_games": num_games,
+                        "mode": self.mode,
+                        "p1_level": self.p1_level,
+                        "p2_level": self.p2_level,
+                        "base_seed": self.base_seed,
+                    },
+                )
+                export_path = str(export_dir)
+            except Exception as e:
+                logger.warning("Failed to export simulation data: %s", e)
+
         yield {
             "type": "complete",
             "result": {
@@ -220,12 +255,23 @@ class SimulationRunner:
                 "p1_win_rate": round(sim_result.p1_win_rate * 100, 1),
                 "p2_win_rate": round(sim_result.p2_win_rate * 100, 1),
                 "card_stats": sim_result.card_stats,
+                "enhanced_stats": enhanced,
+                "export_path": export_path,
                 "sample_games": [
                     {
                         "winner": g.winner,
                         "turns": g.turns,
                         "p1_life": g.p1_life_remaining,
                         "p2_life": g.p2_life_remaining,
+                        "win_condition": g.win_condition,
+                        "p1_mulligan": g.p1_mulligan,
+                        "p2_mulligan": g.p2_mulligan,
+                        "p1_effects": g.p1_effects_fired,
+                        "p2_effects": g.p2_effects_fired,
+                        "p1_damage": g.p1_total_damage_dealt,
+                        "p2_damage": g.p2_total_damage_dealt,
+                        "decision_count": len(g.decision_points),
+                        "turn_snapshots": [s.to_dict() for s in g.turn_snapshots],
                         "game_log": g.game_log[:200],
                     }
                     for g in sim_result.sample_games
@@ -257,3 +303,51 @@ class SimulationRunner:
                     s.times_in_winning_game += 1
 
         return stats
+
+    def _aggregate_enhanced_stats(self, results: list[GameResult]) -> dict[str, Any]:
+        """Aggregate enhanced statistics across all games."""
+        n = max(len(results), 1)
+
+        # Mulligan stats
+        p1_mulligans = sum(1 for r in results if r.p1_mulligan)
+        p2_mulligans = sum(1 for r in results if r.p2_mulligan)
+        mulligan_wins = sum(
+            1
+            for r in results
+            if (r.p1_mulligan and r.winner == "p1")
+            or (r.p2_mulligan and r.winner == "p2")
+        )
+        total_mulligans = p1_mulligans + p2_mulligans
+
+        # Win condition breakdown
+        win_by_lethal = sum(1 for r in results if r.win_condition == "lethal")
+        win_by_deckout = sum(1 for r in results if r.win_condition == "deck_out")
+        win_by_timeout = sum(1 for r in results if r.win_condition == "timeout")
+
+        # First player advantage
+        first_player_wins = sum(1 for r in results if r.winner == r.first_player)
+
+        # Effects and damage
+        avg_effects = sum(r.p1_effects_fired + r.p2_effects_fired for r in results) / n
+        avg_p1_damage = sum(r.p1_total_damage_dealt for r in results) / n
+        avg_p2_damage = sum(r.p2_total_damage_dealt for r in results) / n
+
+        # Decision counts
+        total_decisions = sum(len(r.decision_points) for r in results)
+
+        return {
+            "mulligan_rate_p1": round(p1_mulligans / n, 3),
+            "mulligan_rate_p2": round(p2_mulligans / n, 3),
+            "mulligan_win_rate": (
+                round(mulligan_wins / total_mulligans, 3) if total_mulligans > 0 else 0
+            ),
+            "win_by_lethal": win_by_lethal,
+            "win_by_deckout": win_by_deckout,
+            "win_by_timeout": win_by_timeout,
+            "first_player_win_rate": round(first_player_wins / n, 3),
+            "avg_effects_per_game": round(avg_effects, 1),
+            "avg_p1_damage": round(avg_p1_damage, 1),
+            "avg_p2_damage": round(avg_p2_damage, 1),
+            "total_decisions": total_decisions,
+            "avg_decisions_per_game": round(total_decisions / n, 1),
+        }
