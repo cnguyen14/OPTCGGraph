@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import type { SimulationResult, CardPerformance, TurnSnapshot } from '../../types';
 import type { GameProgressEntry } from '../../hooks/useSimulation';
-import LiveGameFeed from './LiveGameFeed';
+import BoardReplay from './BoardReplay';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -636,21 +636,58 @@ function GameLogTab({
   gameResults,
   p1Leader,
   p2Leader,
-  totalGames,
 }: {
   gameResults: GameProgressEntry[];
   p1Leader: string | null;
   p2Leader: string | null;
-  totalGames: number;
 }) {
+  const [selectedGame, setSelectedGame] = useState(0);
+
+  if (gameResults.length === 0) {
+    return (
+      <div className="rounded-xl border border-gray-700/50 bg-gray-900/50 p-8 text-center text-sm text-gray-500">
+        No game data available for replay.
+      </div>
+    );
+  }
+
+  const game = gameResults[selectedGame];
+  const winnerLabel =
+    game.winner === 'p1'
+      ? `P1 wins`
+      : game.winner === 'p2'
+        ? `P2 wins`
+        : 'Draw';
+
   return (
-    <LiveGameFeed
-      gameResults={gameResults}
-      p1Leader={p1Leader}
-      p2Leader={p2Leader}
-      totalGames={totalGames}
-      isRunning={false}
-    />
+    <div className="space-y-3">
+      {/* Game selector */}
+      <div className="flex items-center gap-3">
+        <label className="text-xs text-gray-400 shrink-0">Replay game:</label>
+        <select
+          value={selectedGame}
+          onChange={(e) => setSelectedGame(Number(e.target.value))}
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white"
+        >
+          {gameResults.map((g, i) => (
+            <option key={i} value={i}>
+              Game {g.game} — {g.winner === 'p1' ? 'P1 wins' : g.winner === 'p2' ? 'P2 wins' : 'Draw'} ({g.turns} turns)
+            </option>
+          ))}
+        </select>
+        <span className="text-xs text-gray-500">
+          {winnerLabel} in {game.turns} turns | P1 {game.p1Life} life, P2 {game.p2Life} life
+        </span>
+      </div>
+
+      {/* Board replay */}
+      <BoardReplay
+        gameLog={game.gameLog}
+        p1Leader={p1Leader ?? 'Player 1'}
+        p2Leader={p2Leader ?? 'Player 2'}
+        winner={game.winner}
+      />
+    </div>
   );
 }
 
@@ -808,7 +845,6 @@ export default function SimulatorDashboard({ result, gameResults, simId, p1Leade
           gameResults={gameResults}
           p1Leader={p1Leader}
           p2Leader={p2Leader}
-          totalGames={result.num_games}
         />
       )}
       {activeTab === 'export' && <ExportTab result={result} simId={simId} />}
