@@ -30,6 +30,7 @@ interface DeckDetailPanelProps {
   deckName: string;
   onClose: () => void;
   onOpenBuilder?: () => void;
+  onSimulate?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -963,6 +964,7 @@ export default function DeckDetailPanel({
   deckName,
   onClose,
   onOpenBuilder,
+  onSimulate,
 }: DeckDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('decklist');
   const [swapModalData, setSwapModalData] = useState<{ swaps: SwapWithCandidates[] } | null>(null);
@@ -1036,6 +1038,7 @@ export default function DeckDetailPanel({
           onSaved={() => {
             setSwapModalData(null);
           }}
+          onSimulate={onSimulate}
         />
       )}
     </div>

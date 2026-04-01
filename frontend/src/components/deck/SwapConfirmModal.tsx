@@ -38,6 +38,7 @@ interface SwapConfirmModalProps {
   swaps: SwapWithCandidates[];
   onClose: () => void;
   onSaved: () => void;
+  onSimulate?: () => void;
 }
 
 const ROLE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
@@ -60,6 +61,7 @@ export default function SwapConfirmModal({
   swaps,
   onClose,
   onSaved,
+  onSimulate,
 }: SwapConfirmModalProps) {
   const [enabled, setEnabled] = useState<boolean[]>(() => swaps.map((s) => s.candidates.length > 0));
   const [selectedCandidates, setSelectedCandidates] = useState<Record<number, string>>(() => {
@@ -155,9 +157,7 @@ export default function SwapConfirmModal({
       });
 
       setSuccess(true);
-      setTimeout(() => {
-        onSaved();
-      }, 1200);
+      onSaved();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to apply swaps');
     } finally {
@@ -198,7 +198,7 @@ export default function SwapConfirmModal({
           )}
 
           {success && (
-            <div className="flex flex-col items-center justify-center py-12 gap-2">
+            <div className="flex flex-col items-center justify-center py-8 gap-3 px-6">
               <svg
                 className="w-10 h-10 text-green-400"
                 fill="none"
@@ -212,7 +212,26 @@ export default function SwapConfirmModal({
                   d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                 />
               </svg>
-              <span className="text-sm text-green-400 font-medium">Swaps applied!</span>
+              <span className="text-sm text-green-400 font-medium">Swaps applied successfully!</span>
+              <p className="text-xs text-gray-400 text-center mt-1">
+                Your deck has been updated. Run a new simulation to see how the changes perform, then use AI Matchup Analysis for updated insights.
+              </p>
+              <div className="flex gap-2 mt-2">
+                {onSimulate && (
+                  <button
+                    onClick={() => { onClose(); onSimulate(); }}
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 rounded transition-colors"
+                  >
+                    Run Simulation Now
+                  </button>
+                )}
+                <button
+                  onClick={onClose}
+                  className="bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs px-4 py-2 rounded transition-colors"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           )}
 
