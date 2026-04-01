@@ -21,6 +21,7 @@ interface HandCard {
   power: number;
   counter: number;
   card_type: string;
+  ability?: string;
 }
 
 interface FieldCard {
@@ -32,6 +33,7 @@ interface FieldCard {
   don: number;
   card_type: string;
   cost: number;
+  ability?: string;
 }
 
 interface LeaderInfo {
@@ -41,6 +43,7 @@ interface LeaderInfo {
   power: number;
   don: number;
   state: 'active' | 'rested';
+  ability?: string;
 }
 
 interface PlayerBoardState {
@@ -255,6 +258,7 @@ function parseHandCards(raw: unknown): HandCard[] {
       power: (obj.power as number) ?? 0,
       counter: (obj.counter as number) ?? 0,
       card_type: (obj.card_type as string) ?? '',
+      ability: (obj.ability as string) ?? '',
     };
   });
 }
@@ -272,6 +276,7 @@ function parseFieldCards(raw: unknown): FieldCard[] {
       don: (obj.don as number) ?? 0,
       card_type: (obj.card_type as string) ?? '',
       cost: (obj.cost as number) ?? 0,
+      ability: (obj.ability as string) ?? '',
     };
   });
 }
@@ -286,6 +291,7 @@ function parseLeaderInfo(raw: unknown, fallbackName: string): LeaderInfo {
     power: (obj.power as number) ?? 5000,
     don: (obj.don as number) ?? 0,
     state: ((obj.state as string) === 'rested' ? 'rested' : 'active') as 'active' | 'rested',
+    ability: (obj.ability as string) ?? '',
   };
 }
 
@@ -557,6 +563,7 @@ interface TooltipData {
   card_type: string;
   don?: number;
   state?: string;
+  ability?: string;
   x: number;
   y: number;
   flipUp: boolean;
@@ -639,6 +646,11 @@ function BoardCardTooltip({ tip }: { tip: TooltipData }) {
           )}
         </div>
       </div>
+      {tip.ability && (
+        <div className="text-gray-300 text-[10px] mt-2 pt-2 border-t border-gray-700 leading-relaxed">
+          {tip.ability}
+        </div>
+      )}
     </div>,
     document.body,
   );
@@ -914,7 +926,7 @@ function PlayerBoard({
         player.field.map((card, i) => (
           <div
             key={`${card.card_id || card.name}-${i}`}
-            onMouseEnter={(e) => onCardHover({ name: card.name, image: card.image, card_id: card.card_id, cost: card.cost, power: card.power, card_type: card.card_type, don: card.don, state: card.state }, e)}
+            onMouseEnter={(e) => onCardHover({ name: card.name, image: card.image, card_id: card.card_id, cost: card.cost, power: card.power, card_type: card.card_type, don: card.don, state: card.state, ability: card.ability }, e)}
             onMouseLeave={onCardLeave}
           >
             <FieldCardSlot card={card} isP1={isP1} highlighted={highlightCards.includes(card.name)} />
@@ -949,7 +961,7 @@ function PlayerBoard({
         player.hand.map((card, i) => (
           <div
             key={`p1h-${card.card_id || card.name}-${i}`}
-            onMouseEnter={(e) => onCardHover({ name: card.name, image: card.image, card_id: card.card_id, cost: card.cost, power: card.power, card_type: card.card_type, counter: card.counter }, e)}
+            onMouseEnter={(e) => onCardHover({ name: card.name, image: card.image, card_id: card.card_id, cost: card.cost, power: card.power, card_type: card.card_type, counter: card.counter, ability: card.ability }, e)}
             onMouseLeave={onCardLeave}
           >
             <HandCardFaceUp card={card} highlighted={highlightCards.includes(card.name)} />
@@ -973,7 +985,7 @@ function PlayerBoard({
       {/* Leader */}
       <div
         className="shrink-0"
-        onMouseEnter={(e) => onCardHover({ name: player.leader.name, image: player.leader.image, card_id: player.leader.card_id, cost: 0, power: player.leader.power, card_type: 'LEADER', don: player.leader.don, state: player.leader.state }, e)}
+        onMouseEnter={(e) => onCardHover({ name: player.leader.name, image: player.leader.image, card_id: player.leader.card_id, cost: 0, power: player.leader.power, card_type: 'LEADER', don: player.leader.don, state: player.leader.state, ability: player.leader.ability }, e)}
         onMouseLeave={onCardLeave}
       >
         <LeaderCard leader={player.leader} isP1={isP1} highlighted={leaderHighlighted} />

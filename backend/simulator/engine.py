@@ -223,6 +223,7 @@ class GameEngine:
                         "power": c.power,
                         "counter": c.counter,
                         "card_type": c.card_type,
+                        "ability": c.ability_text,
                     }
                     for c in self.state.p1.hand
                 ],
@@ -235,6 +236,7 @@ class GameEngine:
                         "power": c.power,
                         "counter": c.counter,
                         "card_type": c.card_type,
+                        "ability": c.ability_text,
                     }
                     for c in self.state.p2.hand
                 ],
@@ -260,6 +262,7 @@ class GameEngine:
                     "power": self.state.p1.leader.effective_power,
                     "don": self.state.p1.leader.attached_don,
                     "state": self.state.p1.leader.state.value,
+                    "ability": self.state.p1.leader.ability_text,
                 },
                 p2_leader={
                     "name": self.state.p2.leader.name,
@@ -268,6 +271,7 @@ class GameEngine:
                     "power": self.state.p2.leader.effective_power,
                     "don": self.state.p2.leader.attached_don,
                     "state": self.state.p2.leader.state.value,
+                    "ability": self.state.p2.leader.ability_text,
                 },
                 # Field details with images
                 p1_field_details=[
@@ -280,6 +284,7 @@ class GameEngine:
                         "don": c.attached_don,
                         "card_type": c.card_type,
                         "cost": c.cost,
+                        "ability": c.ability_text,
                     }
                     for c in self.state.p1.field
                 ],
@@ -293,6 +298,7 @@ class GameEngine:
                         "don": c.attached_don,
                         "card_type": c.card_type,
                         "cost": c.cost,
+                        "ability": c.ability_text,
                     }
                     for c in self.state.p2.field
                 ],
