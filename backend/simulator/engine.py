@@ -818,6 +818,13 @@ class GameEngine:
             "life_lost",
             remaining=len(defender.life),
             trigger=life_card.trigger_effect or "none",
+            card_name=life_card.name,
+            card_image=life_card.image,
+            card_id=life_card.card_id,
+            card_cost=life_card.cost,
+            card_power=life_card.power,
+            card_counter=life_card.counter,
+            card_type=life_card.card_type,
         )
 
         # Resolve trigger effect

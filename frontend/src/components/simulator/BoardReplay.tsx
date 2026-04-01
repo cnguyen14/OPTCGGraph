@@ -451,9 +451,19 @@ function buildSteps(gameLog: LogEntry[], p1Leader: string, p2Leader: string): Bo
       }
       case 'life_lost': {
         player.life = (d.remaining as number) ?? Math.max(0, player.life - 1);
-        // Life card goes to hand (OPTCG rule), but we don't know which card
-        // it is from the log. The next turn_start snapshot will have the
-        // correct hand contents. Just increment hand size indicator.
+        // Life card goes to hand (OPTCG rule)
+        const lifeName = d.card_name as string | undefined;
+        if (lifeName) {
+          player.hand.push({
+            name: lifeName,
+            card_id: (d.card_id as string) ?? '',
+            image: (d.card_image as string) ?? '',
+            cost: (d.card_cost as number) ?? 0,
+            power: (d.card_power as number) ?? 0,
+            counter: (d.card_counter as number) ?? 0,
+            card_type: (d.card_type as string) ?? '',
+          });
+        }
         break;
       }
       case 'counter_played': {
@@ -545,30 +555,33 @@ function LeaderCard({
   const glowColor = isP1 ? 'shadow-blue-500/30' : 'shadow-red-500/30';
   const isRested = leader.state === 'rested';
 
+  // Wrapper reserves space for rotated card (swap w/h when rested)
   return (
-    <div
-      className={`
-        relative w-[90px] h-[126px] rounded-lg overflow-hidden border-2 ${borderColor}
-        shadow-lg ${glowColor} shrink-0
-        ${isRested ? 'opacity-70 grayscale-[30%]' : ''}
-        ${highlighted ? 'ring-2 ring-yellow-400 animate-pulse' : ''}
-        transition-all duration-300
-      `}
-      title={`${leader.name} | Power: ${leader.power}${leader.don > 0 ? ` | DON: ${leader.don}` : ''}`}
-    >
-      <CardImage src={leader.image} alt={leader.name} className="w-full h-full" />
-      {/* Power overlay */}
-      <div className="absolute bottom-0 left-0 right-0 bg-black/80 px-1.5 py-1 text-center">
-        <span className={`text-xs font-bold ${leader.don > 0 ? 'text-green-400' : 'text-white'}`}>
-          {leader.power}
-        </span>
-        {leader.don > 0 && (
-          <span className="text-yellow-400 text-[10px] ml-1">{'\u26A1'}{leader.don}</span>
-        )}
-      </div>
-      {/* Leader badge */}
-      <div className={`absolute top-0 left-0 right-0 ${isP1 ? 'bg-blue-600/80' : 'bg-red-600/80'} px-1 py-0.5 text-center`}>
-        <span className="text-[9px] font-bold text-white uppercase tracking-wider">Leader</span>
+    <div className={`shrink-0 ${isRested ? 'w-[126px] h-[90px]' : 'w-[90px] h-[126px]'} flex items-center justify-center transition-all duration-300`}>
+      <div
+        className={`
+          relative w-[90px] h-[126px] rounded-lg overflow-hidden border-2 ${borderColor}
+          shadow-lg ${glowColor}
+          ${isRested ? 'rotate-90' : ''}
+          ${highlighted ? 'ring-2 ring-yellow-400 animate-pulse' : ''}
+          transition-all duration-300
+        `}
+        title={`${leader.name} | Power: ${leader.power}${leader.don > 0 ? ` | DON: ${leader.don}` : ''}${isRested ? ' | Rested' : ''}`}
+      >
+        <CardImage src={leader.image} alt={leader.name} className="w-full h-full" />
+        {/* Power overlay */}
+        <div className="absolute bottom-0 left-0 right-0 bg-black/80 px-1.5 py-1 text-center">
+          <span className={`text-xs font-bold ${leader.don > 0 ? 'text-green-400' : 'text-white'}`}>
+            {leader.power}
+          </span>
+          {leader.don > 0 && (
+            <span className="text-yellow-400 text-[10px] ml-1">{'\u26A1'}{leader.don}</span>
+          )}
+        </div>
+        {/* Leader badge */}
+        <div className={`absolute top-0 left-0 right-0 ${isP1 ? 'bg-blue-600/80' : 'bg-red-600/80'} px-1 py-0.5 text-center`}>
+          <span className="text-[9px] font-bold text-white uppercase tracking-wider">Leader</span>
+        </div>
       </div>
     </div>
   );
@@ -586,17 +599,19 @@ function FieldCardSlot({
   const isRested = card.state === 'rested';
   const borderColor = isP1 ? 'border-blue-500/70' : 'border-red-500/70';
 
+  // Wrapper reserves space for rotated card
   return (
-    <div
-      className={`
-        relative w-[72px] h-[100px] rounded-md overflow-hidden border-2 ${borderColor}
-        shrink-0 transition-all duration-300
-        ${isRested ? 'rotate-[20deg] opacity-75 translate-y-1' : ''}
-        ${highlighted ? 'ring-2 ring-yellow-400 animate-pulse' : ''}
-      `}
-      title={`${card.name} | Power: ${card.power}${card.don > 0 ? ` | DON: ${card.don}` : ''}${isRested ? ' | Rested' : ''}`}
-    >
-      <CardImage src={card.image} alt={card.name} className="w-full h-full" />
+    <div className={`${isRested ? 'w-[100px] h-[72px]' : 'w-[72px] h-[100px]'} flex items-center justify-center shrink-0 transition-all duration-300`}>
+      <div
+        className={`
+          relative w-[72px] h-[100px] rounded-md overflow-hidden border-2 ${borderColor}
+          transition-all duration-300
+          ${isRested ? 'rotate-90' : ''}
+          ${highlighted ? 'ring-2 ring-yellow-400 animate-pulse' : ''}
+        `}
+        title={`${card.name} | Power: ${card.power}${card.don > 0 ? ` | DON: ${card.don}` : ''}${isRested ? ' | Rested' : ''}`}
+      >
+        <CardImage src={card.image} alt={card.name} className="w-full h-full" />
       {/* Power overlay at bottom */}
       <div className="absolute bottom-0 left-0 right-0 bg-black/70 px-1 py-0.5 text-center">
         <span className={`text-xs font-bold ${card.don > 0 ? 'text-green-400' : 'text-white'}`}>
@@ -606,10 +621,11 @@ function FieldCardSlot({
           <span className="text-yellow-400 text-[10px] ml-1">{'\u26A1'}{card.don}</span>
         )}
       </div>
-      {/* Rested overlay */}
-      {isRested && (
-        <div className="absolute inset-0 bg-gray-900/20 pointer-events-none" />
-      )}
+        {/* Rested overlay */}
+        {isRested && (
+          <div className="absolute inset-0 bg-gray-900/20 pointer-events-none" />
+        )}
+      </div>
     </div>
   );
 }
