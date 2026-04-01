@@ -55,6 +55,8 @@ def _find_sim_dir(sim_id: str) -> Path | None:
     if old_path.exists():
         return old_path
     return None
+
+
 MAX_SAVED_DECKS = 50
 
 
@@ -275,12 +277,29 @@ async def get_sim_history(req: SimHistoryRequest) -> SimHistoryResponse:
 
         raw_entries = await r.lrange(redis_key, 0, -1)
         simulations: list[SimHistoryEntry] = []
-        for raw in raw_entries:
+        stale_indices: list[int] = []
+        for idx, raw in enumerate(raw_entries):
             try:
                 data = json.loads(raw)
+                sim_id = data.get("sim_id", "")
+                # Verify simulation data still exists on disk
+                if sim_id and not _find_sim_dir(sim_id):
+                    stale_indices.append(idx)
+                    continue
                 simulations.append(SimHistoryEntry(**data))
             except (json.JSONDecodeError, ValueError):
+                stale_indices.append(idx)
                 continue
+
+        # Clean up stale entries from Redis (deleted sim data)
+        if stale_indices:
+            # Remove stale entries by setting to sentinel then removing
+            pipe = r.pipeline()
+            sentinel = "__STALE__"
+            for idx in stale_indices:
+                await r.lset(redis_key, idx, sentinel)  # type: ignore[arg-type]
+            await r.lrem(redis_key, 0, sentinel)  # type: ignore[arg-type]
+            await pipe.execute()
 
         return SimHistoryResponse(simulations=simulations)
     except Exception as e:
@@ -507,7 +526,9 @@ async def analyze_matchup(req: MatchupAnalysisRequest) -> MatchupAnalysisRespons
     card_stats_lines: list[str] = []
     for card_id, played in sorted(card_play_counts.items(), key=lambda x: -x[1]):
         win_games = card_win_counts.get(card_id, 0)
-        total_games_played = sum(1 for g in games if card_id in g.get("p1_cards_played", {}))
+        total_games_played = sum(
+            1 for g in games if card_id in g.get("p1_cards_played", {})
+        )
         win_corr = win_games / total_games_played if total_games_played > 0 else 0.0
         card_stats_lines.append(
             f"  {card_id}: played {played}x in {total_games_played} games, win correlation {win_corr:.0%}"
@@ -526,10 +547,10 @@ async def analyze_matchup(req: MatchupAnalysisRequest) -> MatchupAnalysisRespons
     mulligans_p1 = sum(1 for g in games if g.get("p1_mulligan"))
     mulligans_p2 = sum(1 for g in games if g.get("p2_mulligan"))
     enhanced_stats_text = (
-        f"Avg P1 damage: {sum(p1_damage)/max(num_games,1):.1f}, "
-        f"Avg P2 damage: {sum(p2_damage)/max(num_games,1):.1f}\n"
-        f"Avg P1 effects: {sum(p1_effects)/max(num_games,1):.1f}, "
-        f"Avg P2 effects: {sum(p2_effects)/max(num_games,1):.1f}\n"
+        f"Avg P1 damage: {sum(p1_damage) / max(num_games, 1):.1f}, "
+        f"Avg P2 damage: {sum(p2_damage) / max(num_games, 1):.1f}\n"
+        f"Avg P1 effects: {sum(p1_effects) / max(num_games, 1):.1f}, "
+        f"Avg P2 effects: {sum(p2_effects) / max(num_games, 1):.1f}\n"
         f"P1 mulligan: {mulligans_p1}/{num_games}, P2 mulligan: {mulligans_p2}/{num_games}"
     )
 
