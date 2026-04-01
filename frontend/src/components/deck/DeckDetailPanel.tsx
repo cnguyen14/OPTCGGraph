@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { analyzeDeck, getDeckSimHistory, improveDeck, fetchSimDetail, analyzeMatchup } from '../../lib/api';
 import type { SimHistoryEntry, DeckImprovement, MatchupAnalysis } from '../../types';
+import SwapConfirmModal from './SwapConfirmModal';
 
 type TabId = 'analysis' | 'history' | 'improve';
 
@@ -252,11 +253,13 @@ function SimDetailPanel({
   leaderId,
   cardIds,
   onOpenBuilder,
+  onApplySwaps,
 }: {
   simId: string;
   leaderId: string;
   cardIds: string[];
   onOpenBuilder?: () => void;
+  onApplySwaps?: (swaps: SwapInput[]) => void;
 }) {
   const {
     data: detail,
@@ -387,17 +390,28 @@ function SimDetailPanel({
         <p className="text-xs text-red-400 py-2">Analysis error: {analysisError}</p>
       )}
 
-      {analysis && <MatchupAnalysisPanel analysis={analysis} onOpenBuilder={onOpenBuilder} />}
+      {analysis && <MatchupAnalysisPanel analysis={analysis} onOpenBuilder={onOpenBuilder} onApplySwaps={onApplySwaps} />}
     </div>
   );
+}
+
+interface SwapInput {
+  remove: string;
+  remove_id?: string;
+  add: string;
+  add_id?: string;
+  add_image?: string;
+  reason: string;
 }
 
 function MatchupAnalysisPanel({
   analysis,
   onOpenBuilder,
+  onApplySwaps,
 }: {
   analysis: MatchupAnalysis;
   onOpenBuilder?: () => void;
+  onApplySwaps?: (swaps: SwapInput[]) => void;
 }) {
   return (
     <div className="bg-gray-900/80 rounded-lg p-4 space-y-4">
@@ -500,15 +514,33 @@ function MatchupAnalysisPanel({
         </div>
       )}
 
-      {/* Action button */}
-      {onOpenBuilder && (
-        <button
-          onClick={onOpenBuilder}
-          className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 rounded transition-colors"
-        >
-          Open in Deck Builder to Apply Changes
-        </button>
-      )}
+      {/* Action buttons */}
+      <div className="flex items-center gap-2">
+        {onApplySwaps && analysis.suggested_swaps.length > 0 && (
+          <button
+            onClick={() =>
+              onApplySwaps(
+                analysis.suggested_swaps.map((s) => ({
+                  remove: s.remove,
+                  add: s.add,
+                  reason: s.reason,
+                })),
+              )
+            }
+            className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 rounded transition-colors"
+          >
+            Review &amp; Apply Swaps ({analysis.suggested_swaps.length})
+          </button>
+        )}
+        {onOpenBuilder && (
+          <button
+            onClick={onOpenBuilder}
+            className="bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs px-4 py-2 rounded transition-colors"
+          >
+            Open in Deck Builder
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -517,10 +549,12 @@ function SimHistoryTab({
   leaderId,
   cardIds,
   onOpenBuilder,
+  onApplySwaps,
 }: {
   leaderId: string;
   cardIds: string[];
   onOpenBuilder?: () => void;
+  onApplySwaps?: (swaps: SwapInput[]) => void;
 }) {
   const { data, loading, error, retry } = useFetch(
     () => getDeckSimHistory(leaderId, cardIds).then((r) => r.simulations),
@@ -603,7 +637,7 @@ function SimHistoryTab({
 
             {isExpanded && (
               <div className="mt-1.5 ml-2">
-                <SimDetailPanel simId={entry.sim_id} leaderId={leaderId} cardIds={cardIds} onOpenBuilder={onOpenBuilder} />
+                <SimDetailPanel simId={entry.sim_id} leaderId={leaderId} cardIds={cardIds} onOpenBuilder={onOpenBuilder} onApplySwaps={onApplySwaps} />
               </div>
             )}
           </div>
@@ -724,6 +758,7 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 
 export default function DeckDetailPanel({
+  deckId,
   leaderId,
   cardIds,
   deckName,
@@ -731,6 +766,11 @@ export default function DeckDetailPanel({
   onOpenBuilder,
 }: DeckDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('analysis');
+  const [swapModalData, setSwapModalData] = useState<{ swaps: SwapInput[] } | null>(null);
+
+  const handleApplySwaps = useCallback((swaps: SwapInput[]) => {
+    setSwapModalData({ swaps });
+  }, []);
 
   return (
     <div className="rounded-xl border border-gray-700/50 bg-gray-900/80 overflow-hidden">
@@ -766,9 +806,30 @@ export default function DeckDetailPanel({
       {/* Tab content */}
       <div className="p-4">
         {activeTab === 'analysis' && <AnalysisTab leaderId={leaderId} cardIds={cardIds} />}
-        {activeTab === 'history' && <SimHistoryTab leaderId={leaderId} cardIds={cardIds} onOpenBuilder={onOpenBuilder} />}
+        {activeTab === 'history' && (
+          <SimHistoryTab
+            leaderId={leaderId}
+            cardIds={cardIds}
+            onOpenBuilder={onOpenBuilder}
+            onApplySwaps={handleApplySwaps}
+          />
+        )}
         {activeTab === 'improve' && <ImproveTab leaderId={leaderId} cardIds={cardIds} />}
       </div>
+
+      {/* Swap confirmation modal */}
+      {swapModalData && (
+        <SwapConfirmModal
+          deckId={deckId}
+          deckName={deckName}
+          leaderId={leaderId}
+          swaps={swapModalData.swaps}
+          onClose={() => setSwapModalData(null)}
+          onSaved={() => {
+            setSwapModalData(null);
+          }}
+        />
+      )}
     </div>
   );
 }

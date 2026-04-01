@@ -468,7 +468,10 @@ async def get_sim_detail(sim_id: str) -> dict:
 
 
 @router.post("/analyze-matchup", response_model=MatchupAnalysisResponse)
-async def analyze_matchup(req: MatchupAnalysisRequest) -> MatchupAnalysisResponse:
+async def analyze_matchup(
+    req: MatchupAnalysisRequest,
+    driver: AsyncDriver = Depends(_get_driver),
+) -> MatchupAnalysisResponse:
     """AI-powered matchup analysis using simulation data."""
     # Check Redis cache first
     cache_key = f"matchup-analysis:{req.sim_id}"
@@ -623,6 +626,56 @@ Provide your analysis in this exact JSON format:
             )
         except (json.JSONDecodeError, IndexError):
             result = MatchupAnalysisResponse(analysis=raw_text)
+
+        # Enrich suggested_swaps with card_ids from Neo4j
+        if result.suggested_swaps:
+            enriched_swaps: list[dict] = []
+            for swap in result.suggested_swaps:
+                remove_name = swap.get("remove", "")
+                add_name = swap.get("add", "")
+                remove_id = ""
+                add_id = ""
+                add_image = ""
+
+                if add_name:
+                    async with driver.session() as session:
+                        neo_result = await session.run(
+                            "MATCH (c:Card) WHERE toLower(c.name) CONTAINS toLower($name) "
+                            "RETURN c.id AS id, c.name AS name, c.image_small AS image LIMIT 1",
+                            name=add_name,
+                        )
+                        record = await neo_result.single()
+                        if record:
+                            add_id = record["id"]
+                            add_image = record.get("image", "") or ""
+
+                if remove_name:
+                    async with driver.session() as session:
+                        neo_result = await session.run(
+                            "MATCH (c:Card) WHERE toLower(c.name) CONTAINS toLower($name) "
+                            "RETURN c.id AS id, c.name AS name LIMIT 1",
+                            name=remove_name,
+                        )
+                        record = await neo_result.single()
+                        if record:
+                            remove_id = record["id"]
+
+                enriched_swaps.append({
+                    "remove": remove_name,
+                    "remove_id": remove_id,
+                    "add": add_name,
+                    "add_id": add_id,
+                    "add_image": add_image,
+                    "reason": swap.get("reason", ""),
+                })
+            result = MatchupAnalysisResponse(
+                analysis=result.analysis,
+                strengths=result.strengths,
+                weaknesses=result.weaknesses,
+                overperformers=result.overperformers,
+                underperformers=result.underperformers,
+                suggested_swaps=enriched_swaps,
+            )
 
         # Cache in Redis (7 days)
         try:
