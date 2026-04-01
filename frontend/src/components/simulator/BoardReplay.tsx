@@ -440,6 +440,16 @@ function buildSteps(gameLog: LogEntry[], p1Leader: string, p2Leader: string): Bo
       }
       case 'life_lost': {
         player.life = (d.remaining as number) ?? Math.max(0, player.life - 1);
+        // Life card goes to hand (OPTCG rule: life damage → card added to hand)
+        player.hand.push({
+          name: 'Life Card',
+          card_id: '',
+          image: '',
+          cost: 0,
+          power: 0,
+          counter: 0,
+          card_type: 'LIFE',
+        });
         break;
       }
       case 'counter_played': {
@@ -653,21 +663,34 @@ function LifePile({ life }: { life: number }) {
 }
 
 function DonDisplay({ available, rested, donDeck }: { available: number; rested: number; donDeck: number }) {
+  const total = available + rested;
   return (
-    <div className="flex items-center gap-1 flex-wrap">
-      {Array.from({ length: available }).map((_, i) => (
-        <div
-          key={`a-${i}`}
-          className="w-4 h-4 rounded-full bg-yellow-500 border border-yellow-400 shadow-sm shadow-yellow-500/30"
-        />
-      ))}
-      {Array.from({ length: rested }).map((_, i) => (
-        <div
-          key={`r-${i}`}
-          className="w-4 h-4 rounded-full bg-yellow-900 border border-yellow-700"
-        />
-      ))}
-      {(available + rested) === 0 && <span className="text-[10px] text-gray-600">No DON</span>}
+    <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-0.5">
+        {Array.from({ length: available }).map((_, i) => (
+          <div
+            key={`a-${i}`}
+            className="w-4 h-4 rounded-full bg-yellow-500 border border-yellow-400 shadow-sm shadow-yellow-500/30"
+            title="Active DON"
+          />
+        ))}
+        {available > 0 && (
+          <span className="text-[10px] text-yellow-400 ml-0.5">{available} active</span>
+        )}
+      </div>
+      {rested > 0 && (
+        <div className="flex items-center gap-0.5">
+          {Array.from({ length: rested }).map((_, i) => (
+            <div
+              key={`r-${i}`}
+              className="w-4 h-4 rounded-full bg-yellow-900/60 border border-yellow-700/50 rotate-90"
+              title="Rested DON"
+            />
+          ))}
+          <span className="text-[10px] text-yellow-700 ml-0.5">{rested} rested</span>
+        </div>
+      )}
+      {total === 0 && <span className="text-[10px] text-gray-600">No DON</span>}
       <span className="text-[10px] text-gray-500 ml-1">DON deck: {donDeck}</span>
     </div>
   );
