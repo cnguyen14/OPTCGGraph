@@ -20,7 +20,24 @@ export default function MyDecksPage({ onLoadDeck, onSimulateDeck, onNewDeck }: P
   const [leaderImages, setLeaderImages] = useState<Record<string, string>>({});
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const [expandedCardIds, setExpandedCardIds] = useState<string[]>([]);
+  const [detailKey, setDetailKey] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  const reloadExpandedDeck = async (deckId: string) => {
+    try {
+      const full = await loadSavedDeck(deckId);
+      const cardIds: string[] = [];
+      for (const entry of full.entries) {
+        for (let i = 0; i < entry.quantity; i++) {
+          cardIds.push(entry.card_id);
+        }
+      }
+      setExpandedCardIds(cardIds);
+      setDetailKey((k) => k + 1);
+    } catch {
+      // ignore
+    }
+  };
 
   const fetchDecks = () => {
     setLoading(true);
@@ -300,6 +317,7 @@ export default function MyDecksPage({ onLoadDeck, onSimulateDeck, onNewDeck }: P
                   {selectedDeckId === deck.id && deck.leader_id && expandedCardIds.length > 0 && (
                     <div ref={panelRef}>
                       <DeckDetailPanel
+                        key={detailKey}
                         deckId={deck.id}
                         leaderId={deck.leader_id}
                         cardIds={expandedCardIds}
@@ -310,6 +328,7 @@ export default function MyDecksPage({ onLoadDeck, onSimulateDeck, onNewDeck }: P
                         }}
                         onOpenBuilder={() => handleLoad(deck)}
                         onSimulate={() => handleSimulate(deck)}
+                        onDeckChanged={() => reloadExpandedDeck(deck.id)}
                       />
                     </div>
                   )}
