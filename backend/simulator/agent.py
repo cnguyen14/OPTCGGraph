@@ -241,6 +241,12 @@ def _estimate_action_value(
         # Penalty for low-power cards late game
         if state.turn >= 6 and card.power < 4000:
             base -= 5.0
+        # Near-lethal: don't play expensive cards — focus on killing
+        opp_life = len(opponent.life)
+        if opp_life <= 1 and card.cost >= 3:
+            base *= 0.3
+        elif opp_life <= 2 and card.cost >= 5:
+            base *= 0.5
         return base
 
     if action.action_type == ActionType.ATTACH_DON:
@@ -275,13 +281,13 @@ def _estimate_action_value(
                 return -8.0  # Attack will likely fail
             if opp_life == 0:
                 return 200.0  # Win condition
-            if opp_life == 1:
-                return 80.0  # Near-lethal
-            # Value scales with life pressure
-            base_attack_value = 20.0 + (5 - opp_life) * 8.0
+            # Quadratic scaling: attack value increases FAST near lethal
+            life_pressure = 5 - opp_life
+            base_attack_value = 20.0 + life_pressure**2 * 5.0
+            # L5: 20, L4: 25, L3: 40, L2: 65, L1: 100, L0: 145
             # Double attack bonus
             if _has_effect(attacker, EffectType.DOUBLE_ATTACK) and opp_life >= 2:
-                base_attack_value += 20.0
+                base_attack_value += 25.0
             return base_attack_value if power_gap >= 0 else base_attack_value * 0.3
         else:
             # Attacking a rested character
@@ -490,6 +496,7 @@ class HeuristicAgent:
         """Decide whether to mulligan (redraw entire hand).
 
         Evaluates hand quality based on early-game playability.
+        OPTCG strategy: you want at least 1-2 cards playable in turns 1-3.
         """
         prof = self.profile
         costs = [c.cost for c in hand]
@@ -498,23 +505,34 @@ class HeuristicAgent:
 
         avg_cost = sum(costs) / len(costs)
         low_cost_count = sum(1 for c in costs if c <= 3)
+        mid_cost_count = sum(1 for c in costs if 4 <= c <= 5)
         has_on_play = any(_has_on_play_effect(c) for c in hand)
 
         # No early plays at all — always mulligan
         if low_cost_count == 0:
             return True
 
-        # Hand is too expensive on average
-        if avg_cost > 5.5:
+        # Hand is too expensive on average (lowered threshold)
+        if avg_cost > 4.5:
+            return True
+
+        # No mid-game plays AND only 1 early play → bad hand
+        if low_cost_count == 1 and mid_cost_count == 0:
             return True
 
         # Beginners mulligan erratically
         if prof["mistake_rate"] > 0.10:
-            return self.rng.random() < 0.25
+            return self.rng.random() < 0.30
 
-        # Skilled players: mulligan if hand lacks early plays AND effects
+        # Skilled players: mulligan if hand lacks curve (no 1-2 cost + no 4-5 cost)
+        has_low = any(c <= 2 for c in costs)
+        has_mid = any(4 <= c <= 5 for c in costs)
+        if not has_low and not has_mid:
+            return self.rng.random() < 0.6
+
+        # Only 1 early play and no effects → weak hand
         if low_cost_count <= 1 and not has_on_play:
-            return self.rng.random() < 0.5
+            return self.rng.random() < 0.4
 
         return False
 
@@ -640,14 +658,15 @@ class HeuristicAgent:
 
             # --- Play-before-attack sequencing ---
             # Smart agents should develop board and attach DON BEFORE attacking
+            # But near lethal, attack immediately
             if action.action_type == ActionType.ATTACK:
-                # Penalize attacking if we still have playable on-play effects
-                if has_unplayed_on_play:
+                opp_life_count = len(opponent.life)
+                if opp_life_count <= 1:
+                    pass  # Near lethal — don't penalize attacks
+                elif has_unplayed_on_play:
                     score *= 0.4
-                # Penalize attacking if we have DON to attach to attackers
                 elif player.don_field > 0 and has_active_attackers:
                     score *= 0.6
-                # Penalize attacking if we have affordable cards to play first
                 elif has_playable_cards and self._cards_played_this_turn == 0:
                     score *= 0.7
 
@@ -855,16 +874,15 @@ class HeuristicAgent:
             )
             return self._select_counters(sorted_by_utility, power_gap, player)
 
-        # Life 3: counter with expendable low-utility cards only
+        # Life 3: only counter if opponent has many threats or we're control
         if life == 3:
             if archetype == "aggro":
                 return []  # Aggro takes the hit for tempo
-            low_utility = [c for c in counter_cards if _card_utility(c, player) < 3.0]
-            if low_utility:
-                return self._select_counters(
-                    low_utility, power_gap, player, max_cards=2
-                )
-            return []
+            # Only counter if power gap is small (1 cheap card covers it)
+            low_utility = [c for c in counter_cards if _card_utility(c, player) < 2.5]
+            if low_utility and low_utility[0].counter >= power_gap:
+                return [low_utility[0]]  # Single cheap counter only
+            return []  # Take the hit — cards are more valuable
 
         # Life 4+: take the hit — cards are more valuable than life
         return []
@@ -941,17 +959,15 @@ class HeuristicAgent:
                     best = (i, gap)
 
         if best is not None:
-            # Check: don't spend ALL DON on boosting — reserve for card plays
-            boost_cost = (best[1] + 999) // 1000
+            # Check: don't spend ALL DON on boosting — reserve for critical card plays
             remaining_after = player.don_field - 1  # We attach 1 at a time
-            has_playable = any(
-                c.cost <= remaining_after
+            # Only block DON attach if we have a card with on-play removal effect
+            has_critical_play = any(
+                c.cost <= remaining_after and _has_on_play_effect(c)
                 for c in player.hand
                 if c.card_type in ("CHARACTER", "EVENT", "STAGE")
             )
-            # If we still have playable cards and this DON would leave us unable to play them,
-            # only attach if the gap is small (worth it for the attack)
-            if has_playable and remaining_after < 2 and boost_cost > 2:
+            if has_critical_play and remaining_after < 1:
                 return None
             return best[0]
 
@@ -1048,7 +1064,7 @@ class HeuristicAgent:
         opponent: PlayerState,
     ) -> int | None:
         opp_life = len(opponent.life)
-        if opp_life > 2:
+        if opp_life > 3:
             return None
 
         viable: list[tuple[int, int]] = []

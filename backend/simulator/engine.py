@@ -202,6 +202,8 @@ class GameEngine:
                     p2_don_available=self.state.p2.don_field,
                     p1_deck_remaining=len(self.state.p1.deck),
                     p2_deck_remaining=len(self.state.p2.deck),
+                    p1_board_eval=self._quick_board_eval("p1"),
+                    p2_board_eval=self._quick_board_eval("p2"),
                 )
             )
 
@@ -341,7 +343,31 @@ class GameEngine:
         """
         for player_id, agent in [("p1", p1_agent), ("p2", p2_agent)]:
             player = self.state.p1 if player_id == "p1" else self.state.p2
-            if await agent.choose_mulligan(list(player.hand)):
+            opponent = self.state.p2 if player_id == "p1" else self.state.p1
+            did_mulligan = await agent.choose_mulligan(list(player.hand))
+
+            # Log mulligan decision
+            self.decision_points.append(
+                DecisionPoint(
+                    turn=0,
+                    phase="mulligan",
+                    player_id=player_id,
+                    player_life=len(player.life),
+                    opponent_life=len(opponent.life),
+                    player_hand_size=len(player.hand),
+                    player_field_power=0,
+                    player_don_available=0,
+                    opponent_field_power=0,
+                    opponent_hand_size=len(opponent.hand),
+                    num_legal_actions=2,
+                    action_scores=[],
+                    chosen_action_index=1 if did_mulligan else 0,
+                    chosen_action_type="mulligan" if did_mulligan else "keep",
+                    chosen_action_desc="Mulligan hand" if did_mulligan else "Keep hand",
+                )
+            )
+
+            if did_mulligan:
                 player.deck.extend(player.hand)
                 player.hand.clear()
                 self.rng.shuffle(player.deck)
@@ -833,6 +859,22 @@ class GameEngine:
             self.effects.resolve_trigger(self, life_card, defender, opponent)
 
     # --- Data collection helpers ---
+
+    def _quick_board_eval(self, player_id: str) -> float:
+        """Lightweight board evaluation for TurnSnapshot (no imports needed)."""
+        player = self.state.p1 if player_id == "p1" else self.state.p2
+        opponent = self.state.p2 if player_id == "p1" else self.state.p1
+        score = 0.0
+        score += len(player.life) * 100.0
+        score -= len(opponent.life) * 100.0
+        score += len(player.hand) * 15.0
+        score -= len(opponent.hand) * 8.0
+        score += sum(c.effective_power for c in player.characters) * 0.003
+        score -= sum(c.effective_power for c in opponent.characters) * 0.003
+        score += player.don_field * 8.0
+        score += len(player.characters) * 12.0
+        score -= len(opponent.characters) * 12.0
+        return round(score, 1)
 
     def track_effect_fired(self, player_id: str) -> None:
         """Increment effect counter for a player (called by EffectHandler)."""
