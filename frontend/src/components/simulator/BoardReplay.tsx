@@ -371,26 +371,37 @@ function buildSteps(gameLog: LogEntry[], p1Leader: string, p2Leader: string): Bo
       case 'play_card':
       case 'play_event': {
         const cardName = d.card_name as string | undefined;
+        const cardCost = (d.cost as number) ?? 0;
         if (cardName) {
           const idx = player.hand.findIndex((c) => c.name === cardName);
           let removedCard: HandCard | undefined;
           if (idx !== -1) {
             removedCard = player.hand.splice(idx, 1)[0];
           }
+          // Pay DON cost: move from available to rested
+          if (cardCost > 0) {
+            const paid = Math.min(cardCost, player.donAvailable);
+            player.donAvailable -= paid;
+            player.donRested += paid;
+          }
           if (entry.action === 'play_card') {
             const cardImage = (d.card_image as string) ?? removedCard?.image ?? '';
+            // Power comes from the hand card data (base power from Neo4j)
+            const cardPower = removedCard?.power ?? 0;
             player.field.push({
               name: cardName,
               card_id: removedCard?.card_id ?? '',
               image: cardImage,
-              power: (d.power as number) ?? removedCard?.power ?? 0,
-              state: 'active',  // Characters enter ACTIVE (with summoning sickness — can't attack this turn)
+              power: cardPower,
+              state: 'active',
               don: 0,
-              card_type: removedCard?.card_type ?? 'Character',
-              cost: (d.cost as number) ?? removedCard?.cost ?? 0,
+              card_type: (d.card_type as string) ?? removedCard?.card_type ?? 'CHARACTER',
+              cost: cardCost,
             });
           }
-          player.trash += (entry.action === 'play_event' ? 1 : 0);
+          if (entry.action === 'play_event') {
+            player.trash += 1;
+          }
         }
         break;
       }
@@ -440,16 +451,9 @@ function buildSteps(gameLog: LogEntry[], p1Leader: string, p2Leader: string): Bo
       }
       case 'life_lost': {
         player.life = (d.remaining as number) ?? Math.max(0, player.life - 1);
-        // Life card goes to hand (OPTCG rule: life damage → card added to hand)
-        player.hand.push({
-          name: 'Life Card',
-          card_id: '',
-          image: '',
-          cost: 0,
-          power: 0,
-          counter: 0,
-          card_type: 'LIFE',
-        });
+        // Life card goes to hand (OPTCG rule), but we don't know which card
+        // it is from the log. The next turn_start snapshot will have the
+        // correct hand contents. Just increment hand size indicator.
         break;
       }
       case 'counter_played': {
@@ -546,7 +550,7 @@ function LeaderCard({
       className={`
         relative w-[90px] h-[126px] rounded-lg overflow-hidden border-2 ${borderColor}
         shadow-lg ${glowColor} shrink-0
-        ${isRested ? 'rotate-[90deg] opacity-75' : ''}
+        ${isRested ? 'rotate-[15deg] opacity-80' : ''}
         ${highlighted ? 'ring-2 ring-yellow-400 animate-pulse' : ''}
         transition-all duration-300
       `}
@@ -587,7 +591,7 @@ function FieldCardSlot({
       className={`
         relative w-[72px] h-[100px] rounded-md overflow-hidden border-2 ${borderColor}
         shrink-0 transition-all duration-300
-        ${isRested ? 'rotate-[90deg] opacity-75' : ''}
+        ${isRested ? 'rotate-[20deg] opacity-75 translate-y-1' : ''}
         ${highlighted ? 'ring-2 ring-yellow-400 animate-pulse' : ''}
       `}
       title={`${card.name} | Power: ${card.power}${card.don > 0 ? ` | DON: ${card.don}` : ''}${isRested ? ' | Rested' : ''}`}
