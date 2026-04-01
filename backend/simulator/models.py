@@ -127,6 +127,7 @@ class GameCard:
     state: CardState = CardState.ACTIVE
     attached_don: int = 0
     power_modifier: int = 0  # Temp buff/debuff this turn
+    can_attack: bool = True  # False on turn played (summoning sickness)
 
     @property
     def effective_power(self) -> int:

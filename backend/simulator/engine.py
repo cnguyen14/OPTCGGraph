@@ -368,9 +368,10 @@ class GameEngine:
         player.leader.state = CardState.ACTIVE
         player.leader.reset_turn_modifiers()
 
-        # Unrest all field cards, return attached DON!! to pool
+        # Unrest all field cards, return attached DON!! to pool, clear summoning sickness
         for card in player.field:
             card.state = CardState.ACTIVE
+            card.can_attack = True  # Summoning sickness wears off
             player.don_field += card.attached_don
             card.attached_don = 0
             card.reset_turn_modifiers()
@@ -509,15 +510,19 @@ class GameEngine:
                     )
                 )
 
-        # Attack with leader or active characters
+        # Attack with leader or active characters that can attack
         # First player cannot attack on turn 1 (OPTCG rule)
-        can_attack = self.state.turn > 1
+        turn_can_attack = self.state.turn > 1
         attack_sources = []
-        if can_attack:
+        if turn_can_attack:
             if player.leader.state == CardState.ACTIVE:
                 attack_sources.append(player.leader)
             for card in player.characters:
-                if card.state == CardState.ACTIVE and card.effective_power > 0:
+                if (
+                    card.state == CardState.ACTIVE
+                    and card.can_attack  # No summoning sickness
+                    and card.effective_power > 0
+                ):
                     attack_sources.append(card)
 
         for attacker in attack_sources:
@@ -595,10 +600,11 @@ class GameEngine:
                 cost=card.cost,
             )
         else:
-            # Characters and Stages go to field
-            card.state = CardState.RESTED  # Enter rested unless Rush
+            # Characters and Stages go to field ACTIVE but with summoning sickness
+            card.state = CardState.ACTIVE
+            card.can_attack = False  # Summoning sickness — can't attack this turn
             if self.effects.has_rush(card):
-                card.state = CardState.ACTIVE
+                card.can_attack = True  # Rush bypasses summoning sickness
             player.field.append(card)
             self.effects.resolve_on_play(self, card, player, opponent)
             self.state.log(

@@ -598,7 +598,8 @@ class TestCardPlaying:
 
         assert card in state.p1.field
         assert card not in state.p1.hand
-        assert card.state == CardState.RESTED  # Enters rested
+        assert card.state == CardState.ACTIVE  # Enters active (with summoning sickness)
+        assert card.can_attack is False  # Can't attack this turn
         assert state.p1.don_field == 2  # Paid 3
 
     @pytest.mark.asyncio
@@ -625,6 +626,7 @@ class TestCardPlaying:
         await engine._play_card(action, state.p1, state.p2)
 
         assert rush_card.state == CardState.ACTIVE
+        assert rush_card.can_attack is True  # Rush bypasses summoning sickness
 
     @pytest.mark.asyncio
     async def test_play_event_goes_to_trash(self):

@@ -384,7 +384,7 @@ function buildSteps(gameLog: LogEntry[], p1Leader: string, p2Leader: string): Bo
               card_id: removedCard?.card_id ?? '',
               image: cardImage,
               power: (d.power as number) ?? removedCard?.power ?? 0,
-              state: 'rested',
+              state: 'active',  // Characters enter ACTIVE (with summoning sickness — can't attack this turn)
               don: 0,
               card_type: removedCard?.card_type ?? 'Character',
               cost: (d.cost as number) ?? removedCard?.cost ?? 0,
