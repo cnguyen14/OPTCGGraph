@@ -27,6 +27,7 @@ interface DeckDetailPanelProps {
   cardIds: string[];
   deckName: string;
   onClose: () => void;
+  onOpenBuilder?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -250,10 +251,12 @@ function SimDetailPanel({
   simId,
   leaderId,
   cardIds,
+  onOpenBuilder,
 }: {
   simId: string;
   leaderId: string;
   cardIds: string[];
+  onOpenBuilder?: () => void;
 }) {
   const {
     data: detail,
@@ -384,12 +387,18 @@ function SimDetailPanel({
         <p className="text-xs text-red-400 py-2">Analysis error: {analysisError}</p>
       )}
 
-      {analysis && <MatchupAnalysisPanel analysis={analysis} />}
+      {analysis && <MatchupAnalysisPanel analysis={analysis} onOpenBuilder={onOpenBuilder} />}
     </div>
   );
 }
 
-function MatchupAnalysisPanel({ analysis }: { analysis: MatchupAnalysis }) {
+function MatchupAnalysisPanel({
+  analysis,
+  onOpenBuilder,
+}: {
+  analysis: MatchupAnalysis;
+  onOpenBuilder?: () => void;
+}) {
   return (
     <div className="bg-gray-900/80 rounded-lg p-4 space-y-4">
       {/* Main analysis */}
@@ -490,6 +499,16 @@ function MatchupAnalysisPanel({ analysis }: { analysis: MatchupAnalysis }) {
           </div>
         </div>
       )}
+
+      {/* Action button */}
+      {onOpenBuilder && (
+        <button
+          onClick={onOpenBuilder}
+          className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 rounded transition-colors"
+        >
+          Open in Deck Builder to Apply Changes
+        </button>
+      )}
     </div>
   );
 }
@@ -497,9 +516,11 @@ function MatchupAnalysisPanel({ analysis }: { analysis: MatchupAnalysis }) {
 function SimHistoryTab({
   leaderId,
   cardIds,
+  onOpenBuilder,
 }: {
   leaderId: string;
   cardIds: string[];
+  onOpenBuilder?: () => void;
 }) {
   const { data, loading, error, retry } = useFetch(
     () => getDeckSimHistory(leaderId, cardIds).then((r) => r.simulations),
@@ -582,7 +603,7 @@ function SimHistoryTab({
 
             {isExpanded && (
               <div className="mt-1.5 ml-2">
-                <SimDetailPanel simId={entry.sim_id} leaderId={leaderId} cardIds={cardIds} />
+                <SimDetailPanel simId={entry.sim_id} leaderId={leaderId} cardIds={cardIds} onOpenBuilder={onOpenBuilder} />
               </div>
             )}
           </div>
@@ -598,7 +619,22 @@ function SimHistoryTab({
 
 function ImproveTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[] }) {
   const { data, loading, error, retry } = useFetch(
-    () => improveDeck(leaderId, cardIds),
+    async () => {
+      // Try to get sim card_stats from most recent simulation
+      let simCardStats: Record<string, unknown> | undefined;
+      try {
+        const hist = await getDeckSimHistory(leaderId, cardIds);
+        if (hist.simulations.length > 0) {
+          const latest = hist.simulations[0] as Record<string, unknown>;
+          if (latest.card_stats && typeof latest.card_stats === 'object') {
+            simCardStats = latest.card_stats as Record<string, unknown>;
+          }
+        }
+      } catch {
+        // No sim data available — improve without it
+      }
+      return improveDeck(leaderId, cardIds, simCardStats);
+    },
     [leaderId, cardIds],
   );
 
@@ -692,6 +728,7 @@ export default function DeckDetailPanel({
   cardIds,
   deckName,
   onClose,
+  onOpenBuilder,
 }: DeckDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('analysis');
 
@@ -729,7 +766,7 @@ export default function DeckDetailPanel({
       {/* Tab content */}
       <div className="p-4">
         {activeTab === 'analysis' && <AnalysisTab leaderId={leaderId} cardIds={cardIds} />}
-        {activeTab === 'history' && <SimHistoryTab leaderId={leaderId} cardIds={cardIds} />}
+        {activeTab === 'history' && <SimHistoryTab leaderId={leaderId} cardIds={cardIds} onOpenBuilder={onOpenBuilder} />}
         {activeTab === 'improve' && <ImproveTab leaderId={leaderId} cardIds={cardIds} />}
       </div>
     </div>

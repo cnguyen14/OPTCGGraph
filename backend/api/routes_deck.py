@@ -470,6 +470,17 @@ async def get_sim_detail(sim_id: str) -> dict:
 @router.post("/analyze-matchup", response_model=MatchupAnalysisResponse)
 async def analyze_matchup(req: MatchupAnalysisRequest) -> MatchupAnalysisResponse:
     """AI-powered matchup analysis using simulation data."""
+    # Check Redis cache first
+    cache_key = f"matchup-analysis:{req.sim_id}"
+    try:
+        r = await get_redis()
+        cached = await r.get(cache_key)
+        if cached:
+            data = json.loads(cached if isinstance(cached, str) else cached.decode())
+            return MatchupAnalysisResponse(**data)
+    except Exception:
+        pass  # Cache miss or Redis error — proceed with fresh analysis
+
     sim_dir = _find_sim_dir(req.sim_id)
     if not sim_dir:
         raise HTTPException(404, "Simulation data not found")
@@ -602,7 +613,7 @@ Provide your analysis in this exact JSON format:
                 json_text = json_text.split("```")[1].split("```")[0].strip()
 
             parsed = json.loads(json_text)
-            return MatchupAnalysisResponse(
+            result = MatchupAnalysisResponse(
                 analysis=parsed.get("analysis", ""),
                 strengths=parsed.get("strengths", []),
                 weaknesses=parsed.get("weaknesses", []),
@@ -611,8 +622,14 @@ Provide your analysis in this exact JSON format:
                 suggested_swaps=parsed.get("suggested_swaps", []),
             )
         except (json.JSONDecodeError, IndexError):
-            # Fallback: return raw text as analysis
-            return MatchupAnalysisResponse(analysis=raw_text)
+            result = MatchupAnalysisResponse(analysis=raw_text)
+
+        # Cache in Redis (7 days)
+        try:
+            await r.set(cache_key, result.model_dump_json(), ex=7 * 86400)
+        except Exception:
+            pass
+        return result
 
     except anthropic.APIError as e:
         logger.exception("Claude API error during matchup analysis")

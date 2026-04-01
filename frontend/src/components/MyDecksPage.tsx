@@ -308,6 +308,7 @@ export default function MyDecksPage({ onLoadDeck, onSimulateDeck, onNewDeck }: P
                           setSelectedDeckId(null);
                           setExpandedCardIds([]);
                         }}
+                        onOpenBuilder={() => handleLoad(deck)}
                       />
                     </div>
                   )}
