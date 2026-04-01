@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { analyzeDeck, getDeckSimHistory, improveDeck, fetchSimDetail, analyzeMatchup } from '../../lib/api';
 import type { SimHistoryEntry, DeckImprovement, MatchupAnalysis } from '../../types';
 import SwapConfirmModal from './SwapConfirmModal';
+import type { SwapWithCandidates } from './SwapConfirmModal';
 
 type TabId = 'analysis' | 'history' | 'improve';
 
@@ -395,13 +396,23 @@ function SimDetailPanel({
   );
 }
 
+interface SwapCandidate {
+  card_id: string;
+  name: string;
+  image: string;
+  power: number;
+  cost: number;
+  counter: number;
+  synergy_score: number;
+}
+
 interface SwapInput {
   remove: string;
-  remove_id?: string;
-  add: string;
-  add_id?: string;
-  add_image?: string;
+  remove_name?: string;
+  remove_image?: string;
+  role_needed?: string;
   reason: string;
+  candidates?: SwapCandidate[];
 }
 
 function MatchupAnalysisPanel({
@@ -502,12 +513,17 @@ function MatchupAnalysisPanel({
             {analysis.suggested_swaps.map((swap, i) => (
               <div
                 key={i}
-                className="flex items-center gap-2 bg-gray-800/60 border border-gray-700/50 rounded-md px-3 py-2 text-xs"
+                className="bg-gray-800/60 border border-gray-700/50 rounded-md px-3 py-2 text-xs"
               >
-                <span className="text-red-400 font-medium">{swap.remove}</span>
-                <span className="text-gray-600">&rarr;</span>
-                <span className="text-green-400 font-medium">{swap.add}</span>
-                <span className="text-gray-500 ml-auto text-[11px]">{swap.reason}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-red-400 font-medium">{swap.remove_name || swap.remove}</span>
+                  <span className="text-gray-600">&rarr;</span>
+                  <span className="text-purple-400 font-medium capitalize">{swap.role_needed}</span>
+                  {swap.candidates && swap.candidates.length > 0 && (
+                    <span className="text-gray-500 text-[10px]">({swap.candidates.length} candidates)</span>
+                  )}
+                </div>
+                <p className="text-gray-500 text-[11px] mt-1">{swap.reason}</p>
               </div>
             ))}
           </div>
@@ -522,8 +538,11 @@ function MatchupAnalysisPanel({
               onApplySwaps(
                 analysis.suggested_swaps.map((s) => ({
                   remove: s.remove,
-                  add: s.add,
+                  remove_name: s.remove_name,
+                  remove_image: s.remove_image,
+                  role_needed: s.role_needed,
                   reason: s.reason,
+                  candidates: s.candidates,
                 })),
               )
             }
@@ -766,10 +785,18 @@ export default function DeckDetailPanel({
   onOpenBuilder,
 }: DeckDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('analysis');
-  const [swapModalData, setSwapModalData] = useState<{ swaps: SwapInput[] } | null>(null);
+  const [swapModalData, setSwapModalData] = useState<{ swaps: SwapWithCandidates[] } | null>(null);
 
   const handleApplySwaps = useCallback((swaps: SwapInput[]) => {
-    setSwapModalData({ swaps });
+    const swapsWithCandidates: SwapWithCandidates[] = swaps.map((s) => ({
+      remove: s.remove,
+      remove_name: s.remove_name ?? s.remove,
+      remove_image: s.remove_image ?? '',
+      role_needed: s.role_needed ?? '',
+      reason: s.reason,
+      candidates: s.candidates ?? [],
+    }));
+    setSwapModalData({ swaps: swapsWithCandidates });
   }, []);
 
   return (

@@ -483,11 +483,30 @@ export interface SimDetail {
   }>;
 }
 
+export interface SwapCandidate {
+  card_id: string;
+  name: string;
+  image: string;
+  power: number | null;
+  cost: number | null;
+  counter: number | null;
+  synergy_score: number;
+}
+
+export interface SuggestedSwap {
+  remove: string;
+  remove_name: string;
+  remove_image: string;
+  role_needed: string;
+  reason: string;
+  candidates: SwapCandidate[];
+}
+
 export interface MatchupAnalysis {
   analysis: string;
   strengths: string[];
   weaknesses: string[];
   overperformers: Array<{ card_id: string; card_name: string; reason: string }>;
   underperformers: Array<{ card_id: string; card_name: string; reason: string }>;
-  suggested_swaps: Array<{ remove: string; add: string; reason: string }>;
+  suggested_swaps: SuggestedSwap[];
 }

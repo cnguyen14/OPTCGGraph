@@ -474,7 +474,7 @@ async def analyze_matchup(
 ) -> MatchupAnalysisResponse:
     """AI-powered matchup analysis using simulation data."""
     # Check Redis cache first
-    cache_key = f"matchup-analysis:{req.sim_id}"
+    cache_key = f"matchup-analysis:v2:{req.sim_id}"
     try:
         r = await get_redis()
         cached = await r.get(cache_key)
@@ -590,8 +590,13 @@ Provide your analysis in this exact JSON format:
   "weaknesses": ["weakness 1", "weakness 2"],
   "overperformers": [{{"card_id": "...", "card_name": "...", "reason": "..."}}],
   "underperformers": [{{"card_id": "...", "card_name": "...", "reason": "..."}}],
-  "suggested_swaps": [{{"remove": "card_name", "add": "suggested_card", "reason": "..."}}]
-}}"""
+  "suggested_swaps": [{{"remove": "EXACT_CARD_ID", "role_needed": "blocker|removal|finisher|draw|rush|counter", "reason": "why remove and what role is needed"}}]
+}}
+
+IMPORTANT for suggested_swaps:
+- For "remove", use the EXACT card_id from the card performance list above (e.g. "OP04-109", "ST10-012"). Do NOT use card names.
+- For "role_needed", specify what type of replacement the deck needs: blocker, removal, finisher, draw, rush, or counter.
+- Only suggest removing cards that appear in the card performance list above."""
 
     try:
         client = anthropic.AsyncAnthropic(
@@ -627,47 +632,170 @@ Provide your analysis in this exact JSON format:
         except (json.JSONDecodeError, IndexError):
             result = MatchupAnalysisResponse(analysis=raw_text)
 
-        # Enrich suggested_swaps with card_ids from Neo4j
+        # Enrich suggested_swaps: resolve remove card + find candidates from Neo4j
         if result.suggested_swaps:
             enriched_swaps: list[dict] = []
+            role_keywords_map: dict[str, list[str]] = {
+                "blocker": ["Blocker"],
+                "removal": ["KO", "Bounce", "Trash"],
+                "finisher": ["Rush", "Double Attack"],
+                "draw": ["Draw", "Search"],
+                "rush": ["Rush"],
+                "counter": [],  # high counter value cards
+            }
+
             for swap in result.suggested_swaps:
-                remove_name = swap.get("remove", "")
-                add_name = swap.get("add", "")
+                raw_remove = swap.get("remove", "")
+                role_needed = swap.get("role_needed", "")
+                reason = swap.get("reason", "")
+
+                # Resolve remove card — expect card_id, fallback to name search
                 remove_id = ""
-                add_id = ""
-                add_image = ""
+                remove_name = ""
+                remove_image = ""
 
-                if add_name:
-                    async with driver.session() as session:
+                async with driver.session() as session:
+                    # Try direct ID lookup first
+                    neo_result = await session.run(
+                        "MATCH (c:Card {id: $id}) "
+                        "RETURN c.id AS id, c.name AS name, c.image_small AS image "
+                        "LIMIT 1",
+                        id=raw_remove,
+                    )
+                    record = await neo_result.single()
+                    if record:
+                        remove_id = record["id"]
+                        remove_name = record["name"] or ""
+                        remove_image = record["image"] or ""
+                    else:
+                        # Fallback: AI may have returned a name instead of ID
                         neo_result = await session.run(
-                            "MATCH (c:Card) WHERE toLower(c.name) CONTAINS toLower($name) "
-                            "RETURN c.id AS id, c.name AS name, c.image_small AS image LIMIT 1",
-                            name=add_name,
-                        )
-                        record = await neo_result.single()
-                        if record:
-                            add_id = record["id"]
-                            add_image = record.get("image", "") or ""
-
-                if remove_name:
-                    async with driver.session() as session:
-                        neo_result = await session.run(
-                            "MATCH (c:Card) WHERE toLower(c.name) CONTAINS toLower($name) "
-                            "RETURN c.id AS id, c.name AS name LIMIT 1",
-                            name=remove_name,
+                            "MATCH (c:Card) "
+                            "WHERE toLower(c.name) CONTAINS toLower($name) "
+                            "RETURN c.id AS id, c.name AS name, c.image_small AS image "
+                            "LIMIT 1",
+                            name=raw_remove,
                         )
                         record = await neo_result.single()
                         if record:
                             remove_id = record["id"]
+                            remove_name = record["name"] or ""
+                            remove_image = record["image"] or ""
+                        else:
+                            remove_name = raw_remove
 
-                enriched_swaps.append({
-                    "remove": remove_name,
-                    "remove_id": remove_id,
-                    "add": add_name,
-                    "add_id": add_id,
-                    "add_image": add_image,
-                    "reason": swap.get("reason", ""),
-                })
+                # Find candidate replacements from Neo4j
+                role_keywords = role_keywords_map.get(role_needed.lower(), [])
+                is_counter_role = role_needed.lower() == "counter"
+                exclude_ids = req.card_ids + [leader_id]
+
+                candidates: list[dict] = []
+                async with driver.session() as session:
+                    if is_counter_role:
+                        # For counter role: find high-counter cards matching color
+                        neo_result = await session.run(
+                            """
+                            MATCH (leader:Card {id: $leader_id})-[:HAS_COLOR]->(lc:Color)
+                            WITH collect(lc.name) AS leader_colors
+                            MATCH (c:Card)-[:HAS_COLOR]->(color:Color)
+                            WHERE color.name IN leader_colors
+                              AND c.card_type IN ['CHARACTER', 'EVENT']
+                              AND NOT c.id IN $exclude_ids
+                              AND c.id <> $leader_id
+                              AND c.counter IS NOT NULL
+                              AND c.counter > 0
+                            OPTIONAL MATCH (c)-[:SYNERGY|MECHANICAL_SYNERGY]-(deck_card:Card)
+                            WHERE deck_card.id IN $deck_card_ids
+                            WITH c, count(DISTINCT deck_card) AS synergy_count
+                            RETURN c.id AS card_id, c.name AS name,
+                                   c.image_small AS image,
+                                   c.power AS power, c.cost AS cost,
+                                   c.counter AS counter, synergy_count
+                            ORDER BY c.counter DESC, synergy_count DESC
+                            LIMIT 5
+                            """,
+                            leader_id=leader_id,
+                            exclude_ids=exclude_ids,
+                            deck_card_ids=req.card_ids,
+                        )
+                    elif role_keywords:
+                        neo_result = await session.run(
+                            """
+                            MATCH (leader:Card {id: $leader_id})-[:HAS_COLOR]->(lc:Color)
+                            WITH collect(lc.name) AS leader_colors
+                            MATCH (c:Card)-[:HAS_COLOR]->(color:Color)
+                            WHERE color.name IN leader_colors
+                              AND c.card_type IN ['CHARACTER', 'EVENT']
+                              AND NOT c.id IN $exclude_ids
+                              AND c.id <> $leader_id
+                            OPTIONAL MATCH (c)-[:HAS_KEYWORD]->(kw:Keyword)
+                            WHERE kw.name IN $role_keywords
+                            WITH c, count(DISTINCT kw) AS role_match, leader_colors
+                            WHERE role_match > 0
+                            OPTIONAL MATCH (c)-[:SYNERGY|MECHANICAL_SYNERGY]-(deck_card:Card)
+                            WHERE deck_card.id IN $deck_card_ids
+                            WITH c, role_match, count(DISTINCT deck_card) AS synergy_count
+                            RETURN c.id AS card_id, c.name AS name,
+                                   c.image_small AS image,
+                                   c.power AS power, c.cost AS cost,
+                                   c.counter AS counter, synergy_count
+                            ORDER BY synergy_count DESC, role_match DESC, c.power DESC
+                            LIMIT 5
+                            """,
+                            leader_id=leader_id,
+                            exclude_ids=exclude_ids,
+                            deck_card_ids=req.card_ids,
+                            role_keywords=role_keywords,
+                        )
+                    else:
+                        # No keywords — match any card by synergy score
+                        neo_result = await session.run(
+                            """
+                            MATCH (leader:Card {id: $leader_id})-[:HAS_COLOR]->(lc:Color)
+                            WITH collect(lc.name) AS leader_colors
+                            MATCH (c:Card)-[:HAS_COLOR]->(color:Color)
+                            WHERE color.name IN leader_colors
+                              AND c.card_type IN ['CHARACTER', 'EVENT']
+                              AND NOT c.id IN $exclude_ids
+                              AND c.id <> $leader_id
+                            OPTIONAL MATCH (c)-[:SYNERGY|MECHANICAL_SYNERGY]-(deck_card:Card)
+                            WHERE deck_card.id IN $deck_card_ids
+                            WITH c, count(DISTINCT deck_card) AS synergy_count
+                            RETURN c.id AS card_id, c.name AS name,
+                                   c.image_small AS image,
+                                   c.power AS power, c.cost AS cost,
+                                   c.counter AS counter, synergy_count
+                            ORDER BY synergy_count DESC, c.power DESC
+                            LIMIT 5
+                            """,
+                            leader_id=leader_id,
+                            exclude_ids=exclude_ids,
+                            deck_card_ids=req.card_ids,
+                        )
+
+                    async for rec in neo_result:
+                        candidates.append(
+                            {
+                                "card_id": rec["card_id"],
+                                "name": rec["name"] or "",
+                                "image": rec["image"] or "",
+                                "power": rec["power"],
+                                "cost": rec["cost"],
+                                "counter": rec["counter"],
+                                "synergy_score": rec["synergy_count"],
+                            }
+                        )
+
+                enriched_swaps.append(
+                    {
+                        "remove": remove_id or raw_remove,
+                        "remove_name": remove_name,
+                        "remove_image": remove_image,
+                        "role_needed": role_needed,
+                        "reason": reason,
+                        "candidates": candidates,
+                    }
+                )
             result = MatchupAnalysisResponse(
                 analysis=result.analysis,
                 strengths=result.strengths,

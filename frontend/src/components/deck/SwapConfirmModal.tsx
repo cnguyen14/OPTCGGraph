@@ -1,34 +1,46 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { loadSavedDeck, searchCards, updateDeck } from '../../lib/api';
-import type { CardSearchResponse } from '../../types';
+import { loadSavedDeck, updateDeck } from '../../lib/api';
 
-interface SwapInput {
-  remove: string;
-  remove_id?: string;
-  add: string;
-  add_id?: string;
-  add_image?: string;
-  reason: string;
+interface SwapCandidate {
+  card_id: string;
+  name: string;
+  image: string;
+  power: number;
+  cost: number;
+  counter: number;
+  synergy_score: number;
 }
 
-interface ResolvedSwap {
+export interface SwapWithCandidates {
+  remove: string;
   remove_name: string;
-  remove_id: string | null;
-  remove_image: string | null;
-  add_name: string;
-  add_id: string | null;
-  add_image: string | null;
+  remove_image: string;
+  role_needed: string;
   reason: string;
+  candidates: SwapCandidate[];
 }
 
 interface SwapConfirmModalProps {
   deckId: string;
   deckName: string;
   leaderId: string;
-  swaps: SwapInput[];
+  swaps: SwapWithCandidates[];
   onClose: () => void;
   onSaved: () => void;
+}
+
+const ROLE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+  blocker: { bg: 'bg-blue-900/30', text: 'text-blue-400', border: 'border-blue-500/40' },
+  removal: { bg: 'bg-red-900/30', text: 'text-red-400', border: 'border-red-500/40' },
+  finisher: { bg: 'bg-purple-900/30', text: 'text-purple-400', border: 'border-purple-500/40' },
+  draw: { bg: 'bg-green-900/30', text: 'text-green-400', border: 'border-green-500/40' },
+  rush: { bg: 'bg-amber-900/30', text: 'text-amber-400', border: 'border-amber-500/40' },
+  counter: { bg: 'bg-cyan-900/30', text: 'text-cyan-400', border: 'border-cyan-500/40' },
+};
+
+function getRoleStyle(role: string) {
+  return ROLE_COLORS[role.toLowerCase()] ?? { bg: 'bg-gray-700/40', text: 'text-gray-400', border: 'border-gray-600/40' };
 }
 
 export default function SwapConfirmModal({
@@ -39,129 +51,42 @@ export default function SwapConfirmModal({
   onClose,
   onSaved,
 }: SwapConfirmModalProps) {
-  const [resolving, setResolving] = useState(true);
-  const [resolvedSwaps, setResolvedSwaps] = useState<ResolvedSwap[]>([]);
-  const [selected, setSelected] = useState<boolean[]>([]);
+  const [enabled, setEnabled] = useState<boolean[]>(() => swaps.map((s) => s.candidates.length > 0));
+  const [selectedCandidates, setSelectedCandidates] = useState<Record<number, string>>(() => {
+    const initial: Record<number, string> = {};
+    swaps.forEach((swap, i) => {
+      if (swap.candidates.length > 0) {
+        initial[i] = swap.candidates[0].card_id;
+      }
+    });
+    return initial;
+  });
   const [deckEntries, setDeckEntries] = useState<{ card_id: string; quantity: number }[]>([]);
+  const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  // Resolve card IDs and images on mount
+  // Load deck entries on mount
   useEffect(() => {
     let cancelled = false;
-
-    async function resolve() {
-      try {
-        const deck = await loadSavedDeck(deckId);
-        if (cancelled) return;
-        setDeckEntries(deck.entries);
-
-        const resolved: ResolvedSwap[] = await Promise.all(
-          swaps.map(async (swap) => {
-            // Resolve remove_id: use provided or search in deck entries by name
-            let removeId = swap.remove_id ?? null;
-            let removeImage: string | null = null;
-
-            if (!removeId) {
-              // Search for the card by name to get its ID
-              try {
-                const result: CardSearchResponse = await searchCards({
-                  keyword: swap.remove,
-                  limit: 5,
-                });
-                const match = result.cards.find(
-                  (c) => c.name.toLowerCase() === swap.remove.toLowerCase(),
-                );
-                if (match) {
-                  // Verify this card is actually in the deck
-                  const inDeck = deck.entries.find((e) => e.card_id === match.id);
-                  if (inDeck) {
-                    removeId = match.id;
-                    removeImage = match.image_small;
-                  }
-                }
-                // If exact match not found, try first result that's in the deck
-                if (!removeId && result.cards.length > 0) {
-                  for (const c of result.cards) {
-                    if (deck.entries.find((e) => e.card_id === c.id)) {
-                      removeId = c.id;
-                      removeImage = c.image_small;
-                      break;
-                    }
-                  }
-                }
-              } catch {
-                // Search failed, leave as null
-              }
-            } else {
-              // Have remove_id, try to get image
-              try {
-                const result = await searchCards({ keyword: swap.remove, limit: 1 });
-                if (result.cards.length > 0) {
-                  removeImage = result.cards[0].image_small;
-                }
-              } catch {
-                // No image available
-              }
-            }
-
-            // Resolve add_id and add_image
-            let addId = swap.add_id ?? null;
-            let addImage = swap.add_image ?? null;
-
-            if (!addId || !addImage) {
-              try {
-                const result: CardSearchResponse = await searchCards({
-                  keyword: swap.add,
-                  limit: 5,
-                });
-                const match = result.cards.find(
-                  (c) => c.name.toLowerCase() === swap.add.toLowerCase(),
-                );
-                if (match) {
-                  if (!addId) addId = match.id;
-                  if (!addImage) addImage = match.image_small;
-                } else if (result.cards.length > 0) {
-                  if (!addId) addId = result.cards[0].id;
-                  if (!addImage) addImage = result.cards[0].image_small;
-                }
-              } catch {
-                // Search failed
-              }
-            }
-
-            return {
-              remove_name: swap.remove,
-              remove_id: removeId,
-              remove_image: removeImage,
-              add_name: swap.add,
-              add_id: addId,
-              add_image: addImage,
-              reason: swap.reason,
-            };
-          }),
-        );
-
-        if (cancelled) return;
-        setResolvedSwaps(resolved);
-        setSelected(resolved.map(() => true));
-      } catch (e: unknown) {
+    loadSavedDeck(deckId)
+      .then((deck) => {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Failed to load deck data');
+          setDeckEntries(deck.entries);
+          setLoading(false);
         }
-      } finally {
-        if (!cancelled) setResolving(false);
-      }
-    }
+      })
+      .catch((e: Error) => {
+        if (!cancelled) {
+          setError(e.message);
+          setLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [deckId]);
 
-    resolve();
-    return () => {
-      cancelled = true;
-    };
-  }, [deckId, swaps]);
-
-  // Close on Escape key
+  // Close on Escape
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
@@ -171,29 +96,30 @@ export default function SwapConfirmModal({
   }, [onClose]);
 
   const toggleSwap = useCallback((index: number) => {
-    setSelected((prev) => prev.map((v, i) => (i === index ? !v : v)));
+    setEnabled((prev) => prev.map((v, i) => (i === index ? !v : v)));
   }, []);
 
-  const selectedCount = selected.filter(Boolean).length;
+  const selectCandidate = useCallback((swapIndex: number, cardId: string) => {
+    setSelectedCandidates((prev) => ({ ...prev, [swapIndex]: cardId }));
+  }, []);
+
+  const enabledCount = enabled.filter((v, i) => v && swaps[i].candidates.length > 0).length;
 
   const handleApply = useCallback(async () => {
     setApplying(true);
     setError(null);
 
     try {
-      // Clone current entries
       const newEntries = deckEntries.map((e) => ({ ...e }));
 
-      for (let i = 0; i < resolvedSwaps.length; i++) {
-        if (!selected[i]) continue;
-        const swap = resolvedSwaps[i];
-
-        if (!swap.remove_id || !swap.add_id) {
-          continue; // Skip swaps where we couldn't resolve IDs
-        }
+      for (let i = 0; i < swaps.length; i++) {
+        if (!enabled[i]) continue;
+        const swap = swaps[i];
+        const selectedCardId = selectedCandidates[i];
+        if (!selectedCardId || swap.candidates.length === 0) continue;
 
         // Remove: decrement quantity or remove entry
-        const removeIdx = newEntries.findIndex((e) => e.card_id === swap.remove_id);
+        const removeIdx = newEntries.findIndex((e) => e.card_id === swap.remove);
         if (removeIdx !== -1) {
           if (newEntries[removeIdx].quantity > 1) {
             newEntries[removeIdx].quantity -= 1;
@@ -203,11 +129,11 @@ export default function SwapConfirmModal({
         }
 
         // Add: increment quantity if exists, add new entry if not
-        const addIdx = newEntries.findIndex((e) => e.card_id === swap.add_id);
+        const addIdx = newEntries.findIndex((e) => e.card_id === selectedCardId);
         if (addIdx !== -1) {
           newEntries[addIdx].quantity += 1;
         } else {
-          newEntries.push({ card_id: swap.add_id, quantity: 1 });
+          newEntries.push({ card_id: selectedCardId, quantity: 1 });
         }
       }
 
@@ -226,12 +152,7 @@ export default function SwapConfirmModal({
     } finally {
       setApplying(false);
     }
-  }, [deckEntries, resolvedSwaps, selected, deckId, deckName, leaderId, onSaved]);
-
-  // Count how many selected swaps have unresolved IDs
-  const unresolvedCount = resolvedSwaps.filter(
-    (s, i) => selected[i] && (!s.remove_id || !s.add_id),
-  ).length;
+  }, [deckEntries, swaps, enabled, selectedCandidates, deckId, deckName, leaderId, onSaved]);
 
   const modal = (
     <div
@@ -240,7 +161,7 @@ export default function SwapConfirmModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-[600px] max-h-[80vh] flex flex-col">
+      <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-[640px] max-h-[80vh] flex flex-col">
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-700 flex items-center justify-between shrink-0">
           <div>
@@ -258,10 +179,10 @@ export default function SwapConfirmModal({
 
         {/* Content */}
         <div className="overflow-y-auto flex-1 min-h-0">
-          {resolving && (
+          {loading && (
             <div className="flex items-center justify-center py-12">
               <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-              <span className="ml-3 text-sm text-gray-400">Resolving card data...</span>
+              <span className="ml-3 text-sm text-gray-400">Loading deck data...</span>
             </div>
           )}
 
@@ -284,85 +205,151 @@ export default function SwapConfirmModal({
             </div>
           )}
 
-          {!resolving && !success && (
+          {!loading && !success && (
             <>
               <p className="px-6 pt-4 pb-2 text-xs text-gray-400">
-                Select swaps to apply to your deck:
+                Select swaps and choose replacement cards:
               </p>
 
-              {resolvedSwaps.map((swap, i) => {
-                const canApply = swap.remove_id && swap.add_id;
+              {swaps.map((swap, i) => {
+                const hasCandidates = swap.candidates.length > 0;
+                const roleStyle = getRoleStyle(swap.role_needed);
+
                 return (
                   <div
                     key={i}
-                    className={`px-6 py-3 border-b border-gray-800 hover:bg-gray-800/50 transition-colors ${
-                      !canApply ? 'opacity-50' : ''
+                    className={`px-6 py-4 border-b border-gray-800 transition-colors ${
+                      !hasCandidates ? 'opacity-50' : ''
                     }`}
                   >
-                    <label className="flex items-start gap-3 cursor-pointer">
+                    {/* Remove card row */}
+                    <div className="flex items-start gap-3">
                       <input
                         type="checkbox"
-                        checked={selected[i]}
+                        checked={enabled[i]}
                         onChange={() => toggleSwap(i)}
-                        disabled={!canApply}
+                        disabled={!hasCandidates}
                         className="mt-2 w-4 h-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 shrink-0"
                       />
 
                       <div className="flex items-center gap-3 flex-1 min-w-0">
-                        {/* Remove card */}
-                        <div className="flex items-center gap-2 shrink-0">
-                          {swap.remove_image ? (
-                            <img
-                              src={swap.remove_image}
-                              alt={swap.remove_name}
-                              className="w-12 h-[67px] rounded object-cover border-2 border-red-500/50"
-                            />
-                          ) : (
-                            <div className="w-12 h-[67px] rounded border-2 border-red-500/50 bg-gray-800 flex items-center justify-center">
-                              <span className="text-[10px] text-gray-500 text-center leading-tight px-0.5">
-                                No img
-                              </span>
-                            </div>
-                          )}
-                          <span className="text-xs text-red-400 font-medium max-w-[120px] truncate">
-                            {swap.remove_name}
-                          </span>
-                        </div>
+                        {swap.remove_image ? (
+                          <img
+                            src={swap.remove_image}
+                            alt={swap.remove_name}
+                            className="w-12 h-[67px] rounded object-cover border-2 border-red-500/50 shrink-0"
+                          />
+                        ) : (
+                          <div className="w-12 h-[67px] rounded border-2 border-red-500/50 bg-gray-800 flex items-center justify-center shrink-0">
+                            <span className="text-[10px] text-gray-500 text-center leading-tight px-0.5">
+                              No img
+                            </span>
+                          </div>
+                        )}
 
-                        {/* Arrow */}
-                        <span className="text-gray-600 text-lg shrink-0">&rarr;</span>
-
-                        {/* Add card */}
-                        <div className="flex items-center gap-2 shrink-0">
-                          {swap.add_image ? (
-                            <img
-                              src={swap.add_image}
-                              alt={swap.add_name}
-                              className="w-12 h-[67px] rounded object-cover border-2 border-green-500/50"
-                            />
-                          ) : (
-                            <div className="w-12 h-[67px] rounded border-2 border-green-500/50 bg-gray-800 flex items-center justify-center">
-                              <span className="text-[10px] text-gray-500 text-center leading-tight px-0.5">
-                                No img
-                              </span>
-                            </div>
-                          )}
-                          <span className="text-xs text-green-400 font-medium max-w-[120px] truncate">
-                            {swap.add_name}
-                          </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs text-red-400 font-medium truncate">
+                              {swap.remove_name}
+                            </span>
+                            <span className="text-[10px] text-red-500/70">(remove)</span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[10px] text-gray-500">Role needed:</span>
+                            <span
+                              className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${roleStyle.bg} ${roleStyle.text} ${roleStyle.border} capitalize`}
+                            >
+                              {swap.role_needed}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-500 mt-1 italic">
+                            &ldquo;{swap.reason}&rdquo;
+                          </p>
                         </div>
                       </div>
-                    </label>
+                    </div>
 
-                    {/* Reason */}
-                    <p className="text-[11px] text-gray-500 mt-1.5 ml-7">
-                      {`"${swap.reason}"`}
-                    </p>
+                    {/* Candidates selection */}
+                    {hasCandidates ? (
+                      <div className="mt-3 ml-7">
+                        <p className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-2">
+                          Select replacement:
+                        </p>
+                        <div className="rounded-lg border border-gray-700 bg-gray-800/40 divide-y divide-gray-700/50">
+                          {swap.candidates.map((candidate) => {
+                            const isSelected = selectedCandidates[i] === candidate.card_id;
+                            return (
+                              <label
+                                key={candidate.card_id}
+                                className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors ${
+                                  isSelected
+                                    ? 'bg-blue-900/20 border-l-2 border-l-blue-500'
+                                    : 'hover:bg-gray-700/30 border-l-2 border-l-transparent'
+                                }`}
+                              >
+                                <input
+                                  type="radio"
+                                  name={`swap-candidate-${i}`}
+                                  checked={isSelected}
+                                  onChange={() => selectCandidate(i, candidate.card_id)}
+                                  disabled={!enabled[i]}
+                                  className="w-3.5 h-3.5 border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 shrink-0"
+                                />
 
-                    {/* Warning if unresolved */}
-                    {!canApply && (
-                      <p className="text-[10px] text-yellow-500 mt-1 ml-7">
-                        Could not resolve card ID - swap cannot be applied
+                                {candidate.image ? (
+                                  <img
+                                    src={candidate.image}
+                                    alt={candidate.name}
+                                    className={`w-10 h-[56px] rounded object-cover shrink-0 border-2 ${
+                                      isSelected ? 'border-green-500/60' : 'border-gray-600/40'
+                                    }`}
+                                  />
+                                ) : (
+                                  <div className="w-10 h-[56px] rounded border-2 border-gray-600/40 bg-gray-800 flex items-center justify-center shrink-0">
+                                    <span className="text-[9px] text-gray-500">No img</span>
+                                  </div>
+                                )}
+
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`text-xs font-medium truncate ${isSelected ? 'text-green-400' : 'text-gray-300'}`}>
+                                      {candidate.name}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-3 mt-0.5">
+                                    <span className="text-[10px] text-gray-500">
+                                      Cost {candidate.cost}
+                                    </span>
+                                    <span className="text-[10px] text-gray-500">
+                                      Power {candidate.power}
+                                    </span>
+                                    {candidate.counter > 0 && (
+                                      <span className="text-[10px] text-gray-500">
+                                        Counter +{candidate.counter}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {/* Synergy bar */}
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <div className="w-20 h-1.5 bg-gray-700 rounded-full">
+                                      <div
+                                        className="h-full bg-green-500 rounded-full transition-all"
+                                        style={{ width: `${Math.min(candidate.synergy_score * 10, 100)}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-[10px] text-gray-400">
+                                      {candidate.synergy_score} synergy
+                                    </span>
+                                  </div>
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-3 ml-7 text-[11px] text-gray-600 italic">
+                        No candidates found for this swap
                       </p>
                     )}
                   </div>
@@ -373,7 +360,7 @@ export default function SwapConfirmModal({
         </div>
 
         {/* Footer */}
-        {!resolving && !success && (
+        {!loading && !success && (
           <div className="px-6 py-4 border-t border-gray-700 flex items-center justify-between shrink-0">
             {error && <p className="text-xs text-red-400 mr-3 truncate flex-1">{error}</p>}
 
@@ -386,7 +373,7 @@ export default function SwapConfirmModal({
               </button>
               <button
                 onClick={handleApply}
-                disabled={applying || selectedCount === 0 || selectedCount === unresolvedCount}
+                disabled={applying || enabledCount === 0}
                 className="px-4 py-2 text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center gap-2"
               >
                 {applying && (
@@ -394,7 +381,7 @@ export default function SwapConfirmModal({
                 )}
                 {applying
                   ? 'Applying...'
-                  : `Apply ${selectedCount - unresolvedCount} Swap${selectedCount - unresolvedCount !== 1 ? 's' : ''}`}
+                  : `Apply ${enabledCount} Swap${enabledCount !== 1 ? 's' : ''}`}
               </button>
             </div>
           </div>
