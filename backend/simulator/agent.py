@@ -544,6 +544,7 @@ class HeuristicAgent:
         self, state: GameState, legal_actions: list[GameAction]
     ) -> int:
         if len(legal_actions) <= 1:
+            self._log_decision(state, legal_actions, 0)
             return 0
 
         player = state.active_player

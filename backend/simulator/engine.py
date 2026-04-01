@@ -590,6 +590,17 @@ class GameEngine:
             )
         )
 
+        if len(actions) <= 1:
+            logger.warning(
+                "Turn %d %s: only PASS available. don=%d hand=%d field=%d leader_colors=%s",
+                self.state.turn,
+                player.player_id,
+                player.don_field,
+                len(player.hand),
+                len(player.field),
+                list(leader_colors),
+            )
+
         return actions
 
     async def _execute_action(
