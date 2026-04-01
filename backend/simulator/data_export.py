@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -41,10 +42,17 @@ class SimulationDataExporter:
 
         Returns the simulation directory path.
         """
-        sim_dir = self.output_dir / sim_id
+        # Folder name: timestamp_sim_id_short for easy management
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
+        short_id = sim_id[:8]
+        folder_name = f"{timestamp}_{short_id}"
+        sim_dir = self.output_dir / folder_name
         sim_dir.mkdir(parents=True, exist_ok=True)
 
-        # metadata.json
+        # metadata.json — add timestamp and folder info
+        metadata["timestamp"] = datetime.now(timezone.utc).isoformat()
+        metadata["sim_id"] = sim_id
+        metadata["folder"] = folder_name
         meta_path = sim_dir / "metadata.json"
         meta_path.write_text(json.dumps(metadata, indent=2, default=str))
 

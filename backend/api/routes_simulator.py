@@ -191,6 +191,20 @@ async def get_result(sim_id: str) -> dict[str, Any]:
     return sim_data["result"]
 
 
+def _find_sim_dir(sim_id: str) -> Path | None:
+    """Find simulation directory by sim_id (supports both old UUID and new timestamped format)."""
+    base = Path("data/simulations")
+    # New format: {timestamp}_{sim_id_short}
+    for d in base.iterdir():
+        if d.is_dir() and sim_id[:8] in d.name:
+            return d
+    # Old format: exact sim_id as folder name
+    old_path = base / sim_id
+    if old_path.exists():
+        return old_path
+    return None
+
+
 @router.get("/export/{sim_id}/{file_type}")
 async def export_simulation_data(sim_id: str, file_type: str) -> FileResponse:
     """Download exported simulation data files.
@@ -206,7 +220,10 @@ async def export_simulation_data(sim_id: str, file_type: str) -> FileResponse:
     if file_type not in file_map:
         raise HTTPException(400, f"file_type must be one of: {', '.join(file_map)}")
 
-    file_path = Path("data/simulations") / sim_id / file_map[file_type]
+    sim_dir = _find_sim_dir(sim_id)
+    if not sim_dir:
+        raise HTTPException(404, "Simulation data not found")
+    file_path = sim_dir / file_map[file_type]
     if not file_path.exists():
         raise HTTPException(404, f"Export file not found: {file_type}")
 

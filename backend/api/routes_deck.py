@@ -41,6 +41,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/deck", tags=["deck"])
 
 DECK_TTL_SECONDS = 90 * 24 * 3600  # 90 days
+
+
+def _find_sim_dir(sim_id: str) -> Path | None:
+    """Find simulation directory by sim_id (supports both old UUID and new timestamped format)."""
+    base = Path("data/simulations")
+    if not base.exists():
+        return None
+    for d in base.iterdir():
+        if d.is_dir() and sim_id[:8] in d.name:
+            return d
+    old_path = base / sim_id
+    if old_path.exists():
+        return old_path
+    return None
 MAX_SAVED_DECKS = 50
 
 
@@ -412,8 +426,8 @@ async def improve_deck(
 @router.get("/sim-detail/{sim_id}")
 async def get_sim_detail(sim_id: str) -> dict:
     """Get detailed simulation results from exported JSONL files."""
-    sim_dir = Path("data/simulations") / sim_id
-    if not sim_dir.exists():
+    sim_dir = _find_sim_dir(sim_id)
+    if not sim_dir:
         raise HTTPException(404, "Simulation data not found")
 
     metadata: dict = {}
@@ -437,8 +451,8 @@ async def get_sim_detail(sim_id: str) -> dict:
 @router.post("/analyze-matchup", response_model=MatchupAnalysisResponse)
 async def analyze_matchup(req: MatchupAnalysisRequest) -> MatchupAnalysisResponse:
     """AI-powered matchup analysis using simulation data."""
-    sim_dir = Path("data/simulations") / req.sim_id
-    if not sim_dir.exists():
+    sim_dir = _find_sim_dir(req.sim_id)
+    if not sim_dir:
         raise HTTPException(404, "Simulation data not found")
 
     # Read metadata
