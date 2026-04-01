@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -542,6 +543,111 @@ function CardImage({ src, alt, className }: { src: string; alt: string; classNam
 // Sub-components — OPTCG Sim style
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Card Tooltip (hover to see card details)
+// ---------------------------------------------------------------------------
+
+interface TooltipData {
+  name: string;
+  image: string;
+  card_id: string;
+  cost: number;
+  power: number;
+  counter?: number;
+  card_type: string;
+  don?: number;
+  state?: string;
+  x: number;
+  y: number;
+  flipUp: boolean;
+}
+
+function useBoardTooltip() {
+  const [tip, setTip] = useState<TooltipData | null>(null);
+  const hideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const show = useCallback(
+    (data: Omit<TooltipData, 'x' | 'y' | 'flipUp'>, e: React.MouseEvent) => {
+      if (hideRef.current) clearTimeout(hideRef.current);
+      const flipUp = window.innerHeight - e.clientY < 300;
+      setTip({
+        ...data,
+        x: Math.min(e.clientX + 12, window.innerWidth - 260),
+        y: flipUp ? e.clientY - 8 : e.clientY + 12,
+        flipUp,
+      });
+    },
+    [],
+  );
+
+  const hide = useCallback(() => {
+    hideRef.current = setTimeout(() => setTip(null), 100);
+  }, []);
+
+  return { tip, show, hide };
+}
+
+function BoardCardTooltip({ tip }: { tip: TooltipData }) {
+  return createPortal(
+    <div
+      className="fixed z-[9999] pointer-events-none bg-gray-800/95 border border-gray-600 rounded-xl shadow-2xl p-3 w-[240px] backdrop-blur-sm"
+      style={{
+        left: tip.x,
+        top: tip.y,
+        transform: tip.flipUp ? 'translateY(-100%)' : undefined,
+      }}
+    >
+      <div className="flex gap-3">
+        {tip.image && (
+          <img
+            src={tip.image}
+            alt=""
+            className="w-20 h-[112px] rounded-lg object-cover shrink-0"
+          />
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="text-white text-sm font-bold leading-tight">{tip.name}</p>
+          <p className="text-gray-400 text-[10px] mt-0.5">
+            {tip.card_id} &middot; {tip.card_type}
+          </p>
+          <div className="flex flex-wrap gap-1 mt-2">
+            {tip.cost > 0 && (
+              <span className="bg-blue-900/60 text-blue-300 rounded px-1.5 py-0.5 text-[10px]">
+                Cost {tip.cost}
+              </span>
+            )}
+            {tip.power > 0 && (
+              <span className="bg-red-900/60 text-red-300 rounded px-1.5 py-0.5 text-[10px]">
+                {tip.power} PWR
+              </span>
+            )}
+            {(tip.counter ?? 0) > 0 && (
+              <span className="bg-green-900/60 text-green-300 rounded px-1.5 py-0.5 text-[10px]">
+                +{tip.counter} CTR
+              </span>
+            )}
+          </div>
+          {(tip.don ?? 0) > 0 && (
+            <p className="text-amber-400 text-[10px] mt-1.5">
+              {'\u26A1'} {tip.don} DON attached (+{(tip.don ?? 0) * 1000})
+            </p>
+          )}
+          {tip.state && (
+            <p className={`text-[10px] mt-1 ${tip.state === 'rested' ? 'text-orange-400' : 'text-green-400'}`}>
+              {tip.state === 'rested' ? 'RESTED' : 'ACTIVE'}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Card sub-components
+// ---------------------------------------------------------------------------
+
 function LeaderCard({
   leader,
   isP1,
@@ -784,11 +890,15 @@ function PlayerBoard({
   isP1,
   isTop,
   highlightCards,
+  onCardHover,
+  onCardLeave,
 }: {
   player: PlayerBoardState;
   isP1: boolean;
   isTop: boolean;
   highlightCards: string[];
+  onCardHover: (data: Omit<TooltipData, 'x' | 'y' | 'flipUp'>, e: React.MouseEvent) => void;
+  onCardLeave: () => void;
 }) {
   const leaderHighlighted = highlightCards.includes(player.leader.name);
   const accentLabel = isP1 ? 'text-blue-400' : 'text-red-400';
@@ -802,12 +912,13 @@ function PlayerBoard({
     <div className="flex items-center gap-1.5 justify-center min-h-[110px] flex-wrap py-1">
       {player.field.length > 0 ? (
         player.field.map((card, i) => (
-          <FieldCardSlot
+          <div
             key={`${card.card_id || card.name}-${i}`}
-            card={card}
-            isP1={isP1}
-            highlighted={highlightCards.includes(card.name)}
-          />
+            onMouseEnter={(e) => onCardHover({ name: card.name, image: card.image, card_id: card.card_id, cost: card.cost, power: card.power, card_type: card.card_type, don: card.don, state: card.state }, e)}
+            onMouseLeave={onCardLeave}
+          >
+            <FieldCardSlot card={card} isP1={isP1} highlighted={highlightCards.includes(card.name)} />
+          </div>
         ))
       ) : (
         <div className="flex items-center justify-center h-[100px] w-full">
@@ -836,11 +947,13 @@ function PlayerBoard({
     <div className="flex items-center gap-1 justify-center flex-wrap py-1">
       {player.hand.length > 0 ? (
         player.hand.map((card, i) => (
-          <HandCardFaceUp
+          <div
             key={`p1h-${card.card_id || card.name}-${i}`}
-            card={card}
-            highlighted={highlightCards.includes(card.name)}
-          />
+            onMouseEnter={(e) => onCardHover({ name: card.name, image: card.image, card_id: card.card_id, cost: card.cost, power: card.power, card_type: card.card_type, counter: card.counter }, e)}
+            onMouseLeave={onCardLeave}
+          >
+            <HandCardFaceUp card={card} highlighted={highlightCards.includes(card.name)} />
+          </div>
         ))
       ) : (
         <span className="text-xs text-gray-600 italic">Empty hand</span>
@@ -858,7 +971,11 @@ function PlayerBoard({
       </div>
 
       {/* Leader */}
-      <div className="shrink-0">
+      <div
+        className="shrink-0"
+        onMouseEnter={(e) => onCardHover({ name: player.leader.name, image: player.leader.image, card_id: player.leader.card_id, cost: 0, power: player.leader.power, card_type: 'LEADER', don: player.leader.don, state: player.leader.state }, e)}
+        onMouseLeave={onCardLeave}
+      >
         <LeaderCard leader={player.leader} isP1={isP1} highlighted={leaderHighlighted} />
       </div>
 
@@ -919,6 +1036,7 @@ export default function BoardReplay({ gameLog, p1Leader, p2Leader, winner }: Boa
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1.0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { tip, show: showTip, hide: hideTip } = useBoardTooltip();
 
   const totalSteps = steps.length;
   const state = totalSteps > 0 ? steps[currentStep] : null;
@@ -1075,6 +1193,8 @@ export default function BoardReplay({ gameLog, p1Leader, p2Leader, winner }: Boa
             isP1={false}
             isTop={true}
             highlightCards={state.highlightCards}
+            onCardHover={showTip}
+            onCardLeave={hideTip}
           />
         </div>
 
@@ -1090,6 +1210,8 @@ export default function BoardReplay({ gameLog, p1Leader, p2Leader, winner }: Boa
             isP1={true}
             isTop={false}
             highlightCards={state.highlightCards}
+            onCardHover={showTip}
+            onCardLeave={hideTip}
           />
         </div>
       </div>
@@ -1102,6 +1224,9 @@ export default function BoardReplay({ gameLog, p1Leader, p2Leader, winner }: Boa
           </span>
         </div>
       )}
+
+      {/* Card tooltip portal */}
+      {tip && <BoardCardTooltip tip={tip} />}
     </div>
   );
 }
