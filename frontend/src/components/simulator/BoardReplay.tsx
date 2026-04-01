@@ -550,7 +550,7 @@ function LeaderCard({
       className={`
         relative w-[90px] h-[126px] rounded-lg overflow-hidden border-2 ${borderColor}
         shadow-lg ${glowColor} shrink-0
-        ${isRested ? 'rotate-[15deg] opacity-80' : ''}
+        ${isRested ? 'opacity-70 grayscale-[30%]' : ''}
         ${highlighted ? 'ring-2 ring-yellow-400 animate-pulse' : ''}
         transition-all duration-300
       `}
