@@ -236,6 +236,7 @@ class SimulationRunner:
                         "mode": self.mode,
                         "p1_level": self.p1_level,
                         "p2_level": self.p2_level,
+                        "llm_model": self.llm_model,
                         "base_seed": self.base_seed,
                     },
                 )
