@@ -168,18 +168,18 @@ function AnalysisTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[
       </div>
 
       {/* Warnings / Fails */}
-      {validation.checks.filter((c) => c.status !== 'pass').length > 0 && (
+      {validation.checks.filter((c) => c.status.toUpperCase() !== 'PASS').length > 0 && (
         <div className="rounded-lg bg-gray-800 border border-gray-700 p-4 space-y-2">
           <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
             Issues
           </h4>
           {validation.checks
-            .filter((c) => c.status !== 'pass')
+            .filter((c) => c.status.toUpperCase() !== 'PASS')
             .map((c, i) => (
               <div
                 key={i}
                 className={`flex items-start gap-2 text-xs rounded-md px-3 py-2 ${
-                  c.status === 'fail'
+                  c.status.toUpperCase() === 'FAIL'
                     ? 'bg-red-900/20 text-red-400'
                     : 'bg-yellow-900/20 text-yellow-400'
                 }`}
