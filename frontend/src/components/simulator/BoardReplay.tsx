@@ -404,6 +404,7 @@ function buildSteps(gameLog: LogEntry[], p1Leader: string, p2Leader: string): Bo
               don: 0,
               card_type: (d.card_type as string) ?? removedCard?.card_type ?? 'CHARACTER',
               cost: cardCost,
+              ability: removedCard?.ability ?? '',
             });
           }
           if (entry.action === 'play_event') {
