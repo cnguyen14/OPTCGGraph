@@ -656,6 +656,82 @@ class TestCardPlaying:
 
 
 # =====================
+# Test: Stage Card Limit
+# =====================
+
+
+class TestStageLimit:
+    def test_max_one_stage_per_player(self):
+        """OPTCG rule: max 1 Stage card on field per player."""
+        engine = GameEngine(seed=42)
+        state = engine.init_game(
+            make_leader("p1"),
+            make_deck("p1"),
+            make_leader("p2"),
+            make_deck("p2"),
+        )
+        state.active_player_id = "p1"
+        state.turn = 3
+        state.p1.don_field = 10
+
+        # Place a Stage on field
+        existing_stage = make_card(
+            instance_id="p1-stage1",
+            card_type="STAGE",
+            name="Stage 1",
+            cost=2,
+        )
+        state.p1.field.append(existing_stage)
+
+        # Put another Stage in hand
+        new_stage = make_card(
+            instance_id="p1-stage2",
+            card_type="STAGE",
+            name="Stage 2",
+            cost=3,
+        )
+        state.p1.hand.append(new_stage)
+
+        # Get legal actions — should NOT include playing Stage 2
+        legal = engine._get_legal_actions()
+        play_stage_actions = [
+            a for a in legal
+            if a.action_type == ActionType.PLAY_CARD
+            and a.source_id == "p1-stage2"
+        ]
+        assert len(play_stage_actions) == 0, "Should not be able to play 2nd Stage"
+
+    def test_can_play_stage_when_none_on_field(self):
+        """Can play Stage if no Stage currently on field."""
+        engine = GameEngine(seed=42)
+        state = engine.init_game(
+            make_leader("p1"),
+            make_deck("p1"),
+            make_leader("p2"),
+            make_deck("p2"),
+        )
+        state.active_player_id = "p1"
+        state.turn = 3
+        state.p1.don_field = 10
+
+        stage = make_card(
+            instance_id="p1-stage",
+            card_type="STAGE",
+            name="Test Stage",
+            cost=2,
+        )
+        state.p1.hand.append(stage)
+
+        legal = engine._get_legal_actions()
+        play_stage_actions = [
+            a for a in legal
+            if a.action_type == ActionType.PLAY_CARD
+            and a.source_id == "p1-stage"
+        ]
+        assert len(play_stage_actions) == 1, "Should be able to play Stage when none on field"
+
+
+# =====================
 # Test: DON!! Management
 # =====================
 

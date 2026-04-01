@@ -503,6 +503,9 @@ class GameEngine:
                 continue
             if card.cost > player.don_field:
                 continue
+            # Stage limit: max 1 Stage per player (OPTCG rule)
+            if card.card_type == "STAGE" and player.stages:
+                continue
             # Color restriction: card must share at least one color with leader
             # Skip check if leader or card has no color data (backward compat)
             if leader_colors and card.colors:
