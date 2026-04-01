@@ -4,6 +4,23 @@ import type { SimHistoryEntry, DeckImprovement } from '../../types';
 
 type TabId = 'analysis' | 'history' | 'improve';
 
+const CHECK_LABELS: Record<string, string> = {
+  DECK_SIZE: 'Deck Size',
+  COPY_LIMIT: 'Copy Limit',
+  COLOR_MATCH: 'Color Match',
+  LEADER_VALID: 'Leader Valid',
+  NO_LEADER_IN_DECK: 'No Leader in Deck',
+  BANNED_CARDS: 'Banned Cards',
+  COST_CURVE: 'Cost Curve',
+  COUNTER_DENSITY: 'Counter Density',
+  TYPE_RATIO: 'Card Type Ratio',
+  FOUR_COPY_CORE: 'Core Consistency (4x)',
+  WIN_CONDITION: 'Win Condition',
+  BLOCKER_COUNT: 'Blockers',
+  DRAW_ENGINE: 'Draw / Search Engine',
+  REMOVAL_OPTIONS: 'Removal Options',
+};
+
 interface DeckDetailPanelProps {
   deckId: string;
   leaderId: string;
@@ -184,7 +201,7 @@ function AnalysisTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[
                     : 'bg-yellow-900/20 text-yellow-400'
                 }`}
               >
-                <span className="font-medium shrink-0">{c.name}</span>
+                <span className="font-medium shrink-0">{CHECK_LABELS[c.name] ?? c.name}</span>
                 <span className="text-gray-400">{c.message}</span>
               </div>
             ))}
