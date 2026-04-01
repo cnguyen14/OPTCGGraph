@@ -462,7 +462,7 @@ async def analyze_matchup(req: MatchupAnalysisRequest) -> MatchupAnalysisRespons
     num_games = len(games)
     win_rate = round(wins / num_games * 100, 1) if num_games else 0.0
     avg_turns = (
-        round(sum(g.get("total_turns", 0) for g in games) / num_games, 1)
+        round(sum(g.get("turns", 0) for g in games) / num_games, 1)
         if num_games
         else 0.0
     )
@@ -475,20 +475,28 @@ async def analyze_matchup(req: MatchupAnalysisRequest) -> MatchupAnalysisRespons
     games_summary_lines: list[str] = []
     for i, g in enumerate(games[:20], 1):  # Cap at 20 games for prompt size
         winner = g.get("winner", "?")
-        turns = g.get("total_turns", "?")
+        turns = g.get("turns", "?")
         games_summary_lines.append(
             f"Game {i}: {'Win' if winner == 'p1' else 'Loss'}, {turns} turns"
         )
     games_summary = "\n".join(games_summary_lines)
 
-    # Card stats from metadata or games
-    card_stats = metadata.get("card_stats", {})
+    # Compute card stats from games.jsonl (p1_cards_played per game)
+    card_play_counts: dict[str, int] = {}
+    card_win_counts: dict[str, int] = {}
+    for g in games:
+        for card_id, count in g.get("p1_cards_played", {}).items():
+            card_play_counts[card_id] = card_play_counts.get(card_id, 0) + count
+            if g.get("winner") == "p1":
+                card_win_counts[card_id] = card_win_counts.get(card_id, 0) + 1
+
     card_stats_lines: list[str] = []
-    for card_id, stats in card_stats.items():
-        played = stats.get("times_played", 0)
-        win_corr = stats.get("win_correlation", 0.0)
+    for card_id, played in sorted(card_play_counts.items(), key=lambda x: -x[1]):
+        win_games = card_win_counts.get(card_id, 0)
+        total_games_played = sum(1 for g in games if card_id in g.get("p1_cards_played", {}))
+        win_corr = win_games / total_games_played if total_games_played > 0 else 0.0
         card_stats_lines.append(
-            f"  {card_id}: played {played}x, win correlation {win_corr:.2f}"
+            f"  {card_id}: played {played}x in {total_games_played} games, win correlation {win_corr:.0%}"
         )
     card_stats_summary = (
         "\n".join(card_stats_lines)
@@ -496,11 +504,19 @@ async def analyze_matchup(req: MatchupAnalysisRequest) -> MatchupAnalysisRespons
         else "No card-level stats available"
     )
 
-    enhanced_stats = metadata.get("enhanced_stats", {})
+    # Build enhanced stats from games data
+    p1_damage = [g.get("p1_damage_dealt", 0) for g in games]
+    p2_damage = [g.get("p2_damage_dealt", 0) for g in games]
+    p1_effects = [g.get("p1_effects_fired", 0) for g in games]
+    p2_effects = [g.get("p2_effects_fired", 0) for g in games]
+    mulligans_p1 = sum(1 for g in games if g.get("p1_mulligan"))
+    mulligans_p2 = sum(1 for g in games if g.get("p2_mulligan"))
     enhanced_stats_text = (
-        json.dumps(enhanced_stats, indent=2)
-        if enhanced_stats
-        else "No enhanced stats available"
+        f"Avg P1 damage: {sum(p1_damage)/max(num_games,1):.1f}, "
+        f"Avg P2 damage: {sum(p2_damage)/max(num_games,1):.1f}\n"
+        f"Avg P1 effects: {sum(p1_effects)/max(num_games,1):.1f}, "
+        f"Avg P2 effects: {sum(p2_effects)/max(num_games,1):.1f}\n"
+        f"P1 mulligan: {mulligans_p1}/{num_games}, P2 mulligan: {mulligans_p2}/{num_games}"
     )
 
     prompt = f"""You are an OPTCG (One Piece TCG) deck analyst. Analyze this simulation data and provide improvement suggestions.
