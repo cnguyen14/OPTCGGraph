@@ -12,37 +12,58 @@ interface LogEntry {
   details: Record<string, unknown>;
 }
 
+interface HandCard {
+  name: string;
+  card_id: string;
+  image: string;
+  cost: number;
+  power: number;
+  counter: number;
+  card_type: string;
+}
+
 interface FieldCard {
   name: string;
+  card_id: string;
+  image: string;
   power: number;
   state: 'active' | 'rested';
   don: number;
+  card_type: string;
+  cost: number;
+}
+
+interface LeaderInfo {
+  name: string;
+  card_id: string;
+  image: string;
+  power: number;
+  don: number;
+  state: 'active' | 'rested';
+}
+
+interface PlayerBoardState {
+  leader: LeaderInfo;
+  life: number;
+  hand: HandCard[];
+  field: FieldCard[];
+  donAvailable: number;
+  donRested: number;
+  donAttached: number;
+  donDeck: number;
+  deckRemaining: number;
+  trash: number;
 }
 
 interface BoardState {
   turn: number;
   activePlayer: string;
-  p1Hand: string[];
-  p2Hand: string[];
-  p1Life: number;
-  p2Life: number;
-  p1Field: FieldCard[];
-  p2Field: FieldCard[];
-  p1DonAvailable: number;
-  p2DonAvailable: number;
-  p1DonRested: number;
-  p2DonRested: number;
-  p1DonAttached: number;
-  p2DonAttached: number;
-  p1DonDeck: number;
-  p2DonDeck: number;
-  p1DeckCount: number;
-  p2DeckCount: number;
-  actionText: string;
+  p1: PlayerBoardState;
+  p2: PlayerBoardState;
+  action: string;
   actionType: string;
   actionPlayer: string;
   actionDetails: Record<string, unknown>;
-  /** Names of cards involved in the current action (for highlighting) */
   highlightCards: string[];
   winner: string | null;
 }
@@ -68,120 +89,96 @@ interface ActionDisplay {
   icon: string;
   text: string;
   colorClass: string;
+  bgClass: string;
   glowing?: boolean;
 }
 
+const ACTION_CONFIG: Record<string, { icon: string; color: string; bg: string }> = {
+  play_card: { icon: '\u25B6', color: 'text-green-400', bg: 'bg-green-950/40 border-green-700/40' },
+  play_event: { icon: '\u2726', color: 'text-purple-400', bg: 'bg-purple-950/40 border-purple-700/40' },
+  attack_declared: { icon: '\u2694\uFE0F', color: 'text-orange-400', bg: 'bg-orange-950/40 border-orange-700/40' },
+  attack_failed: { icon: '\u2717', color: 'text-red-400', bg: 'bg-red-950/30 border-red-600/30' },
+  character_koed: { icon: '\u2620', color: 'text-red-500', bg: 'bg-red-950/40 border-red-700/40' },
+  life_lost: { icon: '\u2764', color: 'text-red-400', bg: 'bg-red-950/30 border-red-600/40' },
+  counter_played: { icon: '\uD83D\uDEE1', color: 'text-cyan-400', bg: 'bg-cyan-950/30 border-cyan-700/40' },
+  blocker_used: { icon: '\uD83D\uDEE1', color: 'text-blue-400', bg: 'bg-blue-950/30 border-blue-700/40' },
+  attach_don: { icon: '\u26A1', color: 'text-amber-400', bg: 'bg-amber-950/30 border-amber-700/40' },
+  draw_card: { icon: '\uD83D\uDCE5', color: 'text-blue-300', bg: 'bg-blue-950/20 border-blue-700/30' },
+  add_don: { icon: '+', color: 'text-amber-300', bg: 'bg-amber-950/30 border-amber-700/40' },
+  final_blow: { icon: '\uD83D\uDCA5', color: 'text-yellow-300', bg: 'bg-yellow-950/40 border-yellow-500/50' },
+  pass: { icon: '\u2014', color: 'text-gray-500', bg: 'bg-gray-800/80 border-gray-600/50' },
+  mulligan: { icon: '\uD83D\uDD04', color: 'text-purple-400', bg: 'bg-purple-950/30 border-purple-700/40' },
+  start: { icon: '\u25CF', color: 'text-gray-400', bg: 'bg-gray-800/80 border-gray-600/50' },
+  game_initialized: { icon: '\u25CF', color: 'text-gray-400', bg: 'bg-gray-800/80 border-gray-600/50' },
+  deck_out: { icon: '\uD83D\uDCE6', color: 'text-red-400', bg: 'bg-red-950/30 border-red-600/30' },
+};
+
 function formatAction(entry: LogEntry, p1Leader: string, p2Leader: string): ActionDisplay {
   const d = entry.details;
-  const playerName = entry.player === 'p1' ? p1Leader : p2Leader;
   const playerLabel = entry.player === 'p1' ? 'P1' : 'P2';
+  const playerName = entry.player === 'p1' ? p1Leader : p2Leader;
+  const cfg = ACTION_CONFIG[entry.action] ?? { icon: '\u00B7', color: 'text-gray-400', bg: 'bg-gray-800/80 border-gray-600/50' };
+
+  let text = '';
+  let glowing = false;
 
   switch (entry.action) {
     case 'play_card':
     case 'play_event':
-      return {
-        icon: '\u25B6',
-        text: `${playerLabel} plays ${d.card_name ?? '?'} (cost ${d.cost ?? '?'})`,
-        colorClass: 'text-green-400',
-      };
+      text = `${playerLabel} plays ${d.card_name ?? '?'} (cost ${d.cost ?? '?'})`;
+      break;
     case 'attack_declared':
-      return {
-        icon: '\u2694\uFE0F',
-        text: `${d.attacker ?? '?'} attacks ${d.target ?? '?'} (${d.attacker_power ?? '?'} vs ${d.target_power ?? '?'})`,
-        colorClass: 'text-orange-400',
-      };
+      text = `${d.attacker ?? '?'} attacks ${d.target ?? '?'} (${d.attacker_power ?? '?'} vs ${d.target_power ?? '?'})`;
+      break;
     case 'character_koed':
-      return {
-        icon: '\u2620',
-        text: `${d.card_name ?? '?'} was KO'd`,
-        colorClass: 'text-red-500',
-      };
+      text = `${d.card_name ?? '?'} was KO'd`;
+      break;
     case 'life_lost':
-      return {
-        icon: '\u2764',
-        text: `${playerLabel} lost 1 life (${d.remaining ?? 0} remaining)`,
-        colorClass: 'text-red-400',
-      };
+      text = `${playerLabel} lost 1 life (${d.remaining ?? 0} remaining)`;
+      break;
     case 'counter_played':
-      return {
-        icon: '\uD83D\uDEE1',
-        text: `Counter: ${d.card_name ?? '?'} (+${d.counter_value ?? 0})`,
-        colorClass: 'text-cyan-400',
-      };
+      text = `Counter: ${d.card_name ?? '?'} (+${d.counter_value ?? 0})`;
+      break;
     case 'blocker_used':
-      return {
-        icon: '\uD83D\uDEE1',
-        text: `Blocker: ${d.blocker ?? '?'} intercepts`,
-        colorClass: 'text-blue-400',
-      };
+      text = `Blocker: ${d.blocker ?? '?'} intercepts`;
+      break;
     case 'attach_don':
-      return {
-        icon: '\u26A1',
-        text: `DON \u2192 ${d.card_name ?? '?'} (now ${d.new_power ?? '?'})`,
-        colorClass: 'text-amber-400',
-      };
+      text = `DON \u2192 ${d.card_name ?? '?'} (now ${d.new_power ?? '?'})`;
+      break;
     case 'draw_card':
-      return {
-        icon: '\uD83D\uDCE5',
-        text: `${playerLabel} draws ${d.card_name ?? 'a card'}`,
-        colorClass: 'text-blue-400',
-      };
+      text = `${playerLabel} draws ${d.card_name ?? 'a card'}`;
+      break;
     case 'add_don':
-      return {
-        icon: '+',
-        text: `+${d.amount ?? '?'} DON (total: ${d.total ?? '?'})`,
-        colorClass: 'text-amber-400',
-      };
+      text = `+${d.amount ?? '?'} DON (total: ${d.total ?? '?'})`;
+      break;
     case 'final_blow':
-      return {
-        icon: '\uD83D\uDCA5',
-        text: `FINAL BLOW! ${playerName} wins!`,
-        colorClass: 'text-yellow-300',
-        glowing: true,
-      };
+      text = `FINAL BLOW! ${playerName} wins!`;
+      glowing = true;
+      break;
     case 'pass':
-      return {
-        icon: '\u2014',
-        text: `${playerLabel} passes`,
-        colorClass: 'text-gray-500',
-      };
+      text = `${playerLabel} passes`;
+      break;
     case 'mulligan':
-      return {
-        icon: '\uD83D\uDD04',
-        text: `${playerLabel} mulligans hand`,
-        colorClass: 'text-purple-400',
-      };
+      text = `${playerLabel} mulligans hand`;
+      break;
     case 'attack_failed':
-      return {
-        icon: '\u2717',
-        text: `Attack failed (${d.attack_power ?? '?'} vs ${d.defense_power ?? '?'})`,
-        colorClass: 'text-red-400',
-      };
+      text = `Attack failed (${d.attack_power ?? '?'} vs ${d.defense_power ?? '?'})`;
+      break;
     case 'game_initialized':
-      return {
-        icon: '\uD83C\uDFAE',
-        text: `Game starts! ${d.first_player === 'p1' ? p1Leader : p2Leader} goes first`,
-        colorClass: 'text-gray-300',
-      };
+      text = `Game starts! ${d.first_player === 'p1' ? p1Leader : p2Leader} goes first`;
+      break;
     case 'deck_out':
-      return {
-        icon: '!',
-        text: `${playerLabel} decked out!`,
-        colorClass: 'text-red-400',
-      };
+      text = `${playerLabel} decked out!`;
+      break;
     case 'start':
-      return {
-        icon: '\u25B6',
-        text: `Turn ${entry.details.turn ?? entry.turn} begins`,
-        colorClass: 'text-gray-400',
-      };
+      text = `Turn ${d.turn ?? entry.turn} begins`;
+      break;
     default:
-      return {
-        icon: '\u00B7',
-        text: `${playerLabel}: ${entry.action}`,
-        colorClass: 'text-gray-400',
-      };
+      text = `${playerLabel}: ${entry.action}`;
+      break;
   }
+
+  return { icon: cfg.icon, text, colorClass: cfg.color, bgClass: cfg.bg, glowing };
 }
 
 function getHighlightCards(entry: LogEntry): string[] {
@@ -195,8 +192,101 @@ function getHighlightCards(entry: LogEntry): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Step reconstruction
+// Step reconstruction — updated for new rich data format
 // ---------------------------------------------------------------------------
+
+function defaultLeader(name: string): LeaderInfo {
+  return { name, card_id: '', image: '', power: 5000, don: 0, state: 'active' };
+}
+
+function defaultPlayerState(leaderName: string): PlayerBoardState {
+  return {
+    leader: defaultLeader(leaderName),
+    life: 5,
+    hand: [],
+    field: [],
+    donAvailable: 0,
+    donRested: 0,
+    donAttached: 0,
+    donDeck: 10,
+    deckRemaining: 40,
+    trash: 0,
+  };
+}
+
+function clonePlayer(p: PlayerBoardState): PlayerBoardState {
+  return {
+    leader: { ...p.leader },
+    life: p.life,
+    hand: p.hand.map((c) => ({ ...c })),
+    field: p.field.map((c) => ({ ...c })),
+    donAvailable: p.donAvailable,
+    donRested: p.donRested,
+    donAttached: p.donAttached,
+    donDeck: p.donDeck,
+    deckRemaining: p.deckRemaining,
+    trash: p.trash,
+  };
+}
+
+function cloneState(s: BoardState): BoardState {
+  return {
+    ...s,
+    p1: clonePlayer(s.p1),
+    p2: clonePlayer(s.p2),
+    actionDetails: { ...s.actionDetails },
+    highlightCards: [],
+  };
+}
+
+function parseHandCards(raw: unknown): HandCard[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    if (typeof item === 'string') {
+      return { name: item, card_id: '', image: '', cost: 0, power: 0, counter: 0, card_type: '' };
+    }
+    const obj = item as Record<string, unknown>;
+    return {
+      name: (obj.name as string) ?? '',
+      card_id: (obj.card_id as string) ?? '',
+      image: (obj.image as string) ?? '',
+      cost: (obj.cost as number) ?? 0,
+      power: (obj.power as number) ?? 0,
+      counter: (obj.counter as number) ?? 0,
+      card_type: (obj.card_type as string) ?? '',
+    };
+  });
+}
+
+function parseFieldCards(raw: unknown): FieldCard[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    const obj = item as Record<string, unknown>;
+    return {
+      name: (obj.name as string) ?? '',
+      card_id: (obj.card_id as string) ?? '',
+      image: (obj.image as string) ?? '',
+      power: (obj.power as number) ?? 0,
+      state: ((obj.state as string) === 'rested' ? 'rested' : 'active') as 'active' | 'rested',
+      don: (obj.don as number) ?? 0,
+      card_type: (obj.card_type as string) ?? '',
+      cost: (obj.cost as number) ?? 0,
+    };
+  });
+}
+
+function parseLeaderInfo(raw: unknown, fallbackName: string): LeaderInfo {
+  if (!raw || typeof raw !== 'object') return defaultLeader(fallbackName);
+  const obj = raw as Record<string, unknown>;
+  return {
+    name: (obj.name as string) ?? fallbackName,
+    card_id: (obj.card_id as string) ?? '',
+    image: (obj.image as string) ?? '',
+    power: (obj.power as number) ?? 5000,
+    don: (obj.don as number) ?? 0,
+    state: ((obj.state as string) === 'rested' ? 'rested' : 'active') as 'active' | 'rested',
+  };
+}
 
 function buildSteps(gameLog: LogEntry[], p1Leader: string, p2Leader: string): BoardState[] {
   if (gameLog.length === 0) return [];
@@ -206,38 +296,14 @@ function buildSteps(gameLog: LogEntry[], p1Leader: string, p2Leader: string): Bo
   const defaultState = (): BoardState => ({
     turn: 0,
     activePlayer: 'p1',
-    p1Hand: [],
-    p2Hand: [],
-    p1Life: 5,
-    p2Life: 5,
-    p1Field: [],
-    p2Field: [],
-    p1DonAvailable: 0,
-    p2DonAvailable: 0,
-    p1DonRested: 0,
-    p2DonRested: 0,
-    p1DonAttached: 0,
-    p2DonAttached: 0,
-    p1DonDeck: 10,
-    p2DonDeck: 10,
-    p1DeckCount: 40,
-    p2DeckCount: 40,
-    actionText: '',
+    p1: defaultPlayerState(p1Leader),
+    p2: defaultPlayerState(p2Leader),
+    action: '',
     actionType: '',
     actionPlayer: '',
     actionDetails: {},
     highlightCards: [],
     winner: null,
-  });
-
-  const cloneState = (s: BoardState): BoardState => ({
-    ...s,
-    p1Hand: [...s.p1Hand],
-    p2Hand: [...s.p2Hand],
-    p1Field: s.p1Field.map((c) => ({ ...c })),
-    p2Field: s.p2Field.map((c) => ({ ...c })),
-    actionDetails: { ...s.actionDetails },
-    highlightCards: [],
   });
 
   for (const entry of gameLog) {
@@ -247,26 +313,36 @@ function buildSteps(gameLog: LogEntry[], p1Leader: string, p2Leader: string): Bo
     // Turn start with full snapshot
     if (entry.action === 'start' && entry.phase === 'turn') {
       const d = entry.details;
+      const prev = steps.length > 0 ? steps[steps.length - 1] : defaultState();
+
       const state: BoardState = {
         turn: (d.turn as number) ?? entry.turn,
         activePlayer: entry.player || 'p1',
-        p1Hand: (d.p1_hand as string[]) ?? [],
-        p2Hand: (d.p2_hand as string[]) ?? [],
-        p1Life: (d.p1_life as number) ?? 5,
-        p2Life: (d.p2_life as number) ?? 5,
-        p1Field: (d.p1_field_details as FieldCard[]) ?? [],
-        p2Field: (d.p2_field_details as FieldCard[]) ?? [],
-        p1DonAvailable: (d.p1_don as number) ?? 0,
-        p2DonAvailable: (d.p2_don as number) ?? 0,
-        p1DonRested: (d.p1_don_rested as number) ?? 0,
-        p2DonRested: (d.p2_don_rested as number) ?? 0,
-        p1DonAttached: (d.p1_don_attached as number) ?? 0,
-        p2DonAttached: (d.p2_don_attached as number) ?? 0,
-        p1DonDeck: (d.p1_don_deck as number) ?? 10,
-        p2DonDeck: (d.p2_don_deck as number) ?? 10,
-        p1DeckCount: steps.length > 0 ? steps[steps.length - 1].p1DeckCount : 40,
-        p2DeckCount: steps.length > 0 ? steps[steps.length - 1].p2DeckCount : 40,
-        actionText: display.text,
+        p1: {
+          leader: parseLeaderInfo(d.p1_leader, p1Leader),
+          life: (d.p1_life as number) ?? 5,
+          hand: parseHandCards(d.p1_hand),
+          field: parseFieldCards(d.p1_field_details),
+          donAvailable: (d.p1_don as number) ?? 0,
+          donRested: (d.p1_don_rested as number) ?? 0,
+          donAttached: (d.p1_don_attached as number) ?? 0,
+          donDeck: (d.p1_don_deck as number) ?? 10,
+          deckRemaining: prev.p1.deckRemaining,
+          trash: (d.p1_trash as number) ?? prev.p1.trash,
+        },
+        p2: {
+          leader: parseLeaderInfo(d.p2_leader, p2Leader),
+          life: (d.p2_life as number) ?? 5,
+          hand: parseHandCards(d.p2_hand),
+          field: parseFieldCards(d.p2_field_details),
+          donAvailable: (d.p2_don as number) ?? 0,
+          donRested: (d.p2_don_rested as number) ?? 0,
+          donAttached: (d.p2_don_attached as number) ?? 0,
+          donDeck: (d.p2_don_deck as number) ?? 10,
+          deckRemaining: prev.p2.deckRemaining,
+          trash: (d.p2_trash as number) ?? prev.p2.trash,
+        },
+        action: display.text,
         actionType: entry.action,
         actionPlayer: entry.player,
         actionDetails: entry.details,
@@ -281,7 +357,7 @@ function buildSteps(gameLog: LogEntry[], p1Leader: string, p2Leader: string): Bo
     const prev = steps.length > 0 ? steps[steps.length - 1] : defaultState();
     const state = cloneState(prev);
     state.turn = entry.turn;
-    state.actionText = display.text;
+    state.action = display.text;
     state.actionType = entry.action;
     state.actionPlayer = entry.player;
     state.actionDetails = entry.details;
@@ -289,118 +365,130 @@ function buildSteps(gameLog: LogEntry[], p1Leader: string, p2Leader: string): Bo
 
     const d = entry.details;
     const isP1 = entry.player === 'p1';
+    const player = isP1 ? state.p1 : state.p2;
 
     switch (entry.action) {
       case 'play_card':
       case 'play_event': {
         const cardName = d.card_name as string | undefined;
         if (cardName) {
-          const hand = isP1 ? state.p1Hand : state.p2Hand;
-          const idx = hand.indexOf(cardName);
-          if (idx !== -1) hand.splice(idx, 1);
-          // Only add to field for characters, not events
+          const idx = player.hand.findIndex((c) => c.name === cardName);
+          let removedCard: HandCard | undefined;
+          if (idx !== -1) {
+            removedCard = player.hand.splice(idx, 1)[0];
+          }
           if (entry.action === 'play_card') {
-            const field = isP1 ? state.p1Field : state.p2Field;
-            field.push({
+            const cardImage = (d.card_image as string) ?? removedCard?.image ?? '';
+            player.field.push({
               name: cardName,
-              power: (d.power as number) ?? 0,
+              card_id: removedCard?.card_id ?? '',
+              image: cardImage,
+              power: (d.power as number) ?? removedCard?.power ?? 0,
               state: 'rested',
               don: 0,
+              card_type: removedCard?.card_type ?? 'Character',
+              cost: (d.cost as number) ?? removedCard?.cost ?? 0,
             });
           }
+          player.trash += (entry.action === 'play_event' ? 1 : 0);
         }
         break;
       }
       case 'attach_don': {
         const cardName = d.card_name as string | undefined;
         if (cardName) {
-          const field = isP1 ? state.p1Field : state.p2Field;
-          const card = field.find((c) => c.name === cardName);
-          if (card) {
-            card.don += 1;
-            card.power = (d.new_power as number) ?? card.power;
-          }
-          if (isP1) {
-            state.p1DonAvailable = Math.max(0, state.p1DonAvailable - 1);
-            state.p1DonAttached += 1;
+          // Check if attaching to leader
+          if (player.leader.name === cardName) {
+            player.leader.don += 1;
+            player.leader.power = (d.new_power as number) ?? player.leader.power + 1000;
           } else {
-            state.p2DonAvailable = Math.max(0, state.p2DonAvailable - 1);
-            state.p2DonAttached += 1;
+            const card = player.field.find((c) => c.name === cardName);
+            if (card) {
+              card.don += 1;
+              card.power = (d.new_power as number) ?? card.power + 1000;
+            }
           }
+          player.donAvailable = Math.max(0, player.donAvailable - 1);
+          player.donAttached += 1;
         }
         break;
       }
       case 'attack_declared': {
         const attackerName = d.attacker as string | undefined;
         if (attackerName) {
-          const field = isP1 ? state.p1Field : state.p2Field;
-          const card = field.find((c) => c.name === attackerName);
-          if (card) card.state = 'rested';
+          if (player.leader.name === attackerName) {
+            player.leader.state = 'rested';
+          } else {
+            const card = player.field.find((c) => c.name === attackerName);
+            if (card) card.state = 'rested';
+          }
         }
         break;
       }
       case 'character_koed': {
         const cardName = d.card_name as string | undefined;
         if (cardName) {
-          // Could be on either side
-          state.p1Field = state.p1Field.filter((c) => c.name !== cardName);
-          state.p2Field = state.p2Field.filter((c) => c.name !== cardName);
+          const p1Before = state.p1.field.length;
+          state.p1.field = state.p1.field.filter((c) => c.name !== cardName);
+          if (state.p1.field.length < p1Before) state.p1.trash += 1;
+
+          const p2Before = state.p2.field.length;
+          state.p2.field = state.p2.field.filter((c) => c.name !== cardName);
+          if (state.p2.field.length < p2Before) state.p2.trash += 1;
         }
         break;
       }
       case 'life_lost': {
-        if (isP1) {
-          state.p1Life = (d.remaining as number) ?? Math.max(0, state.p1Life - 1);
-        } else {
-          state.p2Life = (d.remaining as number) ?? Math.max(0, state.p2Life - 1);
-        }
+        player.life = (d.remaining as number) ?? Math.max(0, player.life - 1);
         break;
       }
       case 'counter_played': {
         const cardName = d.card_name as string | undefined;
         if (cardName) {
-          // Counter can be played by the defending player
-          const hand = isP1 ? state.p1Hand : state.p2Hand;
-          const idx = hand.indexOf(cardName);
-          if (idx !== -1) hand.splice(idx, 1);
+          const idx = player.hand.findIndex((c) => c.name === cardName);
+          if (idx !== -1) player.hand.splice(idx, 1);
+          player.trash += 1;
         }
         break;
       }
       case 'draw_card': {
         const cardName = d.card_name as string | undefined;
+        const cardImage = (d.card_image as string) ?? '';
         if (cardName) {
-          const hand = isP1 ? state.p1Hand : state.p2Hand;
-          hand.push(cardName);
+          player.hand.push({
+            name: cardName,
+            card_id: '',
+            image: cardImage,
+            cost: 0,
+            power: 0,
+            counter: 0,
+            card_type: '',
+          });
         }
-        if (isP1) state.p1DeckCount = Math.max(0, state.p1DeckCount - 1);
-        else state.p2DeckCount = Math.max(0, state.p2DeckCount - 1);
+        player.deckRemaining = Math.max(0, player.deckRemaining - 1);
         break;
       }
       case 'add_don': {
-        if (isP1) {
-          state.p1DonAvailable = (d.total as number) ?? state.p1DonAvailable + ((d.amount as number) ?? 0);
-          state.p1DonDeck = Math.max(0, state.p1DonDeck - ((d.amount as number) ?? 0));
-        } else {
-          state.p2DonAvailable = (d.total as number) ?? state.p2DonAvailable + ((d.amount as number) ?? 0);
-          state.p2DonDeck = Math.max(0, state.p2DonDeck - ((d.amount as number) ?? 0));
-        }
+        player.donAvailable = (d.total as number) ?? player.donAvailable + ((d.amount as number) ?? 0);
+        player.donDeck = Math.max(0, player.donDeck - ((d.amount as number) ?? 0));
         break;
       }
       case 'final_blow': {
         state.winner = isP1 ? 'p1' : 'p2';
         break;
       }
+      case 'deck_out': {
+        state.winner = isP1 ? (entry.player === 'p1' ? 'p2' : 'p1') : (entry.player === 'p2' ? 'p1' : 'p2');
+        break;
+      }
       case 'blocker_used': {
         const blockerName = d.blocker as string | undefined;
         if (blockerName) {
-          // Blocker is on the defending side
-          const defField = isP1 ? state.p1Field : state.p2Field;
-          const card = defField.find((c) => c.name === blockerName);
+          const card = player.field.find((c) => c.name === blockerName);
           if (card) card.state = 'rested';
         }
         break;
       }
-      // pass, mulligan, game_initialized, deck_out, etc. — no board change
       default:
         break;
     }
@@ -412,214 +500,364 @@ function buildSteps(gameLog: LogEntry[], p1Leader: string, p2Leader: string): Bo
 }
 
 // ---------------------------------------------------------------------------
-// Sub-components
+// Card image helper
 // ---------------------------------------------------------------------------
 
-function FieldCardSlot({
-  card,
-  color,
-  highlighted,
-}: {
-  card: FieldCard;
-  color: 'blue' | 'red';
-  highlighted: boolean;
-}) {
-  const isRested = card.state === 'rested';
-  const borderColor = color === 'blue' ? 'border-blue-500' : 'border-red-500';
-  const highlightRing = highlighted ? 'ring-2 ring-yellow-400' : '';
-  const truncatedName = card.name.length > 8 ? card.name.slice(0, 8) + '\u2026' : card.name;
-
+function CardImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  if (src) {
+    return <img src={src} alt={alt} className={`${className ?? ''} object-cover`} loading="lazy" />;
+  }
   return (
-    <div
-      className={`
-        relative w-[76px] h-[96px] rounded-lg border-2 ${borderColor} ${highlightRing}
-        bg-gray-800 flex flex-col items-center justify-between p-1.5
-        transition-all duration-200 select-none shrink-0
-        ${isRested ? 'rotate-[20deg] opacity-70 scale-95' : ''}
-      `}
-      title={`${card.name} (${card.power} power${card.don > 0 ? `, ${card.don} DON` : ''}${isRested ? ', rested' : ''})`}
-    >
-      {/* Card name */}
-      <span className="text-[10px] text-gray-300 leading-tight text-center w-full truncate">
-        {truncatedName}
-      </span>
-
-      {/* Power */}
-      <span className={`text-lg font-bold ${card.don > 0 ? 'text-green-400' : 'text-white'}`}>
-        {card.power >= 1000 ? `${(card.power / 1000).toFixed(0)}k` : card.power}
-      </span>
-
-      {/* DON indicator */}
-      {card.don > 0 && (
-        <div className="flex items-center gap-0.5">
-          <span className="text-amber-400 text-[9px]">{'\u26A1'}</span>
-          <span className="text-amber-300 text-[10px] font-medium">{card.don}</span>
-        </div>
-      )}
-      {card.don === 0 && <div className="h-3" />}
-
-      {/* Rested overlay */}
-      {isRested && (
-        <div className="absolute inset-0 bg-gray-900/30 rounded-lg pointer-events-none" />
-      )}
+    <div className={`${className ?? ''} bg-gray-700 flex items-center justify-center`}>
+      <span className="text-[9px] text-gray-400 text-center leading-tight px-0.5">{alt}</span>
     </div>
   );
 }
 
-function PlayerInfoBar({
-  label,
+// ---------------------------------------------------------------------------
+// Sub-components — OPTCG Sim style
+// ---------------------------------------------------------------------------
+
+function LeaderCard({
   leader,
-  life,
-  donAvailable,
-  donRested,
-  donAttached,
-  donDeck,
-  deckCount,
-  handCount,
-  color,
-  isTop,
+  isP1,
+  highlighted,
 }: {
-  label: string;
-  leader: string;
-  life: number;
-  donAvailable: number;
-  donRested: number;
-  donAttached: number;
-  donDeck: number;
-  deckCount: number;
-  handCount: number;
-  color: 'blue' | 'red';
-  isTop: boolean;
+  leader: LeaderInfo;
+  isP1: boolean;
+  highlighted: boolean;
 }) {
-  const textColor = color === 'blue' ? 'text-blue-400' : 'text-red-400';
-  const bgColor = color === 'blue' ? 'bg-blue-950/30' : 'bg-red-950/30';
-  const borderColor = color === 'blue' ? 'border-blue-800/30' : 'border-red-800/30';
+  const borderColor = isP1 ? 'border-blue-500' : 'border-red-500';
+  const glowColor = isP1 ? 'shadow-blue-500/30' : 'shadow-red-500/30';
+  const isRested = leader.state === 'rested';
 
   return (
-    <div className={`${bgColor} border ${borderColor} rounded-lg px-4 py-2 ${isTop ? 'mb-2' : 'mt-2'}`}>
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <span className={`text-sm font-semibold ${textColor}`}>{label}</span>
-          <span className="text-xs text-gray-400">{leader}</span>
-        </div>
-        <div className="flex items-center gap-3 text-xs">
-          <span className="text-red-400">
-            {'\u2764'} {life}
-          </span>
-          <span className="text-amber-400" title={`${donAvailable} available, ${donRested} rested, ${donAttached} attached`}>
-            {'\u26A1'} {donAvailable} DON
-            {donRested > 0 && <span className="text-amber-500/70"> ({donRested} rested)</span>}
-            {donAttached > 0 && <span className="text-orange-400/70"> ({donAttached} att.)</span>}
-          </span>
-          <span className="text-gray-500" title="DON deck remaining">
-            DON deck: {donDeck}
-          </span>
-          <span className="text-gray-500" title="Main deck remaining">
-            Deck: {deckCount}
-          </span>
-          {!isTop && (
-            <span className="text-blue-300" title="Cards in hand">
-              Hand: {handCount}
-            </span>
-          )}
-        </div>
+    <div
+      className={`
+        relative w-[90px] h-[126px] rounded-lg overflow-hidden border-2 ${borderColor}
+        shadow-lg ${glowColor} shrink-0
+        ${isRested ? 'rotate-[90deg] opacity-75' : ''}
+        ${highlighted ? 'ring-2 ring-yellow-400 animate-pulse' : ''}
+        transition-all duration-300
+      `}
+      title={`${leader.name} | Power: ${leader.power}${leader.don > 0 ? ` | DON: ${leader.don}` : ''}`}
+    >
+      <CardImage src={leader.image} alt={leader.name} className="w-full h-full" />
+      {/* Power overlay */}
+      <div className="absolute bottom-0 left-0 right-0 bg-black/80 px-1.5 py-1 text-center">
+        <span className={`text-xs font-bold ${leader.don > 0 ? 'text-green-400' : 'text-white'}`}>
+          {leader.power}
+        </span>
+        {leader.don > 0 && (
+          <span className="text-yellow-400 text-[10px] ml-1">{'\u26A1'}{leader.don}</span>
+        )}
+      </div>
+      {/* Leader badge */}
+      <div className={`absolute top-0 left-0 right-0 ${isP1 ? 'bg-blue-600/80' : 'bg-red-600/80'} px-1 py-0.5 text-center`}>
+        <span className="text-[9px] font-bold text-white uppercase tracking-wider">Leader</span>
       </div>
     </div>
   );
 }
 
-function ActionBar({
-  entry,
-  p1Leader,
-  p2Leader,
+function FieldCardSlot({
+  card,
+  isP1,
+  highlighted,
 }: {
-  entry: { actionType: string; actionText: string; actionPlayer: string; actionDetails: Record<string, unknown> };
-  p1Leader: string;
-  p2Leader: string;
+  card: FieldCard;
+  isP1: boolean;
+  highlighted: boolean;
 }) {
-  // Determine color based on action type
-  let bgClass = 'bg-gray-800/80 border-gray-600/50';
-  let textClass = 'text-gray-300';
-  let glow = false;
-
-  const logEntry: LogEntry = {
-    turn: 0,
-    player: entry.actionPlayer,
-    phase: '',
-    action: entry.actionType,
-    details: entry.actionDetails,
-  };
-  const display = formatAction(logEntry, p1Leader, p2Leader);
-  textClass = display.colorClass;
-  glow = display.glowing ?? false;
-
-  switch (entry.actionType) {
-    case 'play_card':
-    case 'play_event':
-      bgClass = 'bg-green-950/40 border-green-700/40';
-      break;
-    case 'attack_declared':
-      bgClass = 'bg-orange-950/40 border-orange-700/40';
-      break;
-    case 'character_koed':
-      bgClass = 'bg-red-950/40 border-red-700/40';
-      break;
-    case 'life_lost':
-      bgClass = 'bg-red-950/30 border-red-600/40';
-      break;
-    case 'counter_played':
-      bgClass = 'bg-cyan-950/30 border-cyan-700/40';
-      break;
-    case 'blocker_used':
-      bgClass = 'bg-blue-950/30 border-blue-700/40';
-      break;
-    case 'attach_don':
-    case 'add_don':
-      bgClass = 'bg-amber-950/30 border-amber-700/40';
-      break;
-    case 'final_blow':
-      bgClass = 'bg-yellow-950/40 border-yellow-500/50';
-      break;
-    case 'attack_failed':
-      bgClass = 'bg-red-950/30 border-red-600/30';
-      break;
-    case 'draw_card':
-      bgClass = 'bg-blue-950/20 border-blue-700/30';
-      break;
-    case 'mulligan':
-      bgClass = 'bg-purple-950/30 border-purple-700/40';
-      break;
-  }
+  const isRested = card.state === 'rested';
+  const borderColor = isP1 ? 'border-blue-500/70' : 'border-red-500/70';
 
   return (
     <div
       className={`
-        mx-auto max-w-lg rounded-lg border ${bgClass} px-4 py-2.5 text-center
+        relative w-[72px] h-[100px] rounded-md overflow-hidden border-2 ${borderColor}
+        shrink-0 transition-all duration-300
+        ${isRested ? 'rotate-[90deg] opacity-75' : ''}
+        ${highlighted ? 'ring-2 ring-yellow-400 animate-pulse' : ''}
+      `}
+      title={`${card.name} | Power: ${card.power}${card.don > 0 ? ` | DON: ${card.don}` : ''}${isRested ? ' | Rested' : ''}`}
+    >
+      <CardImage src={card.image} alt={card.name} className="w-full h-full" />
+      {/* Power overlay at bottom */}
+      <div className="absolute bottom-0 left-0 right-0 bg-black/70 px-1 py-0.5 text-center">
+        <span className={`text-xs font-bold ${card.don > 0 ? 'text-green-400' : 'text-white'}`}>
+          {card.power}
+        </span>
+        {card.don > 0 && (
+          <span className="text-yellow-400 text-[10px] ml-1">{'\u26A1'}{card.don}</span>
+        )}
+      </div>
+      {/* Rested overlay */}
+      {isRested && (
+        <div className="absolute inset-0 bg-gray-900/20 pointer-events-none" />
+      )}
+    </div>
+  );
+}
+
+function HandCardFaceUp({ card, highlighted }: { card: HandCard; highlighted: boolean }) {
+  return (
+    <div
+      className={`
+        w-[56px] h-[78px] rounded overflow-hidden border border-gray-600
+        hover:scale-110 hover:z-10 transition-transform cursor-pointer shrink-0 relative
+        ${highlighted ? 'ring-2 ring-yellow-400 animate-pulse' : ''}
+      `}
+      title={`${card.name} | Cost: ${card.cost} | Power: ${card.power} | Counter: ${card.counter}`}
+    >
+      <CardImage src={card.image} alt={card.name} className="w-full h-full" />
+    </div>
+  );
+}
+
+function HandCardFaceDown() {
+  return (
+    <div className="w-[48px] h-[67px] rounded bg-gradient-to-br from-red-900 to-red-800 border border-red-700 shrink-0">
+      <div className="w-full h-full flex items-center justify-center">
+        <div className="w-6 h-6 rounded-full border-2 border-red-600/60" />
+      </div>
+    </div>
+  );
+}
+
+function LifePile({ life }: { life: number }) {
+  const stackCount = Math.min(life, 3);
+  return (
+    <div className="relative w-[48px] h-[67px] shrink-0" title={`Life: ${life}`}>
+      {Array.from({ length: stackCount }).map((_, i) => (
+        <div
+          key={i}
+          className="absolute bg-gradient-to-br from-red-900 to-red-800 rounded border border-red-700"
+          style={{ top: i * 2, left: i * 2, width: 48, height: 67, zIndex: i }}
+        />
+      ))}
+      {life > 0 && (
+        <div className="absolute inset-0 flex items-center justify-center z-10">
+          <span className="text-white font-bold text-lg bg-black/50 rounded-full w-8 h-8 flex items-center justify-center">
+            {life}
+          </span>
+        </div>
+      )}
+      {life === 0 && (
+        <div className="w-[48px] h-[67px] rounded border border-dashed border-red-800/40 flex items-center justify-center">
+          <span className="text-[10px] text-red-800">0</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DonDisplay({ available, rested, donDeck }: { available: number; rested: number; donDeck: number }) {
+  return (
+    <div className="flex items-center gap-1 flex-wrap">
+      {Array.from({ length: available }).map((_, i) => (
+        <div
+          key={`a-${i}`}
+          className="w-4 h-4 rounded-full bg-yellow-500 border border-yellow-400 shadow-sm shadow-yellow-500/30"
+        />
+      ))}
+      {Array.from({ length: rested }).map((_, i) => (
+        <div
+          key={`r-${i}`}
+          className="w-4 h-4 rounded-full bg-yellow-900 border border-yellow-700"
+        />
+      ))}
+      {(available + rested) === 0 && <span className="text-[10px] text-gray-600">No DON</span>}
+      <span className="text-[10px] text-gray-500 ml-1">DON deck: {donDeck}</span>
+    </div>
+  );
+}
+
+function DeckPile({ count }: { count: number }) {
+  return (
+    <div
+      className="relative w-[48px] h-[67px] bg-gradient-to-br from-blue-900 to-blue-800 rounded border border-blue-700 shrink-0"
+      title={`Deck: ${count} cards`}
+    >
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-[9px] text-blue-300 uppercase">Deck</span>
+        <span className="text-white font-bold text-sm">{count}</span>
+      </div>
+    </div>
+  );
+}
+
+function TrashPile({ count }: { count: number }) {
+  return (
+    <div
+      className="w-[48px] h-[67px] rounded border border-gray-600 bg-gray-800/50 flex flex-col items-center justify-center shrink-0"
+      title={`Trash: ${count} cards`}
+    >
+      <span className="text-[10px] text-gray-500">TRASH</span>
+      <span className="text-white font-bold">{count}</span>
+    </div>
+  );
+}
+
+function ActionBar({
+  state,
+  p1Leader,
+  p2Leader,
+}: {
+  state: BoardState;
+  p1Leader: string;
+  p2Leader: string;
+}) {
+  const logEntry: LogEntry = {
+    turn: state.turn,
+    player: state.actionPlayer,
+    phase: '',
+    action: state.actionType,
+    details: state.actionDetails,
+  };
+  const display = formatAction(logEntry, p1Leader, p2Leader);
+
+  return (
+    <div
+      className={`
+        w-full rounded-lg border ${display.bgClass} px-4 py-2.5 text-center
         transition-all duration-300
-        ${glow ? 'shadow-[0_0_20px_rgba(234,179,8,0.3)]' : ''}
+        ${display.glowing ? 'shadow-[0_0_20px_rgba(234,179,8,0.3)]' : ''}
       `}
     >
-      <span className={`text-sm font-medium ${textClass}`}>
-        {display.icon} {entry.actionText}
+      <span className={`text-sm font-medium ${display.colorClass}`}>
+        {display.icon} {state.action}
       </span>
     </div>
   );
 }
 
-function HandDisplay({ cards }: { cards: string[] }) {
-  if (cards.length === 0) {
-    return <span className="text-xs text-gray-600 italic">Empty hand</span>;
+// ---------------------------------------------------------------------------
+// Player Half-Board
+// ---------------------------------------------------------------------------
+
+function PlayerBoard({
+  player,
+  isP1,
+  isTop,
+  highlightCards,
+}: {
+  player: PlayerBoardState;
+  isP1: boolean;
+  isTop: boolean;
+  highlightCards: string[];
+}) {
+  const leaderHighlighted = highlightCards.includes(player.leader.name);
+  const accentLabel = isP1 ? 'text-blue-400' : 'text-red-400';
+
+  // For top player (P2), the layout is mirrored conceptually
+  // Left column: Trash + Leader
+  // Center: Character field (5 slots)
+  // Right: Deck
+
+  const fieldContent = (
+    <div className="flex items-center gap-1.5 justify-center min-h-[110px] flex-wrap py-1">
+      {player.field.length > 0 ? (
+        player.field.map((card, i) => (
+          <FieldCardSlot
+            key={`${card.card_id || card.name}-${i}`}
+            card={card}
+            isP1={isP1}
+            highlighted={highlightCards.includes(card.name)}
+          />
+        ))
+      ) : (
+        <div className="flex items-center justify-center h-[100px] w-full">
+          <span className="text-xs text-gray-700 italic">No characters</span>
+        </div>
+      )}
+    </div>
+  );
+
+  const handContent = isTop ? (
+    // P2 hand: face-down
+    <div className="flex items-center gap-1 justify-center flex-wrap py-1">
+      {player.hand.length > 0 ? (
+        <>
+          {player.hand.map((_, i) => (
+            <HandCardFaceDown key={`p2h-${i}`} />
+          ))}
+          <span className="text-[10px] text-gray-500 ml-2">({player.hand.length})</span>
+        </>
+      ) : (
+        <span className="text-xs text-gray-600 italic">Empty hand</span>
+      )}
+    </div>
+  ) : (
+    // P1 hand: face-up
+    <div className="flex items-center gap-1 justify-center flex-wrap py-1">
+      {player.hand.length > 0 ? (
+        player.hand.map((card, i) => (
+          <HandCardFaceUp
+            key={`p1h-${card.card_id || card.name}-${i}`}
+            card={card}
+            highlighted={highlightCards.includes(card.name)}
+          />
+        ))
+      ) : (
+        <span className="text-xs text-gray-600 italic">Empty hand</span>
+      )}
+    </div>
+  );
+
+  // Build the board row: Trash | Leader | Field | Deck
+  const boardRow = (
+    <div className="flex items-center gap-3 px-2">
+      {/* Left column: Trash + Life */}
+      <div className="flex flex-col items-center gap-2 shrink-0">
+        <TrashPile count={player.trash} />
+        <LifePile life={player.life} />
+      </div>
+
+      {/* Leader */}
+      <div className="shrink-0">
+        <LeaderCard leader={player.leader} isP1={isP1} highlighted={leaderHighlighted} />
+      </div>
+
+      {/* Character field */}
+      <div className="flex-1 min-w-0">
+        {fieldContent}
+      </div>
+
+      {/* Deck */}
+      <div className="shrink-0">
+        <DeckPile count={player.deckRemaining} />
+      </div>
+    </div>
+  );
+
+  // DON display
+  const donRow = (
+    <div className="flex items-center justify-between px-3 py-1">
+      <span className={`text-xs font-semibold ${accentLabel}`}>
+        {isP1 ? 'P1' : 'P2'} {'\u2014'} {player.leader.name}
+      </span>
+      <DonDisplay available={player.donAvailable} rested={player.donRested} donDeck={player.donDeck} />
+    </div>
+  );
+
+  if (isTop) {
+    // P2: hand on top, then DON, then board
+    return (
+      <div className="space-y-1">
+        {handContent}
+        {donRow}
+        {boardRow}
+      </div>
+    );
   }
+
+  // P1: board, then DON, then hand on bottom
   return (
-    <div className="flex flex-wrap gap-1.5 mt-1">
-      {cards.map((card, i) => (
-        <span
-          key={`${card}-${i}`}
-          className="text-[11px] bg-gray-800 border border-gray-700/60 rounded px-2 py-0.5 text-gray-300"
-        >
-          {card}
-        </span>
-      ))}
+    <div className="space-y-1">
+      {boardRow}
+      {donRow}
+      {handContent}
     </div>
   );
 }
@@ -636,7 +874,7 @@ export default function BoardReplay({ gameLog, p1Leader, p2Leader, winner }: Boa
 
   const [currentStep, setCurrentStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [speed, setSpeed] = useState(1.0); // seconds per step
+  const [speed, setSpeed] = useState(1.0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const totalSteps = steps.length;
@@ -684,7 +922,7 @@ export default function BoardReplay({ gameLog, p1Leader, p2Leader, winner }: Boa
 
   if (totalSteps === 0 || !state) {
     return (
-      <div className="rounded-xl border border-gray-700/50 bg-gray-900/50 p-8 text-center text-sm text-gray-500">
+      <div className="rounded-xl border border-gray-700/50 bg-gray-900/95 p-8 text-center text-sm text-gray-500">
         No game log data available for replay.
       </div>
     );
@@ -694,26 +932,21 @@ export default function BoardReplay({ gameLog, p1Leader, p2Leader, winner }: Boa
     winner === 'p1' ? p1Leader : winner === 'p2' ? p2Leader : 'Draw';
 
   return (
-    <div className="rounded-xl border border-gray-700/50 bg-gray-900/50 overflow-hidden">
+    <div className="rounded-xl border border-gray-700 bg-gray-900/95 overflow-hidden">
       {/* Controls bar */}
-      <div className="flex items-center gap-3 px-4 py-2.5 bg-gray-800/60 border-b border-gray-700/40">
-        {/* Step counter */}
-        <span className="text-xs text-gray-400 font-mono shrink-0">
-          Step {currentStep + 1}/{totalSteps}
-        </span>
-
+      <div className="flex items-center gap-3 px-4 py-2.5 bg-gray-800/80 border-b border-gray-700/60">
         {/* Transport controls */}
         <div className="flex items-center gap-1">
           <button
             onClick={() => { setCurrentStep(0); setIsPlaying(false); }}
-            className="px-2 py-1 text-xs text-gray-400 hover:text-white hover:bg-gray-700/50 rounded transition-colors"
+            className="px-2 py-1 text-xs text-gray-400 hover:text-white hover:bg-gray-700/50 rounded transition-colors font-mono"
             title="Go to start"
           >
             |&lt;
           </button>
           <button
             onClick={() => setCurrentStep((prev) => Math.max(0, prev - 1))}
-            className="px-2 py-1 text-xs text-gray-400 hover:text-white hover:bg-gray-700/50 rounded transition-colors"
+            className="px-2 py-1 text-xs text-gray-400 hover:text-white hover:bg-gray-700/50 rounded transition-colors font-mono"
             title="Previous step (Left arrow)"
           >
             &lt;
@@ -731,19 +964,24 @@ export default function BoardReplay({ gameLog, p1Leader, p2Leader, winner }: Boa
           </button>
           <button
             onClick={() => setCurrentStep((prev) => Math.min(totalSteps - 1, prev + 1))}
-            className="px-2 py-1 text-xs text-gray-400 hover:text-white hover:bg-gray-700/50 rounded transition-colors"
+            className="px-2 py-1 text-xs text-gray-400 hover:text-white hover:bg-gray-700/50 rounded transition-colors font-mono"
             title="Next step (Right arrow)"
           >
             &gt;
           </button>
           <button
             onClick={() => { setCurrentStep(totalSteps - 1); setIsPlaying(false); }}
-            className="px-2 py-1 text-xs text-gray-400 hover:text-white hover:bg-gray-700/50 rounded transition-colors"
+            className="px-2 py-1 text-xs text-gray-400 hover:text-white hover:bg-gray-700/50 rounded transition-colors font-mono"
             title="Go to end"
           >
             &gt;|
           </button>
         </div>
+
+        {/* Step counter */}
+        <span className="text-xs text-gray-400 font-mono">
+          Step {currentStep + 1}/{totalSteps}
+        </span>
 
         {/* Speed control */}
         <div className="flex items-center gap-2 ml-auto">
@@ -762,18 +1000,16 @@ export default function BoardReplay({ gameLog, p1Leader, p2Leader, winner }: Boa
         </div>
 
         {/* Turn indicator */}
-        <span className="text-xs text-gray-300 font-medium shrink-0">
-          Turn {state.turn}
-          {state.activePlayer && (
-            <span className={state.activePlayer === 'p1' ? 'text-blue-400 ml-1' : 'text-red-400 ml-1'}>
-              {state.activePlayer === 'p1' ? p1Leader : p2Leader}
-            </span>
-          )}
-        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-gray-500">Turn {state.turn}</span>
+          <span className={`text-xs font-semibold ${state.activePlayer === 'p1' ? 'text-blue-400' : 'text-red-400'}`}>
+            {state.activePlayer === 'p1' ? p1Leader : p2Leader}
+          </span>
+        </div>
       </div>
 
       {/* Progress scrubber */}
-      <div className="px-4 py-1 bg-gray-800/30">
+      <div className="px-4 py-1 bg-gray-800/40">
         <input
           type="range"
           min={0}
@@ -787,79 +1023,31 @@ export default function BoardReplay({ gameLog, p1Leader, p2Leader, winner }: Boa
         />
       </div>
 
-      {/* Board */}
-      <div className="p-4 space-y-3">
-        {/* P2 (opponent) — top */}
-        <PlayerInfoBar
-          label="P2"
-          leader={p2Leader}
-          life={state.p2Life}
-          donAvailable={state.p2DonAvailable}
-          donRested={state.p2DonRested}
-          donAttached={state.p2DonAttached}
-          donDeck={state.p2DonDeck}
-          deckCount={state.p2DeckCount}
-          handCount={state.p2Hand.length}
-          color="red"
-          isTop={true}
-        />
-
-        {/* P2 field */}
-        <div className="flex items-center justify-center gap-2 min-h-[110px] flex-wrap py-2">
-          {state.p2Field.length > 0 ? (
-            state.p2Field.map((card, i) => (
-              <FieldCardSlot
-                key={`p2-${card.name}-${i}`}
-                card={card}
-                color="red"
-                highlighted={state.highlightCards.includes(card.name)}
-              />
-            ))
-          ) : (
-            <span className="text-xs text-gray-600 italic">No characters on field</span>
-          )}
+      {/* Board — OPTCG playmat style */}
+      <div className="p-3 space-y-2">
+        {/* P2 (opponent) — top half */}
+        <div className={`rounded-lg border ${state.activePlayer === 'p2' ? 'border-red-700/50 bg-red-950/10' : 'border-gray-800/50 bg-gray-900/30'} p-2 transition-colors duration-300`}>
+          <PlayerBoard
+            player={state.p2}
+            isP1={false}
+            isTop={true}
+            highlightCards={state.highlightCards}
+          />
         </div>
 
-        {/* Action bar — center */}
-        {state.actionText && (
-          <ActionBar entry={state} p1Leader={p1Leader} p2Leader={p2Leader} />
+        {/* Action bar — center divider */}
+        {state.action && (
+          <ActionBar state={state} p1Leader={p1Leader} p2Leader={p2Leader} />
         )}
 
-        {/* P1 field */}
-        <div className="flex items-center justify-center gap-2 min-h-[110px] flex-wrap py-2">
-          {state.p1Field.length > 0 ? (
-            state.p1Field.map((card, i) => (
-              <FieldCardSlot
-                key={`p1-${card.name}-${i}`}
-                card={card}
-                color="blue"
-                highlighted={state.highlightCards.includes(card.name)}
-              />
-            ))
-          ) : (
-            <span className="text-xs text-gray-600 italic">No characters on field</span>
-          )}
-        </div>
-
-        {/* P1 (player) — bottom */}
-        <PlayerInfoBar
-          label="P1"
-          leader={p1Leader}
-          life={state.p1Life}
-          donAvailable={state.p1DonAvailable}
-          donRested={state.p1DonRested}
-          donAttached={state.p1DonAttached}
-          donDeck={state.p1DonDeck}
-          deckCount={state.p1DeckCount}
-          handCount={state.p1Hand.length}
-          color="blue"
-          isTop={false}
-        />
-
-        {/* P1 hand */}
-        <div className="mt-1">
-          <span className="text-[10px] text-gray-500 uppercase tracking-wide">Hand</span>
-          <HandDisplay cards={state.p1Hand} />
+        {/* P1 (player) — bottom half */}
+        <div className={`rounded-lg border ${state.activePlayer === 'p1' ? 'border-blue-700/50 bg-blue-950/10' : 'border-gray-800/50 bg-gray-900/30'} p-2 transition-colors duration-300`}>
+          <PlayerBoard
+            player={state.p1}
+            isP1={true}
+            isTop={false}
+            highlightCards={state.highlightCards}
+          />
         </div>
       </div>
 

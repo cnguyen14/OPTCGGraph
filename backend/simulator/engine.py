@@ -211,8 +211,31 @@ class GameEngine:
                 "turn",
                 "start",
                 turn=self.state.turn,
-                p1_hand=[c.name for c in self.state.p1.hand],
-                p2_hand=[c.name for c in self.state.p2.hand],
+                # Hand details with card info for board replay
+                p1_hand=[
+                    {
+                        "name": c.name,
+                        "card_id": c.card_id,
+                        "image": c.image,
+                        "cost": c.cost,
+                        "power": c.power,
+                        "counter": c.counter,
+                        "card_type": c.card_type,
+                    }
+                    for c in self.state.p1.hand
+                ],
+                p2_hand=[
+                    {
+                        "name": c.name,
+                        "card_id": c.card_id,
+                        "image": c.image,
+                        "cost": c.cost,
+                        "power": c.power,
+                        "counter": c.counter,
+                        "card_type": c.card_type,
+                    }
+                    for c in self.state.p2.hand
+                ],
                 p1_life=len(self.state.p1.life),
                 p2_life=len(self.state.p2.life),
                 p1_field=[c.name for c in self.state.p1.field],
@@ -227,24 +250,53 @@ class GameEngine:
                 + self.state.p2.leader.attached_don,
                 p1_don_deck=self.state.p1.don_deck,
                 p2_don_deck=self.state.p2.don_deck,
+                # Leader details with image
+                p1_leader={
+                    "name": self.state.p1.leader.name,
+                    "card_id": self.state.p1.leader.card_id,
+                    "image": self.state.p1.leader.image,
+                    "power": self.state.p1.leader.effective_power,
+                    "don": self.state.p1.leader.attached_don,
+                    "state": self.state.p1.leader.state.value,
+                },
+                p2_leader={
+                    "name": self.state.p2.leader.name,
+                    "card_id": self.state.p2.leader.card_id,
+                    "image": self.state.p2.leader.image,
+                    "power": self.state.p2.leader.effective_power,
+                    "don": self.state.p2.leader.attached_don,
+                    "state": self.state.p2.leader.state.value,
+                },
+                # Field details with images
                 p1_field_details=[
                     {
                         "name": c.name,
+                        "card_id": c.card_id,
+                        "image": c.image,
                         "power": c.effective_power,
                         "state": c.state.value,
                         "don": c.attached_don,
+                        "card_type": c.card_type,
+                        "cost": c.cost,
                     }
                     for c in self.state.p1.field
                 ],
                 p2_field_details=[
                     {
                         "name": c.name,
+                        "card_id": c.card_id,
+                        "image": c.image,
                         "power": c.effective_power,
                         "state": c.state.value,
                         "don": c.attached_don,
+                        "card_type": c.card_type,
+                        "cost": c.cost,
                     }
                     for c in self.state.p2.field
                 ],
+                # Trash counts
+                p1_trash=len(self.state.p1.trash),
+                p2_trash=len(self.state.p2.trash),
             )
             await self._main_phase(agent, agents)
             self._end_phase()
@@ -539,6 +591,7 @@ class GameEngine:
                 "main",
                 "play_event",
                 card_name=card.name,
+                card_image=card.image,
                 cost=card.cost,
             )
         else:
@@ -553,6 +606,7 @@ class GameEngine:
                 "main",
                 "play_card",
                 card_name=card.name,
+                card_image=card.image,
                 cost=card.cost,
                 card_type=card.card_type,
             )

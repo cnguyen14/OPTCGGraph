@@ -60,6 +60,7 @@ async def _load_game_card(
         ability_text=ability_text,
         trigger_effect=trigger_effect,
         colors=data.get("colors", []) or [],
+        image=data.get("image_small", "") or data.get("image_large", "") or "",
         effects=effects,
     )
 

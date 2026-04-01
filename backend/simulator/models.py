@@ -122,6 +122,7 @@ class GameCard:
     ability_text: str = ""
     trigger_effect: str = ""
     colors: list[str] = dataclass_field(default_factory=list)
+    image: str = ""  # image_small URL from Neo4j
     effects: list[EffectTemplate] = dataclass_field(default_factory=list)
     state: CardState = CardState.ACTIVE
     attached_don: int = 0
