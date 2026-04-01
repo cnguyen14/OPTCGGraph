@@ -455,3 +455,39 @@ export interface DeckImprovements {
   improvements: DeckImprovement[];
   summary: string;
 }
+
+export interface SimDetail {
+  metadata: {
+    p1_leader: string;
+    p2_leader: string;
+    num_games: number;
+    mode: string;
+    llm_model: string | null;
+    p1_level: string;
+    p2_level: string;
+  };
+  games: Array<{
+    game_idx: number;
+    winner: string;
+    turns: number;
+    p1_life: number;
+    p2_life: number;
+    p1_damage_dealt: number;
+    p2_damage_dealt: number;
+    p1_effects_fired: number;
+    p2_effects_fired: number;
+    p1_mulligan: boolean;
+    p2_mulligan: boolean;
+    win_condition: string;
+    decision_count: number;
+  }>;
+}
+
+export interface MatchupAnalysis {
+  analysis: string;
+  strengths: string[];
+  weaknesses: string[];
+  overperformers: Array<{ card_id: string; card_name: string; reason: string }>;
+  underperformers: Array<{ card_id: string; card_name: string; reason: string }>;
+  suggested_swaps: Array<{ remove: string; add: string; reason: string }>;
+}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { analyzeDeck, getDeckSimHistory, improveDeck } from '../../lib/api';
-import type { SimHistoryEntry, DeckImprovement } from '../../types';
+import { analyzeDeck, getDeckSimHistory, improveDeck, fetchSimDetail, analyzeMatchup } from '../../lib/api';
+import type { SimHistoryEntry, DeckImprovement, MatchupAnalysis } from '../../types';
 
 type TabId = 'analysis' | 'history' | 'improve';
 
@@ -246,11 +246,267 @@ function StatCard({
 // Tab 2: Simulation History
 // ---------------------------------------------------------------------------
 
-function SimHistoryTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[] }) {
+function SimDetailPanel({
+  simId,
+  leaderId,
+  cardIds,
+}: {
+  simId: string;
+  leaderId: string;
+  cardIds: string[];
+}) {
+  const {
+    data: detail,
+    loading: detailLoading,
+    error: detailError,
+  } = useFetch(() => fetchSimDetail(simId), [simId]);
+
+  const [analysis, setAnalysis] = useState<MatchupAnalysis | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const analysisRequested = useRef(false);
+
+  const handleAnalyze = useCallback(() => {
+    if (analysisRequested.current) return;
+    analysisRequested.current = true;
+    setAnalysisLoading(true);
+    setAnalysisError(null);
+    analyzeMatchup(leaderId, cardIds, simId)
+      .then(setAnalysis)
+      .catch((e: Error) => setAnalysisError(e.message))
+      .finally(() => setAnalysisLoading(false));
+  }, [leaderId, cardIds, simId]);
+
+  if (detailLoading) return <Spinner text="Loading game details..." />;
+  if (detailError) return <p className="text-xs text-red-400 py-2 px-3">{detailError}</p>;
+  if (!detail) return null;
+
+  const { metadata, games } = detail;
+
+  return (
+    <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 space-y-4">
+      {/* Metadata summary */}
+      <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400">
+        <span>
+          vs <span className="text-gray-200 font-medium">{metadata.p2_leader}</span>
+        </span>
+        <span className="text-gray-600">|</span>
+        <span>{metadata.num_games} games</span>
+        <span className="text-gray-600">|</span>
+        <span className="capitalize">{metadata.mode}</span>
+        {metadata.llm_model && (
+          <>
+            <span className="text-gray-600">|</span>
+            <span>{metadata.llm_model}</span>
+          </>
+        )}
+        <span className="text-gray-600">|</span>
+        <span>
+          P1: <span className="capitalize">{metadata.p1_level}</span> vs P2:{' '}
+          <span className="capitalize">{metadata.p2_level}</span>
+        </span>
+      </div>
+
+      {/* Games table */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-700/50">
+              <th className="py-1.5 px-2 text-left">#</th>
+              <th className="py-1.5 px-2 text-left">Winner</th>
+              <th className="py-1.5 px-2 text-center">Turns</th>
+              <th className="py-1.5 px-2 text-center">P1 Life</th>
+              <th className="py-1.5 px-2 text-center">P2 Life</th>
+              <th className="py-1.5 px-2 text-center">Damage</th>
+              <th className="py-1.5 px-2 text-center">Effects</th>
+              <th className="py-1.5 px-2 text-center">Mulligan</th>
+              <th className="py-1.5 px-2 text-left">Condition</th>
+            </tr>
+          </thead>
+          <tbody>
+            {games.map((g) => {
+              const isP1Win = g.winner === 'p1';
+              return (
+                <tr
+                  key={g.game_idx}
+                  className="border-b border-gray-700/20 hover:bg-gray-700/20 transition-colors"
+                >
+                  <td className="py-1.5 px-2 text-gray-500">{g.game_idx}</td>
+                  <td className="py-1.5 px-2">
+                    <span
+                      className={`font-medium ${isP1Win ? 'text-green-400' : 'text-red-400'}`}
+                    >
+                      {g.winner.toUpperCase()}
+                    </span>
+                    {isP1Win && <span className="ml-1 text-green-600 text-[10px]">W</span>}
+                  </td>
+                  <td className="py-1.5 px-2 text-center text-gray-400">{g.turns}</td>
+                  <td className="py-1.5 px-2 text-center text-gray-400">{g.p1_life}</td>
+                  <td className="py-1.5 px-2 text-center text-gray-400">{g.p2_life}</td>
+                  <td className="py-1.5 px-2 text-center text-gray-400">
+                    {g.p1_damage_dealt}-{g.p2_damage_dealt}
+                  </td>
+                  <td className="py-1.5 px-2 text-center text-gray-400">
+                    {g.p1_effects_fired}-{g.p2_effects_fired}
+                  </td>
+                  <td className="py-1.5 px-2 text-center text-gray-400">
+                    {g.p1_mulligan && g.p2_mulligan
+                      ? 'Both'
+                      : g.p1_mulligan
+                        ? 'P1'
+                        : g.p2_mulligan
+                          ? 'P2'
+                          : '-'}
+                  </td>
+                  <td className="py-1.5 px-2 text-gray-400 capitalize">
+                    {g.win_condition.replace(/_/g, ' ')}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* AI Matchup Analysis */}
+      {!analysis && !analysisLoading && !analysisError && (
+        <button
+          onClick={handleAnalyze}
+          className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded transition-colors"
+        >
+          AI Matchup Analysis
+        </button>
+      )}
+
+      {analysisLoading && <Spinner text="Generating AI matchup analysis..." />}
+
+      {analysisError && (
+        <p className="text-xs text-red-400 py-2">Analysis error: {analysisError}</p>
+      )}
+
+      {analysis && <MatchupAnalysisPanel analysis={analysis} />}
+    </div>
+  );
+}
+
+function MatchupAnalysisPanel({ analysis }: { analysis: MatchupAnalysis }) {
+  return (
+    <div className="bg-gray-900/80 rounded-lg p-4 space-y-4">
+      {/* Main analysis */}
+      <p className="text-sm text-gray-300 leading-relaxed">{analysis.analysis}</p>
+
+      {/* Strengths */}
+      {analysis.strengths.length > 0 && (
+        <div>
+          <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-1.5">
+            Strengths
+          </h5>
+          <ul className="space-y-1">
+            {analysis.strengths.map((s, i) => (
+              <li key={i} className="text-xs text-green-300/80 flex items-start gap-1.5">
+                <span className="text-green-500 shrink-0 mt-0.5">+</span>
+                <span>{s}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Weaknesses */}
+      {analysis.weaknesses.length > 0 && (
+        <div>
+          <h5 className="text-xs font-semibold text-yellow-400 uppercase tracking-wider mb-1.5">
+            Weaknesses
+          </h5>
+          <ul className="space-y-1">
+            {analysis.weaknesses.map((w, i) => (
+              <li key={i} className="text-xs text-yellow-300/80 flex items-start gap-1.5">
+                <span className="text-yellow-500 shrink-0 mt-0.5">!</span>
+                <span>{w}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Overperformers */}
+      {analysis.overperformers.length > 0 && (
+        <div>
+          <h5 className="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1.5">
+            Overperformers
+          </h5>
+          <div className="space-y-1.5">
+            {analysis.overperformers.map((c) => (
+              <div
+                key={c.card_id}
+                className="flex items-start gap-2 bg-emerald-900/15 border border-emerald-900/30 rounded-md px-3 py-2"
+              >
+                <span className="text-xs font-medium text-emerald-300 shrink-0">{c.card_name}</span>
+                <span className="text-xs text-gray-400">{c.reason}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Underperformers */}
+      {analysis.underperformers.length > 0 && (
+        <div>
+          <h5 className="text-xs font-semibold text-orange-400 uppercase tracking-wider mb-1.5">
+            Underperformers
+          </h5>
+          <div className="space-y-1.5">
+            {analysis.underperformers.map((c) => (
+              <div
+                key={c.card_id}
+                className="flex items-start gap-2 bg-orange-900/15 border border-orange-900/30 rounded-md px-3 py-2"
+              >
+                <span className="text-xs font-medium text-orange-300 shrink-0">{c.card_name}</span>
+                <span className="text-xs text-gray-400">{c.reason}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Suggested swaps */}
+      {analysis.suggested_swaps.length > 0 && (
+        <div>
+          <h5 className="text-xs font-semibold text-purple-400 uppercase tracking-wider mb-1.5">
+            Suggested Swaps
+          </h5>
+          <div className="space-y-1.5">
+            {analysis.suggested_swaps.map((swap, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 bg-gray-800/60 border border-gray-700/50 rounded-md px-3 py-2 text-xs"
+              >
+                <span className="text-red-400 font-medium">{swap.remove}</span>
+                <span className="text-gray-600">&rarr;</span>
+                <span className="text-green-400 font-medium">{swap.add}</span>
+                <span className="text-gray-500 ml-auto text-[11px]">{swap.reason}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SimHistoryTab({
+  leaderId,
+  cardIds,
+}: {
+  leaderId: string;
+  cardIds: string[];
+}) {
   const { data, loading, error, retry } = useFetch(
     () => getDeckSimHistory(leaderId, cardIds).then((r) => r.simulations),
     [leaderId, cardIds],
   );
+
+  const [expandedSimId, setExpandedSimId] = useState<string | null>(null);
 
   if (loading) return <Spinner text="Loading simulation history..." />;
   if (error) return <ErrorBox message={error} onRetry={retry} />;
@@ -286,27 +542,49 @@ function SimHistoryTab({ leaderId, cardIds }: { leaderId: string; cardIds: strin
             : entry.win_rate >= 40
               ? 'text-yellow-400'
               : 'text-red-400';
+        const isExpanded = expandedSimId === entry.sim_id;
 
         return (
-          <div
-            key={entry.sim_id}
-            className="grid grid-cols-6 gap-2 items-center rounded-lg bg-gray-800/50 border border-gray-700/40 px-3 py-2.5 text-xs"
-          >
-            <span className="text-gray-300 truncate" title={entry.opponent_leader}>
-              {entry.opponent_leader}
-            </span>
-            <span className={`text-center font-semibold ${winColor}`}>
-              {entry.win_rate.toFixed(1)}%
-            </span>
-            <span className="text-center text-gray-400">{entry.num_games}</span>
-            <span className="text-center text-gray-400">{entry.avg_turns.toFixed(1)}</span>
-            <span className="text-center text-gray-400 capitalize">{entry.mode}</span>
-            <span className="text-right text-gray-500">
-              {new Date(entry.timestamp).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-              })}
-            </span>
+          <div key={entry.sim_id}>
+            <div
+              onClick={() => setExpandedSimId(isExpanded ? null : entry.sim_id)}
+              className={`grid grid-cols-6 gap-2 items-center rounded-lg px-3 py-2.5 text-xs cursor-pointer transition-colors ${
+                isExpanded
+                  ? 'bg-gray-700/60 border border-blue-500/40'
+                  : 'bg-gray-800/50 border border-gray-700/40 hover:bg-gray-700/30'
+              }`}
+            >
+              <span className="text-gray-300 truncate" title={entry.opponent_leader}>
+                {entry.opponent_leader}
+              </span>
+              <span className={`text-center font-semibold ${winColor}`}>
+                {entry.win_rate.toFixed(1)}%
+              </span>
+              <span className="text-center text-gray-400">{entry.num_games}</span>
+              <span className="text-center text-gray-400">{entry.avg_turns.toFixed(1)}</span>
+              <span className="text-center text-gray-400 capitalize">{entry.mode}</span>
+              <span className="text-right text-gray-500 flex items-center justify-end gap-1.5">
+                {new Date(entry.timestamp).toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                })}
+                <svg
+                  className={`w-3 h-3 text-gray-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </span>
+            </div>
+
+            {isExpanded && (
+              <div className="mt-1.5 ml-2">
+                <SimDetailPanel simId={entry.sim_id} leaderId={leaderId} cardIds={cardIds} />
+              </div>
+            )}
           </div>
         );
       })}

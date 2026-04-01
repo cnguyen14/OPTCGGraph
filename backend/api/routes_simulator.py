@@ -87,7 +87,9 @@ async def _store_sim_history(
     """Store a simulation result summary in Redis, keyed by deck composition."""
     deck1_card_ids = req.get("deck1_card_ids", [])
     leader_id = req.get("deck1_leader_id", "")
-    deck_hash = hashlib.md5(json.dumps(sorted(deck1_card_ids)).encode()).hexdigest()[:12]
+    deck_hash = hashlib.md5(json.dumps(sorted(deck1_card_ids)).encode()).hexdigest()[
+        :12
+    ]
     redis_key = f"deck-sims:{leader_id}:{deck_hash}"
 
     entry = {
@@ -99,6 +101,10 @@ async def _store_sim_history(
         "mode": req.get("mode", "virtual"),
         "model": req.get("llm_model", ""),
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        # Enhanced fields for detail view
+        "p1_leader": result.get("p1_leader", req.get("deck1_leader_id", "")),
+        "card_stats": result.get("card_stats", {}),
+        "enhanced_stats": result.get("enhanced_stats", {}),
     }
 
     r = await get_redis()
@@ -150,7 +156,9 @@ async def stream_simulation(sim_id: str) -> StreamingResponse:
                     try:
                         await _store_sim_history(sim_id, req, event["result"])
                     except Exception:
-                        logger.warning("Failed to store sim history in Redis", exc_info=True)
+                        logger.warning(
+                            "Failed to store sim history in Redis", exc_info=True
+                        )
 
                 yield f"data: {json.dumps(event)}\n\n"
 

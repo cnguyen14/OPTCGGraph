@@ -5,11 +5,14 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
+import anthropic
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from neo4j import AsyncDriver
 
+from backend.config import ANTHROPIC_API_KEY
 from backend.graph.connection import get_driver
 from backend.graph.queries import get_card_by_id
 from backend.ai.deck_validator import validate_deck
@@ -22,6 +25,8 @@ from backend.api.models import (
     DeckImproveResponse,
     Improvement,
     ImprovementCard,
+    MatchupAnalysisRequest,
+    MatchupAnalysisResponse,
     SaveDeckRequest,
     SavedDeckResponse,
     SavedDeckListItem,
@@ -49,7 +54,9 @@ class DeckValidateRequest(BaseModel):
 
 
 @router.post("/validate")
-async def validate(req: DeckValidateRequest, driver: AsyncDriver = Depends(_get_driver)):
+async def validate(
+    req: DeckValidateRequest, driver: AsyncDriver = Depends(_get_driver)
+):
     """Validate a deck against official OPTCG rules and competitive quality standards.
 
     Returns a detailed report with PASS/FAIL/WARNING for each check.
@@ -109,9 +116,7 @@ async def _fetch_cards(
     return cards, missing
 
 
-async def _compute_synergy_score(
-    driver: AsyncDriver, card_ids: list[str]
-) -> int:
+async def _compute_synergy_score(driver: AsyncDriver, card_ids: list[str]) -> int:
     """Compute a 0-100 synergy score based on SYNERGY edges between deck cards."""
     unique_ids = list(set(card_ids))
     async with driver.session() as session:
@@ -321,20 +326,24 @@ async def improve_deck(
 
                 if replacement:
                     win_pct = int(stats.win_correlation * 100)
-                    improvements.append(Improvement(
-                        action="swap",
-                        remove=ImprovementCard(
-                            card_id=card_id,
-                            card_name=card_name,
-                            reason=f"Low win correlation ({win_pct}%)",
-                        ),
-                        add=ImprovementCard(
-                            card_id=replacement["id"],
-                            card_name=replacement.get("name", ""),
-                            reason=replacement.get("benefit", "Better synergy with deck"),
-                        ),
-                        impact="high",
-                    ))
+                    improvements.append(
+                        Improvement(
+                            action="swap",
+                            remove=ImprovementCard(
+                                card_id=card_id,
+                                card_name=card_name,
+                                reason=f"Low win correlation ({win_pct}%)",
+                            ),
+                            add=ImprovementCard(
+                                card_id=replacement["id"],
+                                card_name=replacement.get("name", ""),
+                                reason=replacement.get(
+                                    "benefit", "Better synergy with deck"
+                                ),
+                            ),
+                            impact="high",
+                        )
+                    )
                     used_remove_ids.add(card_id)
 
         # Add remaining suggestions from validation warnings
@@ -345,22 +354,28 @@ async def improve_deck(
                 continue
 
             priority = sug.get("priority", "low")
-            impact = "high" if priority == "high" else ("medium" if priority == "medium" else "low")
+            impact = (
+                "high"
+                if priority == "high"
+                else ("medium" if priority == "medium" else "low")
+            )
 
-            improvements.append(Improvement(
-                action="swap",
-                remove=ImprovementCard(
-                    card_id=remove_id,
-                    card_name=sug.get("remove", {}).get("name", ""),
-                    reason=sug.get("remove", {}).get("reason", ""),
-                ),
-                add=ImprovementCard(
-                    card_id=add_id,
-                    card_name=sug.get("add", {}).get("name", ""),
-                    reason=sug.get("add", {}).get("benefit", ""),
-                ),
-                impact=impact,
-            ))
+            improvements.append(
+                Improvement(
+                    action="swap",
+                    remove=ImprovementCard(
+                        card_id=remove_id,
+                        card_name=sug.get("remove", {}).get("name", ""),
+                        reason=sug.get("remove", {}).get("reason", ""),
+                    ),
+                    add=ImprovementCard(
+                        card_id=add_id,
+                        card_name=sug.get("add", {}).get("name", ""),
+                        reason=sug.get("add", {}).get("benefit", ""),
+                    ),
+                    impact=impact,
+                )
+            )
             used_remove_ids.add(remove_id)
             used_add_ids.add(add_id)
 
@@ -392,6 +407,168 @@ async def improve_deck(
     except Exception as e:
         logger.exception("Deck improvement analysis failed")
         raise HTTPException(status_code=500, detail=f"Improvement analysis failed: {e}")
+
+
+@router.get("/sim-detail/{sim_id}")
+async def get_sim_detail(sim_id: str) -> dict:
+    """Get detailed simulation results from exported JSONL files."""
+    sim_dir = Path("data/simulations") / sim_id
+    if not sim_dir.exists():
+        raise HTTPException(404, "Simulation data not found")
+
+    metadata: dict = {}
+    games: list[dict] = []
+
+    meta_path = sim_dir / "metadata.json"
+    if meta_path.exists():
+        metadata = json.loads(meta_path.read_text())
+
+    games_path = sim_dir / "games.jsonl"
+    if games_path.exists():
+        with games_path.open() as f:
+            games = [json.loads(line) for line in f if line.strip()]
+
+    return {
+        "metadata": metadata,
+        "games": games,
+    }
+
+
+@router.post("/analyze-matchup", response_model=MatchupAnalysisResponse)
+async def analyze_matchup(req: MatchupAnalysisRequest) -> MatchupAnalysisResponse:
+    """AI-powered matchup analysis using simulation data."""
+    sim_dir = Path("data/simulations") / req.sim_id
+    if not sim_dir.exists():
+        raise HTTPException(404, "Simulation data not found")
+
+    # Read metadata
+    metadata: dict = {}
+    meta_path = sim_dir / "metadata.json"
+    if meta_path.exists():
+        metadata = json.loads(meta_path.read_text())
+
+    # Read games
+    games: list[dict] = []
+    games_path = sim_dir / "games.jsonl"
+    if games_path.exists():
+        with games_path.open() as f:
+            games = [json.loads(line) for line in f if line.strip()]
+
+    if not games:
+        raise HTTPException(404, "No game data found for this simulation")
+
+    # Compute matchup stats
+    wins = sum(1 for g in games if g.get("winner") == "p1")
+    num_games = len(games)
+    win_rate = round(wins / num_games * 100, 1) if num_games else 0.0
+    avg_turns = (
+        round(sum(g.get("total_turns", 0) for g in games) / num_games, 1)
+        if num_games
+        else 0.0
+    )
+
+    leader_id = req.leader_id
+    leader_name = metadata.get("p1_leader", leader_id)
+    opponent_leader = metadata.get("p2_leader", "Unknown")
+
+    # Build per-game summary
+    games_summary_lines: list[str] = []
+    for i, g in enumerate(games[:20], 1):  # Cap at 20 games for prompt size
+        winner = g.get("winner", "?")
+        turns = g.get("total_turns", "?")
+        games_summary_lines.append(
+            f"Game {i}: {'Win' if winner == 'p1' else 'Loss'}, {turns} turns"
+        )
+    games_summary = "\n".join(games_summary_lines)
+
+    # Card stats from metadata or games
+    card_stats = metadata.get("card_stats", {})
+    card_stats_lines: list[str] = []
+    for card_id, stats in card_stats.items():
+        played = stats.get("times_played", 0)
+        win_corr = stats.get("win_correlation", 0.0)
+        card_stats_lines.append(
+            f"  {card_id}: played {played}x, win correlation {win_corr:.2f}"
+        )
+    card_stats_summary = (
+        "\n".join(card_stats_lines)
+        if card_stats_lines
+        else "No card-level stats available"
+    )
+
+    enhanced_stats = metadata.get("enhanced_stats", {})
+    enhanced_stats_text = (
+        json.dumps(enhanced_stats, indent=2)
+        if enhanced_stats
+        else "No enhanced stats available"
+    )
+
+    prompt = f"""You are an OPTCG (One Piece TCG) deck analyst. Analyze this simulation data and provide improvement suggestions.
+
+Deck: {leader_name} (Leader ID: {leader_id})
+Opponent: {opponent_leader}
+Results: {win_rate}% win rate over {num_games} games, avg {avg_turns} turns
+
+Per-game breakdown:
+{games_summary}
+
+Card performance (cards played and their win correlation):
+{card_stats_summary}
+
+Enhanced stats:
+{enhanced_stats_text}
+
+Provide your analysis in this exact JSON format:
+{{
+  "analysis": "Overall matchup summary in 2-3 sentences",
+  "strengths": ["strength 1", "strength 2"],
+  "weaknesses": ["weakness 1", "weakness 2"],
+  "overperformers": [{{"card_id": "...", "card_name": "...", "reason": "..."}}],
+  "underperformers": [{{"card_id": "...", "card_name": "...", "reason": "..."}}],
+  "suggested_swaps": [{{"remove": "card_name", "add": "suggested_card", "reason": "..."}}]
+}}"""
+
+    try:
+        client = anthropic.AsyncAnthropic(
+            api_key=ANTHROPIC_API_KEY,
+            timeout=60.0,
+        )
+        response = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2048,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        raw_text = response.content[0].text.strip()
+
+        # Try to parse JSON from the response
+        try:
+            # Handle possible markdown code fences
+            json_text = raw_text
+            if "```json" in json_text:
+                json_text = json_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in json_text:
+                json_text = json_text.split("```")[1].split("```")[0].strip()
+
+            parsed = json.loads(json_text)
+            return MatchupAnalysisResponse(
+                analysis=parsed.get("analysis", ""),
+                strengths=parsed.get("strengths", []),
+                weaknesses=parsed.get("weaknesses", []),
+                overperformers=parsed.get("overperformers", []),
+                underperformers=parsed.get("underperformers", []),
+                suggested_swaps=parsed.get("suggested_swaps", []),
+            )
+        except (json.JSONDecodeError, IndexError):
+            # Fallback: return raw text as analysis
+            return MatchupAnalysisResponse(analysis=raw_text)
+
+    except anthropic.APIError as e:
+        logger.exception("Claude API error during matchup analysis")
+        raise HTTPException(502, f"AI analysis failed: {e}")
+    except Exception as e:
+        logger.exception("Matchup analysis failed")
+        raise HTTPException(500, f"Analysis failed: {e}")
 
 
 # --- Saved Decks (Redis) ---
@@ -482,15 +659,17 @@ async def list_saved_decks(client_id: str = Depends(_get_client_id)):
             continue
         data = json.loads(raw)
         card_count = sum(e["quantity"] for e in data.get("entries", []))
-        decks.append(SavedDeckListItem(
-            id=data["id"],
-            name=data["name"],
-            description=data.get("description", ""),
-            leader_id=data.get("leader_id"),
-            card_count=card_count,
-            created_at=data["created_at"],
-            updated_at=data["updated_at"],
-        ))
+        decks.append(
+            SavedDeckListItem(
+                id=data["id"],
+                name=data["name"],
+                description=data.get("description", ""),
+                leader_id=data.get("leader_id"),
+                card_count=card_count,
+                created_at=data["created_at"],
+                updated_at=data["updated_at"],
+            )
+        )
 
     # Cleanup stale index entries
     if stale_ids:

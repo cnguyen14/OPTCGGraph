@@ -402,7 +402,7 @@ export async function testApiKey(provider: string, apiKey: string): Promise<Test
 
 // === Deck Analysis / Improve API ===
 
-import type { DeckAnalysis, SimHistoryEntry, DeckImprovements } from '../types';
+import type { DeckAnalysis, SimHistoryEntry, DeckImprovements, SimDetail, MatchupAnalysis } from '../types';
 
 export async function analyzeDeck(
   leaderId: string,
@@ -443,6 +443,26 @@ export async function improveDeck(
       card_ids: cardIds,
       ...(simCardStats ? { sim_card_stats: simCardStats } : {}),
     }),
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+export async function fetchSimDetail(simId: string): Promise<SimDetail> {
+  const resp = await fetch(`${BASE_URL}/deck/sim-detail/${simId}`);
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+export async function analyzeMatchup(
+  leaderId: string,
+  cardIds: string[],
+  simId: string,
+): Promise<MatchupAnalysis> {
+  const resp = await fetch(`${BASE_URL}/deck/analyze-matchup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ leader_id: leaderId, card_ids: cardIds, sim_id: simId }),
   });
   if (!resp.ok) throw new Error(await resp.text());
   return resp.json();

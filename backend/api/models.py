@@ -231,6 +231,7 @@ class SwapSuggestion(BaseModel):
 
 # --- Saved Decks ---
 
+
 class DeckEntryPayload(BaseModel):
     card_id: str
     quantity: int = Field(..., ge=1, le=4)
@@ -343,3 +344,21 @@ class Improvement(BaseModel):
 class DeckImproveResponse(BaseModel):
     improvements: list[Improvement] = Field(default_factory=list)
     summary: str = ""
+
+
+# --- Matchup Analysis ---
+
+
+class MatchupAnalysisRequest(BaseModel):
+    leader_id: str
+    card_ids: list[str]
+    sim_id: str
+
+
+class MatchupAnalysisResponse(BaseModel):
+    analysis: str
+    strengths: list[str] = Field(default_factory=list)
+    weaknesses: list[str] = Field(default_factory=list)
+    overperformers: list[dict] = Field(default_factory=list)
+    underperformers: list[dict] = Field(default_factory=list)
+    suggested_swaps: list[dict] = Field(default_factory=list)
