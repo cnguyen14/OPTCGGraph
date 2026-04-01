@@ -2,6 +2,16 @@ import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { loadSavedDeck, updateDeck } from '../../lib/api';
 
+// Click card image to show large preview
+function CardPreviewOverlay({ image, name, onClose }: { image: string; name: string; onClose: () => void }) {
+  return createPortal(
+    <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center cursor-pointer" onClick={onClose}>
+      <img src={image} alt={name} className="max-h-[80vh] max-w-[90vw] rounded-xl shadow-2xl" />
+    </div>,
+    document.body,
+  );
+}
+
 interface SwapCandidate {
   card_id: string;
   name: string;
@@ -65,6 +75,7 @@ export default function SwapConfirmModal({
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [previewCard, setPreviewCard] = useState<{ image: string; name: string } | null>(null);
   const [success, setSuccess] = useState(false);
 
   // Load deck entries on mount
@@ -237,7 +248,8 @@ export default function SwapConfirmModal({
                           <img
                             src={swap.remove_image}
                             alt={swap.remove_name}
-                            className="w-12 h-[67px] rounded object-cover border-2 border-red-500/50 shrink-0"
+                            className="w-12 h-[67px] rounded object-cover border-2 border-red-500/50 shrink-0 cursor-pointer hover:opacity-80"
+                            onClick={() => setPreviewCard({ image: swap.remove_image, name: swap.remove_name })}
                           />
                         ) : (
                           <div className="w-12 h-[67px] rounded border-2 border-red-500/50 bg-gray-800 flex items-center justify-center shrink-0">
@@ -249,6 +261,7 @@ export default function SwapConfirmModal({
 
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] text-red-500/70 font-mono">{swap.remove}</span>
                             <span className="text-xs text-red-400 font-medium truncate">
                               {swap.remove_name}
                             </span>
@@ -300,9 +313,10 @@ export default function SwapConfirmModal({
                                   <img
                                     src={candidate.image}
                                     alt={candidate.name}
-                                    className={`w-10 h-[56px] rounded object-cover shrink-0 border-2 ${
+                                    className={`w-10 h-[56px] rounded object-cover shrink-0 border-2 cursor-pointer hover:opacity-80 ${
                                       isSelected ? 'border-green-500/60' : 'border-gray-600/40'
                                     }`}
+                                    onClick={(e) => { e.preventDefault(); setPreviewCard({ image: candidate.image, name: candidate.name }); }}
                                   />
                                 ) : (
                                   <div className="w-10 h-[56px] rounded border-2 border-gray-600/40 bg-gray-800 flex items-center justify-center shrink-0">
@@ -312,6 +326,7 @@ export default function SwapConfirmModal({
 
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2">
+                                    <span className="text-[10px] text-gray-500 font-mono">{candidate.card_id}</span>
                                     <span className={`text-xs font-medium truncate ${isSelected ? 'text-green-400' : 'text-gray-300'}`}>
                                       {candidate.name}
                                     </span>
@@ -390,5 +405,16 @@ export default function SwapConfirmModal({
     </div>
   );
 
-  return createPortal(modal, document.body);
+  return (
+    <>
+      {createPortal(modal, document.body)}
+      {previewCard && (
+        <CardPreviewOverlay
+          image={previewCard.image}
+          name={previewCard.name}
+          onClose={() => setPreviewCard(null)}
+        />
+      )}
+    </>
+  );
 }
