@@ -217,6 +217,8 @@ class EffectHandler:
         """KO opponent characters matching conditions."""
         targets = self._select_targets(tmpl, source, player, opponent)
         for target in targets[: tmpl.count]:
+            if target not in opponent.field:
+                continue
             opponent.field.remove(target)
             opponent.don_field += target.attached_don
             target.attached_don = 0
@@ -235,6 +237,8 @@ class EffectHandler:
         """Return opponent characters to hand."""
         targets = self._select_targets(tmpl, source, player, opponent)
         for target in targets[: tmpl.count]:
+            if target not in opponent.field:
+                continue
             opponent.field.remove(target)
             target.state = CardState.ACTIVE
             opponent.don_field += target.attached_don
@@ -291,6 +295,8 @@ class EffectHandler:
         else:
             best = max(top, key=lambda c: c.cost)
 
+        if best not in player.deck:
+            return
         player.deck.remove(best)
         player.hand.append(best)
         self.rng.shuffle(player.deck[: look_count - 1])
@@ -427,6 +433,8 @@ class EffectHandler:
         """Send opponent character to bottom of deck (stronger than bounce)."""
         targets = self._select_targets(tmpl, source, player, opponent)
         for target in targets[: tmpl.count]:
+            if target not in opponent.field:
+                continue
             opponent.field.remove(target)
             opponent.don_field += target.attached_don
             target.attached_don = 0
@@ -456,6 +464,8 @@ class EffectHandler:
         if not playable:
             return
         card = max(playable, key=lambda c: c.cost)
+        if card not in player.hand:
+            return
         player.hand.remove(card)
         card.state = CardState.RESTED
         player.field.append(card)
@@ -620,6 +630,8 @@ class EffectHandler:
         if not top:
             return
         best = max(top, key=lambda c: c.cost)
+        if best not in player.deck:
+            return
         player.deck.remove(best)
         player.hand.append(best)
         self.rng.shuffle(player.deck[:4])
@@ -630,6 +642,8 @@ class EffectHandler:
         if not chars:
             return
         lowest = min(chars, key=lambda c: c.cost)
+        if lowest not in opponent.field:
+            return
         opponent.field.remove(lowest)
         lowest.state = CardState.ACTIVE
         opponent.don_field += lowest.attached_don
@@ -646,6 +660,8 @@ class EffectHandler:
         if not targets:
             return
         target = min(targets, key=lambda c: c.effective_power)
+        if target not in opponent.field:
+            return
         opponent.field.remove(target)
         opponent.don_field += target.attached_don
         target.attached_don = 0
@@ -692,6 +708,8 @@ class EffectHandler:
         if not playable:
             return
         card = max(playable, key=lambda c: c.cost)
+        if card not in player.hand:
+            return
         player.hand.remove(card)
         card.state = CardState.RESTED
         player.field.append(card)

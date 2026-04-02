@@ -6,7 +6,7 @@ import type { SelectedDeck } from './DeckSelector';
 import SimulationProgress from './SimulationProgress';
 import LiveGameFeed from './LiveGameFeed';
 import SimulatorDashboard from './SimulatorDashboard';
-import { GlassCard, Button, Select, Input, Spinner } from '../../components/ui';
+import { Button, Select, Input, Spinner } from '../../components/ui';
 
 interface Props {
   currentDeckLeaderId?: string;
@@ -54,204 +54,255 @@ export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds 
   };
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
-        {/* Header */}
+    <div className="h-full flex gap-3 p-3 overflow-hidden">
+      {/* Left Sidebar — Settings & Controls */}
+      <div className="glass w-56 shrink-0 overflow-y-auto p-4 space-y-4 flex flex-col">
+        {/* Mode */}
         <div>
-          <h2 className="text-xl font-bold text-text-primary">Battle Simulator</h2>
-          <p className="text-sm text-text-secondary mt-1">
-            Test your deck against tournament decks. AI agents play real OPTCG games to find strengths and weaknesses.
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1.5 block">Mode</label>
+          <div className="flex gap-0.5">
+            <Button
+              variant={mode === 'virtual' ? 'primary' : 'secondary'}
+              size="sm"
+              onClick={() => setMode('virtual')}
+              disabled={!isIdle}
+              className="flex-1 !rounded-r-none"
+            >
+              Virtual
+            </Button>
+            <Button
+              variant={mode === 'real' ? 'primary' : 'secondary'}
+              size="sm"
+              onClick={() => setMode('real')}
+              disabled={!isIdle}
+              className="flex-1 !rounded-l-none"
+            >
+              Real (AI)
+            </Button>
+          </div>
+          <p className="text-[9px] text-text-muted mt-1">
+            {mode === 'virtual' ? 'Free, rule-based' : 'LLM-powered, costs credits'}
           </p>
         </div>
 
-        {/* Deck Selection */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <DeckSelector
-            label="Your Deck"
-            currentDeckLeaderId={currentDeckLeaderId}
-            currentDeckCardIds={currentDeckCardIds}
-            onSelect={setDeck1}
-            selected={deck1}
-          />
-          <DeckSelector
-            label="Opponent Deck"
-            onSelect={setDeck2}
-            selected={deck2}
-          />
-        </div>
-
-        {/* Mode Tabs + Controls */}
-        <div className="space-y-4">
-          {/* Mode Tabs */}
-          <div className="flex items-center gap-3">
-            <div className="flex bg-surface-2 rounded-lg p-0.5">
-              <button
-                onClick={() => setMode('virtual')}
-                disabled={!isIdle}
-                className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                  mode === 'virtual'
-                    ? 'glass text-text-primary shadow-sm'
-                    : 'text-text-muted hover:text-text-secondary'
-                }`}
-              >
-                Virtual (Free)
-              </button>
-              <button
-                onClick={() => setMode('real')}
-                disabled={!isIdle}
-                className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                  mode === 'real'
-                    ? 'bg-op-ocean text-white shadow-sm'
-                    : 'text-text-muted hover:text-text-secondary'
-                }`}
-              >
-                Real (AI)
-              </button>
-            </div>
-            <span className="text-[10px] text-text-muted">
-              {mode === 'virtual'
-                ? 'Fast rule-based simulation. Free, instant results.'
-                : 'LLM-powered AI agents. More realistic, costs API credits.'}
-            </span>
-            {mode === 'real' && hasBalance === false && (
-              <GlassCard variant="subtle" className="mt-1 px-3 py-1.5 text-xs text-red-400 border-red-700/40">
-                Insufficient Claude API balance. Please{' '}
-                <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener noreferrer" className="underline text-red-300 hover:text-red-200">
-                  add credits
-                </a>{' '}
-                or switch to Virtual (Free) mode.
-              </GlassCard>
-            )}
-          </div>
-
-          {/* Controls Row */}
-          <div className="flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-2">
-              <Input
-                type="number"
-                min={1}
-                max={200}
-                value={numGames}
-                onChange={(e) => {
-                  const v = parseInt(e.target.value, 10);
-                  if (!isNaN(v) && v >= 1 && v <= 200) setNumGames(v);
-                }}
-                className="!w-16 text-center text-xs"
-                disabled={!isIdle}
-                label="Games"
-              />
-              <span className="text-[10px] text-text-muted mt-5">1-200</span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Select
-                value={p1Level}
-                onChange={(e) => setP1Level(e.target.value)}
-                disabled={!isIdle}
-                label="Your Playstyle"
-                className="text-xs"
-              >
-                <option value="new">New Player</option>
-                <option value="amateur">Amateur</option>
-                <option value="pro">Professional</option>
-              </Select>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Select
-                value={p2Level}
-                onChange={(e) => setP2Level(e.target.value)}
-                disabled={!isIdle}
-                label="Bot Difficulty"
-                className="text-xs"
-              >
-                <option value="easy">Easy</option>
-                <option value="medium">Medium</option>
-                <option value="hard">Hard</option>
-              </Select>
-            </div>
-
+        {/* Settings */}
+        <div>
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1.5 block">Settings</label>
+          <div className="space-y-2">
+            <Input
+              type="number"
+              min={1}
+              max={200}
+              value={numGames}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                if (!isNaN(v) && v >= 1 && v <= 200) setNumGames(v);
+              }}
+              className="w-full text-center text-xs"
+              disabled={!isIdle}
+              label="Games (1-200)"
+            />
+            <Select
+              value={p1Level}
+              onChange={(e) => setP1Level(e.target.value)}
+              disabled={!isIdle}
+              label="Your Playstyle"
+              className="text-xs"
+            >
+              <option value="new">New Player</option>
+              <option value="amateur">Amateur</option>
+              <option value="pro">Professional</option>
+            </Select>
+            <Select
+              value={p2Level}
+              onChange={(e) => setP2Level(e.target.value)}
+              disabled={!isIdle}
+              label="Bot Difficulty"
+              className="text-xs"
+            >
+              <option value="easy">Easy</option>
+              <option value="medium">Medium</option>
+              <option value="hard">Hard</option>
+            </Select>
             {mode === 'real' && (
-              <div className="flex items-center gap-2">
-                <Select
-                  value={llmModel}
-                  onChange={(e) => setLlmModel(e.target.value)}
-                  disabled={!isIdle}
-                  label="Model"
-                  className="text-xs"
-                >
-                  <option value="claude-haiku-4-5-20251001">Haiku 4.5 (fast, cheap)</option>
-                  <option value="claude-sonnet-4-6">Sonnet 4.6 (balanced)</option>
-                  <option value="claude-opus-4-6">Opus 4.6 (smartest, slow)</option>
-                </Select>
-              </div>
-            )}
-
-            <div className="flex-1" />
-
-            {isIdle ? (
-              <Button
-                onClick={handleStart}
-                disabled={!canStart}
-                variant="primary"
-                size="md"
+              <Select
+                value={llmModel}
+                onChange={(e) => setLlmModel(e.target.value)}
+                disabled={!isIdle}
+                label="Model"
+                className="text-xs"
               >
-                {sim.status === 'complete' ? 'Run Again' : 'Start Battle'}
-              </Button>
-            ) : (
-              <div className="flex items-center gap-2 text-sm text-op-ocean">
-                <Spinner size="sm" />
-                {sim.status === 'loading'
-                  ? 'Loading decks...'
-                  : sim.progress.completed === 0
-                    ? 'Starting first game...'
-                    : `Game ${sim.progress.completed + 1} of ${sim.progress.total} in progress...`}
-              </div>
-            )}
-
-            {sim.status === 'complete' && (
-              <Button onClick={sim.reset} variant="ghost" size="sm">
-                Reset
-              </Button>
+                <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+                <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+                <option value="claude-opus-4-6">Opus 4.6</option>
+              </Select>
             )}
           </div>
         </div>
 
-        {/* Error */}
-        {sim.error && (
-          <GlassCard variant="subtle" className="p-3 text-xs text-red-400 border-red-700/40">
-            {sim.error}
-          </GlassCard>
-        )}
+        {/* Actions */}
+        <div className="space-y-2 mt-auto">
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-text-muted block">Actions</label>
+          {isIdle ? (
+            <Button
+              onClick={handleStart}
+              disabled={!canStart}
+              variant="primary"
+              size="sm"
+              className="w-full"
+            >
+              {sim.status === 'complete' ? 'Run Again' : 'Start Battle'}
+            </Button>
+          ) : (
+            <div className="flex items-center gap-2 text-xs text-op-ocean">
+              <Spinner size="sm" />
+              <span className="truncate">
+                {sim.status === 'loading'
+                  ? 'Loading...'
+                  : sim.progress.completed === 0
+                    ? 'Starting...'
+                    : `Game ${sim.progress.completed + 1}/${sim.progress.total}`}
+              </span>
+            </div>
+          )}
+          {sim.status === 'complete' && (
+            <Button onClick={sim.reset} variant="ghost" size="sm" className="w-full">
+              Reset
+            </Button>
+          )}
+          {sim.error && (
+            <p className="text-[10px] text-red-400 mt-1">{sim.error}</p>
+          )}
+          {mode === 'real' && hasBalance === false && (
+            <p className="text-[10px] text-red-400 mt-1">
+              No API balance.{' '}
+              <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener noreferrer" className="underline text-red-300 hover:text-red-200">
+                Add credits
+              </a>
+            </p>
+          )}
+        </div>
+      </div>
 
-        {/* Progress */}
-        {(sim.status === 'running' || sim.status === 'loading') && (
+      {/* Center — Battle Arena */}
+      <div className="flex-1 glass overflow-hidden min-w-0 flex flex-col">
+        <div className="shrink-0 px-4 py-2.5 border-b border-glass-border/50">
+          <p className="text-text-secondary text-xs font-semibold uppercase tracking-wider">Battle Arena</p>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {sim.status === 'idle' && (
+            <div className="flex-1 flex items-center justify-center h-full text-text-muted">
+              <div className="text-center">
+                <p className="text-lg">Ready to battle</p>
+                <p className="text-sm mt-1">Select decks and configure settings, then start a battle</p>
+              </div>
+            </div>
+          )}
+
+          {(sim.status === 'running' || sim.status === 'loading') && (
+            <div className="p-4 space-y-4">
+              <SimulationProgress
+                progress={sim.progress}
+                p1Leader={sim.p1Leader}
+                p2Leader={sim.p2Leader}
+                startedAt={sim.startedAt}
+              />
+              <LiveGameFeed
+                gameResults={sim.gameResults}
+                p1Leader={sim.p1Leader}
+                p2Leader={sim.p2Leader}
+                totalGames={sim.progress.total}
+                isRunning={sim.status === 'running'}
+              />
+            </div>
+          )}
+
+          {sim.status === 'error' && (
+            <div className="flex-1 flex items-center justify-center h-full text-text-muted">
+              <div className="text-center">
+                <p className="text-lg text-red-400">Simulation failed</p>
+                <p className="text-sm mt-1 text-red-400/70">{sim.error}</p>
+              </div>
+            </div>
+          )}
+
+          {sim.status === 'complete' && sim.result && (
+            <div className="p-4">
+              <SimulatorDashboard
+                result={sim.result}
+                gameResults={sim.gameResults}
+                simId={sim.simId}
+                p1Leader={sim.p1Leader}
+                p2Leader={sim.p2Leader}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Right Panel — Deck Selection & Battle Info */}
+      <div className="glass w-[380px] shrink-0 overflow-y-auto p-4 space-y-4 flex flex-col">
+        {/* Your Deck */}
+        <DeckSelector
+          label="Your Deck"
+          currentDeckLeaderId={currentDeckLeaderId}
+          currentDeckCardIds={currentDeckCardIds}
+          onSelect={setDeck1}
+          selected={deck1}
+          bare
+        />
+
+        <div className="border-t border-glass-border/50" />
+
+        {/* Opponent Deck */}
+        <DeckSelector
+          label="Opponent Deck"
+          onSelect={setDeck2}
+          selected={deck2}
+          bare
+        />
+
+        {/* Battle Status */}
+        {(sim.status === 'running' || sim.status === 'complete') && sim.progress.total > 0 && (
           <>
-            <SimulationProgress
-              progress={sim.progress}
-              p1Leader={sim.p1Leader}
-              p2Leader={sim.p2Leader}
-              startedAt={sim.startedAt}
-            />
-            <LiveGameFeed
-              gameResults={sim.gameResults}
-              p1Leader={sim.p1Leader}
-              p2Leader={sim.p2Leader}
-              totalGames={sim.progress.total}
-              isRunning={sim.status === 'running'}
-            />
+            <div className="border-t border-glass-border/50" />
+            <div>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1.5 block">Battle Score</label>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="glass-subtle p-2 rounded-lg text-center">
+                  <p className="text-base font-bold text-blue-400">{sim.progress.p1Wins}</p>
+                  <p className="text-[9px] text-text-muted uppercase">P1 Wins</p>
+                </div>
+                <div className="glass-subtle p-2 rounded-lg text-center">
+                  <p className="text-base font-bold text-text-muted">{sim.progress.draws}</p>
+                  <p className="text-[9px] text-text-muted uppercase">Draws</p>
+                </div>
+                <div className="glass-subtle p-2 rounded-lg text-center">
+                  <p className="text-base font-bold text-red-400">{sim.progress.p2Wins}</p>
+                  <p className="text-[9px] text-text-muted uppercase">P2 Wins</p>
+                </div>
+              </div>
+              {sim.progress.completed > 0 && (
+                <div className="mt-2 h-2 bg-surface-2 rounded-full overflow-hidden flex">
+                  <div
+                    className="bg-blue-500 transition-all"
+                    style={{ width: `${(sim.progress.p1Wins / sim.progress.completed) * 100}%` }}
+                  />
+                  <div
+                    className="bg-gray-500 transition-all"
+                    style={{ width: `${(sim.progress.draws / sim.progress.completed) * 100}%` }}
+                  />
+                  <div
+                    className="bg-red-500 transition-all"
+                    style={{ width: `${(sim.progress.p2Wins / sim.progress.completed) * 100}%` }}
+                  />
+                </div>
+              )}
+              <p className="text-[10px] text-text-muted text-center mt-1.5">
+                {sim.progress.completed} / {sim.progress.total} games
+              </p>
+            </div>
           </>
-        )}
-
-        {/* Results */}
-        {sim.status === 'complete' && sim.result && (
-          <SimulatorDashboard
-            result={sim.result}
-            gameResults={sim.gameResults}
-            simId={sim.simId}
-            p1Leader={sim.p1Leader}
-            p2Leader={sim.p2Leader}
-          />
         )}
       </div>
     </div>

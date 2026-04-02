@@ -271,7 +271,7 @@ function DeckListTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[
           className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center cursor-pointer"
           onClick={() => setPreviewImage(null)}
         >
-          <img src={previewImage} alt="" className="max-h-[80vh] max-w-[90vw] rounded-xl shadow-2xl" />
+          <img src={previewImage} alt="" className="max-h-[50vh] max-w-[60vw] rounded-xl shadow-2xl" />
         </div>
       )}
     </div>
@@ -339,8 +339,8 @@ function DeckMapTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[]
   }
 
   return (
-    <div>
-      <div className="flex justify-end mb-2">
+    <div className="h-full flex flex-col">
+      <div className="flex justify-end mb-2 shrink-0">
         <button
           onClick={() => setFullscreen(true)}
           className="text-[10px] text-blue-400 hover:text-blue-300"
@@ -348,7 +348,7 @@ function DeckMapTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[]
           Fullscreen
         </button>
       </div>
-      <div className="border border-gray-700 rounded-lg overflow-hidden flex flex-col" style={{ height: 'calc(100vh - 300px)', minHeight: '400px' }}>
+      <div className="border border-gray-700 rounded-lg overflow-hidden flex flex-col flex-1 min-h-0">
         <DeckMap leader={leader} entries={entries} onCardSelect={() => {}} />
       </div>
     </div>
@@ -407,7 +407,7 @@ function AnalysisTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[
 
       {/* Cost curve */}
       <div className="glass-subtle p-4">
-        <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+        <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
           Cost Curve
         </h4>
         <div className="space-y-1.5">
@@ -415,14 +415,14 @@ function AnalysisTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[
             .sort(([a], [b]) => Number(a) - Number(b))
             .map(([cost, count]) => (
               <div key={cost} className="flex items-center gap-2">
-                <span className="text-xs text-gray-400 w-8 text-right">{cost}</span>
+                <span className="text-xs text-text-secondary w-8 text-right">{cost}</span>
                 <div className="flex-1 h-4 bg-gray-700/50 rounded overflow-hidden">
                   <div
                     className="h-full bg-blue-500/60 rounded transition-all duration-300"
                     style={{ width: `${(count / maxCurveValue) * 100}%` }}
                   />
                 </div>
-                <span className="text-xs text-gray-400 w-6">{count}</span>
+                <span className="text-xs text-text-primary w-6">{count}</span>
               </div>
             ))}
         </div>
@@ -430,18 +430,18 @@ function AnalysisTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[
 
       {/* Card roles */}
       <div className="glass-subtle p-4">
-        <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+        <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
           Card Roles
         </h4>
         <div className="flex flex-wrap gap-2">
           {(Object.entries(card_roles) as [string, number][]).map(([role, count]) => (
             <span
               key={role}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-700/60 text-xs text-gray-300"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-700/60 text-xs text-text-primary"
             >
               <span>{roleIcons[role] ?? ''}</span>
               <span className="capitalize">{role.replace('_', ' ')}</span>
-              <span className="text-gray-500">({count})</span>
+              <span className="text-text-secondary">({count})</span>
             </span>
           ))}
         </div>
@@ -450,7 +450,7 @@ function AnalysisTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[
       {/* Warnings / Fails */}
       {validation.checks.filter((c) => c.status.toUpperCase() !== 'PASS').length > 0 && (
         <div className="glass-subtle p-4 space-y-2">
-          <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+          <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1">
             Issues
           </h4>
           {validation.checks
@@ -465,7 +465,7 @@ function AnalysisTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[
                 }`}
               >
                 <span className="font-medium shrink-0">{CHECK_LABELS[c.name] ?? c.name}</span>
-                <span className="text-gray-400">{c.message}</span>
+                <span className="text-text-secondary">{c.message}</span>
               </div>
             ))}
         </div>
@@ -494,12 +494,12 @@ function StatCard({
 
   return (
     <GlassCard variant="subtle" className="p-4">
-      <p className="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-1">
+      <p className="text-[10px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
         {label}
       </p>
       <p className={`text-lg font-bold ${colorMap[color]}`}>
         {value}
-        {sub && <span className="text-xs text-text-muted ml-0.5">{sub}</span>}
+        {sub && <span className="text-xs text-text-secondary ml-0.5">{sub}</span>}
       </p>
     </GlassCard>
   );
@@ -1049,6 +1049,12 @@ export default function DeckDetailPanel({
   onDeckChanged,
 }: DeckDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('decklist');
+  // Track which tabs have been visited so we lazy-mount them (avoids D3/SVG
+  // measuring 0-size containers when hidden via display:none).
+  const [mountedTabs, setMountedTabs] = useState<Set<TabId>>(new Set(['decklist']));
+  useEffect(() => {
+    setMountedTabs((prev) => (prev.has(activeTab) ? prev : new Set(prev).add(activeTab)));
+  }, [activeTab]);
   const [swapModalData, setSwapModalData] = useState<{ swaps: SwapWithCandidates[] } | null>(null);
 
   const handleApplySwaps = useCallback((swaps: SwapInput[]) => {
@@ -1106,20 +1112,31 @@ export default function DeckDetailPanel({
         ))}
       </div>
 
-      {/* Tab content */}
-      <div className="p-4">
-        {activeTab === 'decklist' && <DeckListTab leaderId={leaderId} cardIds={cardIds} />}
-        {activeTab === 'deckmap' && <DeckMapTab leaderId={leaderId} cardIds={cardIds} />}
-        {activeTab === 'analysis' && <AnalysisTab leaderId={leaderId} cardIds={cardIds} />}
-        {activeTab === 'history' && (
-          <SimHistoryTab
-            leaderId={leaderId}
-            cardIds={cardIds}
-            onOpenBuilder={onOpenBuilder}
-            onApplySwaps={handleApplySwaps}
-          />
-        )}
-        {activeTab === 'improve' && <ImproveTab leaderId={leaderId} cardIds={cardIds} />}
+      {/* Tab content — fixed height container with internal scroll per tab.
+           Lazy-mount on first visit, then keep mounted & hide via CSS. */}
+      <div className="p-4" style={{ height: 'calc(100vh - 300px)', minHeight: '400px' }}>
+        <div className={`h-full overflow-y-auto ${activeTab === 'decklist' ? '' : 'hidden'}`}>
+          {mountedTabs.has('decklist') && <DeckListTab leaderId={leaderId} cardIds={cardIds} />}
+        </div>
+        <div className={`h-full overflow-y-auto ${activeTab === 'deckmap' ? '' : 'hidden'}`}>
+          {mountedTabs.has('deckmap') && <DeckMapTab leaderId={leaderId} cardIds={cardIds} />}
+        </div>
+        <div className={`h-full overflow-y-auto ${activeTab === 'analysis' ? '' : 'hidden'}`}>
+          {mountedTabs.has('analysis') && <AnalysisTab leaderId={leaderId} cardIds={cardIds} />}
+        </div>
+        <div className={`h-full overflow-y-auto ${activeTab === 'history' ? '' : 'hidden'}`}>
+          {mountedTabs.has('history') && (
+            <SimHistoryTab
+              leaderId={leaderId}
+              cardIds={cardIds}
+              onOpenBuilder={onOpenBuilder}
+              onApplySwaps={handleApplySwaps}
+            />
+          )}
+        </div>
+        <div className={`h-full overflow-y-auto ${activeTab === 'improve' ? '' : 'hidden'}`}>
+          {mountedTabs.has('improve') && <ImproveTab leaderId={leaderId} cardIds={cardIds} />}
+        </div>
       </div>
 
       {/* Swap confirmation modal */}

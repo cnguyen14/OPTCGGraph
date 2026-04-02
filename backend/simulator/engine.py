@@ -815,6 +815,8 @@ class GameEngine:
                 self.effects.resolve_on_ko(
                     self, target, defender_player, attacker_player
                 )
+                if target not in defender_player.field:
+                    return  # Already removed by KO effect chain
                 defender_player.field.remove(target)
                 if self.effects.has_banish(target):
                     defender_player.deck.append(target)

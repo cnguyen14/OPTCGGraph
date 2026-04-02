@@ -16,6 +16,7 @@ interface Props {
   currentDeckCardIds?: string[];
   onSelect: (deck: SelectedDeck) => void;
   selected: SelectedDeck | null;
+  bare?: boolean;
 }
 
 type TabType = 'saved' | 'tournament';
@@ -26,6 +27,7 @@ export default function DeckSelector({
   currentDeckCardIds,
   onSelect,
   selected,
+  bare,
 }: Props) {
   const [tab, setTab] = useState<TabType>('saved');
   const [metaDecks, setMetaDecks] = useState<MetaDeckSummary[]>([]);
@@ -121,15 +123,15 @@ export default function DeckSelector({
       (d.description ?? '').toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
-  return (
-    <GlassCard className="p-4">
-      <h3 className="text-sm font-semibold text-text-primary mb-3">{label}</h3>
+  const content = (
+    <>
+      <label className={bare ? 'text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1.5 block' : 'text-sm font-semibold text-text-primary mb-3 block'}>{label}</label>
 
       {selected ? (
-        <GlassCard variant="subtle" className="flex items-center justify-between p-3">
-          <div>
-            <div className="text-sm font-medium text-text-primary">{selected.leaderName}</div>
-            <div className="text-[11px] text-text-secondary">{selected.source}</div>
+        <div className="glass-subtle flex items-center justify-between p-3 rounded-lg">
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-medium text-text-primary truncate">{selected.leaderName}</div>
+            <div className="text-[10px] text-text-secondary truncate">{selected.source}</div>
             <div className="text-[10px] text-text-muted">{selected.cardIds.length} cards</div>
           </div>
           <Button
@@ -139,14 +141,14 @@ export default function DeckSelector({
           >
             Change
           </Button>
-        </GlassCard>
+        </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {/* Use current deck button */}
           {currentDeckLeaderId && currentDeckCardIds && currentDeckCardIds.length === 50 && (
             <button
               onClick={handleUseCurrentDeck}
-              className="w-full text-left glass-subtle border-op-ocean/30 p-3 hover:bg-op-ocean/10 transition-colors"
+              className="w-full text-left glass-subtle border-op-ocean/30 p-2.5 rounded-lg hover:bg-op-ocean/10 transition-colors"
             >
               <div className="text-xs font-medium text-op-ocean">Use Your Current Deck</div>
               <div className="text-[10px] text-text-muted">{currentDeckCardIds.length} cards</div>
@@ -173,7 +175,7 @@ export default function DeckSelector({
                   : 'text-text-muted border-transparent hover:text-text-secondary'
               }`}
             >
-              Tournament Decks
+              Tournament
             </button>
           </div>
 
@@ -187,7 +189,7 @@ export default function DeckSelector({
           />
 
           {/* Deck list */}
-          <div className="max-h-48 overflow-y-auto space-y-1">
+          <div className="max-h-36 overflow-y-auto space-y-1">
             {loading && <p className="text-xs text-text-muted text-center py-2">Loading...</p>}
             {loadingDeck && <p className="text-xs text-op-ocean text-center py-2">Loading deck...</p>}
 
@@ -254,6 +256,16 @@ export default function DeckSelector({
           </div>
         </div>
       )}
+    </>
+  );
+
+  if (bare) {
+    return <div>{content}</div>;
+  }
+
+  return (
+    <GlassCard className="p-4">
+      {content}
     </GlassCard>
   );
 }

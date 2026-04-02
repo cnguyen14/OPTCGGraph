@@ -22,7 +22,7 @@ import type {
   ModelsResponse,
   ModelInfo,
 } from '../../types';
-import { GlassCard, Button, Badge, Spinner } from '../../components/ui';
+import { Button, Badge, Spinner } from '../../components/ui';
 
 // --- Helpers ---
 function timeAgo(iso: string | null): string {
@@ -57,16 +57,16 @@ function Section({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <GlassCard className="overflow-hidden">
+    <div className="border border-glass-border rounded-xl overflow-hidden">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-5 py-3 text-sm font-semibold text-text-primary hover:bg-surface-2 transition-colors"
+        className="w-full flex items-center justify-between px-5 py-3 text-sm font-semibold text-text-primary hover:bg-surface-1 transition-colors"
       >
         {title}
         <span className="text-text-muted text-xs">{open ? 'Collapse' : 'Expand'}</span>
       </button>
       {open && <div className="px-5 pb-5 space-y-4">{children}</div>}
-    </GlassCard>
+    </div>
   );
 }
 
@@ -142,10 +142,10 @@ function ApiKeyRow({
   };
 
   return (
-    <GlassCard variant="subtle" className="overflow-hidden">
+    <div className="border border-glass-border rounded-lg overflow-hidden">
       {/* Summary row */}
       <div
-        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-surface-2 transition-colors"
+        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-surface-1 transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
         <StatusDot ok={hasAnyKey} />
@@ -247,7 +247,7 @@ function ApiKeyRow({
           )}
         </div>
       )}
-    </GlassCard>
+    </div>
   );
 }
 
@@ -470,252 +470,237 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-4xl mx-auto px-6 py-6 space-y-4">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-bold text-text-primary">Settings</h2>
-            <p className="text-sm text-text-secondary mt-1">
-              System status, API keys, AI models, data management, and ban list.
-            </p>
-          </div>
-          <Button
-            onClick={loadAll}
-            variant="secondary"
-            size="sm"
-          >
-            Refresh All
-          </Button>
-        </div>
-
-        {/* Action toast */}
-        {actionMsg && (
-          <GlassCard variant="subtle" className="px-4 py-2 text-xs text-op-ocean border-op-ocean/40">
-            {actionMsg}
-          </GlassCard>
-        )}
-
-        {/* Section 1: System Status (infrastructure only) */}
-        <Section title="System Status">
+    <div className="h-full flex gap-3 p-3 overflow-hidden">
+      {/* Left Sidebar — Status & Quick Actions */}
+      <div className="glass w-56 shrink-0 overflow-y-auto p-4 space-y-4 flex flex-col">
+        {/* System Status */}
+        <div>
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1.5 block">System</label>
           {sysStatus && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-sm">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 text-xs">
                 <StatusDot ok={sysStatus.neo4j} />
-                <span className="text-gray-300">Neo4j</span>
-                <span className="text-gray-500 text-xs ml-auto font-mono">
-                  {sysStatus.neo4j_uri}
-                </span>
+                <span className="text-text-secondary">Neo4j</span>
               </div>
-              <div className="flex items-center gap-2 text-sm">
+              <div className="flex items-center gap-2 text-xs">
                 <StatusDot ok={sysStatus.redis} />
-                <span className="text-gray-300">Redis</span>
-                <span className="text-gray-500 text-xs ml-auto font-mono">
-                  {sysStatus.redis_url}
-                </span>
+                <span className="text-text-secondary">Redis</span>
               </div>
             </div>
           )}
-        </Section>
+        </div>
 
-        {/* Claude API Balance */}
-        <Section title="Claude API Balance">
+        {/* API Balance */}
+        <div>
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1.5 block">API Balance</label>
           {balance ? (
-            <div className={`flex items-center gap-3 p-3 rounded-lg ${
+            <div className={`flex items-center gap-2 p-2 rounded-lg text-xs ${
               balance.has_balance
                 ? 'bg-green-900/20 border border-green-700/30'
                 : 'bg-red-900/20 border border-red-700/30'
             }`}>
-              <div className={`w-3 h-3 rounded-full ${balance.has_balance ? 'bg-green-500' : 'bg-red-500'}`} />
-              <div>
-                <p className={`text-sm font-medium ${balance.has_balance ? 'text-green-400' : 'text-red-400'}`}>
-                  {balance.has_balance ? 'Balance Available' : 'Insufficient Balance'}
+              <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${balance.has_balance ? 'bg-green-500' : 'bg-red-500'}`} />
+              <div className="min-w-0 flex-1">
+                <p className={`font-medium ${balance.has_balance ? 'text-green-400' : 'text-red-400'}`}>
+                  {balance.has_balance ? 'Available' : 'Low'}
                 </p>
-                <p className="text-xs text-gray-400">{balance.message}</p>
               </div>
-              {!balance.has_balance && (
-                <a
-                  href="https://console.anthropic.com/settings/billing"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="ml-auto text-xs text-blue-400 hover:text-blue-300 underline"
-                >
-                  Add Credits
-                </a>
-              )}
             </div>
           ) : (
-            <p className="text-xs text-gray-500">Checking balance...</p>
+            <p className="text-[10px] text-text-muted">Checking...</p>
           )}
-        </Section>
+          {balance && !balance.has_balance && (
+            <a
+              href="https://console.anthropic.com/settings/billing"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[10px] text-blue-400 hover:text-blue-300 underline mt-1 block"
+            >
+              Add Credits
+            </a>
+          )}
+        </div>
 
-        {/* Section 2: API Keys (all providers) */}
-        <Section title="API Keys">
-          <p className="text-xs text-gray-500 -mt-1 mb-1">
-            Manage API keys for all services. Keys set here override .env values at runtime.
-          </p>
-          <div className="space-y-2">
-            {KEY_PROVIDERS.map((provider) => (
-              <ApiKeyRow
-                key={provider.key}
-                provider={provider}
-                hasEnvKey={sysStatus?.api_keys[provider.key] ?? false}
-                hasRuntimeKey={sysStatus?.runtime_keys[provider.key] ?? false}
-                onAction={showAction}
-                onStatusChange={refreshStatus}
-              />
-            ))}
-          </div>
-        </Section>
+        {/* Actions */}
+        <div className="space-y-2 mt-auto">
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-text-muted block">Actions</label>
+          <Button onClick={loadAll} variant="secondary" size="sm" className="w-full">
+            Refresh All
+          </Button>
+          <Button onClick={handleCrawl} variant="secondary" size="sm" className="w-full">
+            Re-crawl Cards
+          </Button>
+          <Button onClick={handlePriceUpdate} variant="secondary" size="sm" className="w-full">
+            Update Prices
+          </Button>
+          <Button onClick={handleBanCrawl} variant="danger" size="sm" className="w-full">
+            Update Ban List
+          </Button>
+          {actionMsg && (
+            <p className="text-[10px] text-op-ocean mt-1">{actionMsg}</p>
+          )}
+        </div>
+      </div>
 
-        {/* Section 3: AI Model Configuration */}
-        <Section title="AI Model Configuration">
-          <AIModelSelector
-            models={models}
-            sysStatus={sysStatus}
-            onModelSwitch={handleModelSwitch}
-            onAction={showAction}
-          />
-        </Section>
-
-        {/* Section 4: Data Dashboard */}
-        <Section title="Data Dashboard">
-          <div className="space-y-4">
-            {dbStats && (
-              <div>
-                <h4 className="text-xs text-gray-500 uppercase tracking-wider mb-2">
-                  Knowledge Graph
-                </h4>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {[
-                    { label: 'Cards', value: dbStats.cards },
-                    { label: 'Colors', value: dbStats.colors },
-                    { label: 'Families', value: dbStats.families },
-                    { label: 'Sets', value: dbStats.sets },
-                    { label: 'Keywords', value: dbStats.keywords },
-                    { label: 'Synergy Edges', value: dbStats.synergy_edges },
-                    { label: 'Mech. Synergy', value: dbStats.mech_synergy_edges },
-                    { label: 'Curves Into', value: dbStats.curves_into_edges },
-                  ].map((stat) => (
-                    <GlassCard
-                      key={stat.label}
-                      variant="subtle"
-                      className="px-3 py-2"
-                    >
-                      <div className="text-lg font-bold text-text-primary">
-                        {stat.value != null ? stat.value.toLocaleString() : '--'}
-                      </div>
-                      <div className="text-[10px] text-text-muted">{stat.label}</div>
-                    </GlassCard>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {crawlStatus && (
-              <div>
-                <h4 className="text-xs text-gray-500 uppercase tracking-wider mb-2">
-                  Data Sources
-                </h4>
-                <div className="space-y-2">
-                  {[
-                    { key: 'apitcg' as const, label: 'ApiTCG (Cards)', src: crawlStatus.apitcg },
-                    {
-                      key: 'optcgapi' as const,
-                      label: 'OptcgAPI (Prices)',
-                      src: crawlStatus.optcgapi,
-                    },
-                    {
-                      key: 'limitlesstcg' as const,
-                      label: 'LimitlessTCG (Meta)',
-                      src: crawlStatus.limitlesstcg,
-                    },
-                    { key: 'banned' as const, label: 'Bandai (Ban List)', src: crawlStatus.banned },
-                  ].map(({ key, label, src }) => (
-                    <div
-                      key={key}
-                      className="flex items-center justify-between text-sm glass-subtle px-3 py-2"
-                    >
-                      <span className="text-text-secondary">{label}</span>
-                      <div className="flex items-center gap-3 text-xs">
-                        <span className="text-gray-500">
-                          {src.count > 0 ? `${src.count} items` : '--'}
-                        </span>
-                        <span className={src.last_run ? 'text-gray-400' : 'text-gray-600'}>
-                          {timeAgo(src.last_run)}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="flex flex-wrap gap-2 pt-1">
-              <Button onClick={handleCrawl} variant="secondary" size="sm">
-                Re-crawl Cards
-              </Button>
-              <Button onClick={handlePriceUpdate} variant="secondary" size="sm">
-                Update Prices
-              </Button>
-              <Button onClick={handleBanCrawl} variant="danger" size="sm">
-                Update Ban List
-              </Button>
-            </div>
-          </div>
-        </Section>
-
-        {/* Section 5: Banned Cards */}
-        <Section
-          title={`Banned Cards (${bannedCards.length})`}
-          defaultOpen={bannedCards.length > 0}
-        >
-          {bannedCards.length === 0 ? (
-            <div className="text-center py-6">
-              <p className="text-sm text-gray-500 mb-2">No banned cards found in database.</p>
-              <Button onClick={handleBanCrawl} variant="danger" size="sm">
-                Fetch Ban List from Bandai
-              </Button>
-            </div>
-          ) : (
+      {/* Center — Main Settings */}
+      <div className="flex-1 glass overflow-hidden min-w-0 flex flex-col">
+        <div className="shrink-0 px-4 py-2.5 border-b border-glass-border/50">
+          <p className="text-text-secondary text-xs font-semibold uppercase tracking-wider">Settings</p>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* API Keys */}
+          <Section title="API Keys">
+            <p className="text-xs text-text-muted -mt-1 mb-1">
+              Manage API keys for all services. Keys set here override .env values at runtime.
+            </p>
             <div className="space-y-2">
-              {crawlStatus?.banned.last_run && (
-                <p className="text-xs text-gray-500">
-                  Last updated:{' '}
-                  {new Date(crawlStatus.banned.last_run).toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </p>
-              )}
-              <div className="divide-y divide-gray-800/50">
-                {bannedCards.map((card) => (
-                  <div key={card.id} className="flex items-center gap-3 py-2">
-                    {card.image_small ? (
-                      <img
-                        src={card.image_small}
-                        alt={card.name}
-                        className="w-10 h-14 object-cover rounded border border-gray-700/50"
-                      />
-                    ) : (
-                      <div className="w-10 h-14 bg-gray-800 rounded border border-gray-700/50 flex items-center justify-center">
-                        <span className="text-[8px] text-gray-600">{card.id}</span>
+              {KEY_PROVIDERS.map((provider) => (
+                <ApiKeyRow
+                  key={provider.key}
+                  provider={provider}
+                  hasEnvKey={sysStatus?.api_keys[provider.key] ?? false}
+                  hasRuntimeKey={sysStatus?.runtime_keys[provider.key] ?? false}
+                  onAction={showAction}
+                  onStatusChange={refreshStatus}
+                />
+              ))}
+            </div>
+          </Section>
+
+          {/* AI Model Configuration */}
+          <Section title="AI Model Configuration">
+            <AIModelSelector
+              models={models}
+              sysStatus={sysStatus}
+              onModelSwitch={handleModelSwitch}
+              onAction={showAction}
+            />
+          </Section>
+
+          {/* Data Dashboard */}
+          <Section title="Data Dashboard">
+            <div className="space-y-4">
+              {dbStats && (
+                <div>
+                  <h4 className="text-xs text-text-muted uppercase tracking-wider mb-2">
+                    Knowledge Graph
+                  </h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[
+                      { label: 'Cards', value: dbStats.cards },
+                      { label: 'Colors', value: dbStats.colors },
+                      { label: 'Families', value: dbStats.families },
+                      { label: 'Sets', value: dbStats.sets },
+                      { label: 'Keywords', value: dbStats.keywords },
+                      { label: 'Synergy Edges', value: dbStats.synergy_edges },
+                      { label: 'Mech. Synergy', value: dbStats.mech_synergy_edges },
+                      { label: 'Curves Into', value: dbStats.curves_into_edges },
+                    ].map((stat) => (
+                      <div
+                        key={stat.label}
+                        className="border border-glass-border rounded-lg px-3 py-2"
+                      >
+                        <div className="text-lg font-bold text-text-primary">
+                          {stat.value != null ? stat.value.toLocaleString() : '--'}
+                        </div>
+                        <div className="text-[10px] text-text-muted">{stat.label}</div>
                       </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-text-primary font-medium">{card.name || card.id}</div>
-                      <div className="text-xs text-gray-500">{card.id}</div>
-                    </div>
-                    <Badge variant="red">Banned</Badge>
+                    ))}
                   </div>
-                ))}
+                </div>
+              )}
+
+              {crawlStatus && (
+                <div>
+                  <h4 className="text-xs text-text-muted uppercase tracking-wider mb-2">
+                    Data Sources
+                  </h4>
+                  <div className="space-y-2">
+                    {[
+                      { key: 'apitcg' as const, label: 'ApiTCG (Cards)', src: crawlStatus.apitcg },
+                      {
+                        key: 'optcgapi' as const,
+                        label: 'OptcgAPI (Prices)',
+                        src: crawlStatus.optcgapi,
+                      },
+                      {
+                        key: 'limitlesstcg' as const,
+                        label: 'LimitlessTCG (Meta)',
+                        src: crawlStatus.limitlesstcg,
+                      },
+                      { key: 'banned' as const, label: 'Bandai (Ban List)', src: crawlStatus.banned },
+                    ].map(({ key, label, src }) => (
+                      <div
+                        key={key}
+                        className="flex items-center justify-between text-sm border border-glass-border rounded-lg px-3 py-2"
+                      >
+                        <span className="text-text-secondary">{label}</span>
+                        <div className="flex items-center gap-3 text-xs">
+                          <span className="text-text-muted">
+                            {src.count > 0 ? `${src.count} items` : '--'}
+                          </span>
+                          <span className={src.last_run ? 'text-text-secondary' : 'text-text-muted'}>
+                            {timeAgo(src.last_run)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </Section>
+        </div>
+      </div>
+
+      {/* Right Panel — Banned Cards */}
+      <div className="glass w-[380px] shrink-0 flex flex-col overflow-hidden">
+        <div className="shrink-0 px-4 py-2.5 border-b border-glass-border/50 flex items-center justify-between">
+          <p className="text-text-secondary text-xs font-semibold uppercase tracking-wider">
+            Banned Cards <span className="text-text-muted font-normal">({bannedCards.length})</span>
+          </p>
+          {crawlStatus?.banned.last_run && (
+            <span className="text-[10px] text-text-muted">
+              {timeAgo(crawlStatus.banned.last_run)}
+            </span>
+          )}
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {bannedCards.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center h-full text-text-muted">
+              <div className="text-center">
+                <p className="text-sm">No banned cards found</p>
+                <p className="text-xs mt-1 mb-3">Fetch the ban list from Bandai</p>
+                <Button onClick={handleBanCrawl} variant="danger" size="sm">
+                  Fetch Ban List
+                </Button>
               </div>
             </div>
+          ) : (
+            <div className="divide-y divide-glass-border/50">
+              {bannedCards.map((card) => (
+                <div key={card.id} className="flex items-center gap-3 px-4 py-2.5">
+                  {card.image_small ? (
+                    <img
+                      src={card.image_small}
+                      alt={card.name}
+                      className="w-10 h-14 object-cover rounded border border-glass-border shrink-0"
+                    />
+                  ) : (
+                    <div className="w-10 h-14 bg-surface-2 rounded border border-glass-border flex items-center justify-center shrink-0">
+                      <span className="text-[8px] text-text-muted">{card.id}</span>
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-text-primary font-medium truncate">{card.name || card.id}</div>
+                    <div className="text-[10px] text-text-muted">{card.id}</div>
+                  </div>
+                  <Badge variant="red">Banned</Badge>
+                </div>
+              ))}
+            </div>
           )}
-        </Section>
+        </div>
       </div>
     </div>
   );
