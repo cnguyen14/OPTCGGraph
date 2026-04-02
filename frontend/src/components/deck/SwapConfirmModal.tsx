@@ -74,6 +74,7 @@ export default function SwapConfirmModal({
     return initial;
   });
   const [deckEntries, setDeckEntries] = useState<{ card_id: string; quantity: number }[]>([]);
+  const [swapQty, setSwapQty] = useState<Record<number, number>>({});  // how many copies to swap per index
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +88,13 @@ export default function SwapConfirmModal({
       .then((deck) => {
         if (!cancelled) {
           setDeckEntries(deck.entries);
+          // Default swap quantity = how many copies of remove card in deck
+          const qtyInit: Record<number, number> = {};
+          swaps.forEach((swap, i) => {
+            const entry = deck.entries.find((e) => e.card_id === swap.remove);
+            qtyInit[i] = entry ? entry.quantity : 1;
+          });
+          setSwapQty(qtyInit);
           setLoading(false);
         }
       })
@@ -131,22 +139,22 @@ export default function SwapConfirmModal({
         const selectedCardId = selectedCandidates[i];
         if (!selectedCardId || swap.candidates.length === 0) continue;
 
-        // Remove: decrement quantity or remove entry
+        // Remove: decrement quantity by swapQty amount
+        const qty = swapQty[i] ?? 1;
         const removeIdx = newEntries.findIndex((e) => e.card_id === swap.remove);
         if (removeIdx !== -1) {
-          if (newEntries[removeIdx].quantity > 1) {
-            newEntries[removeIdx].quantity -= 1;
-          } else {
+          newEntries[removeIdx].quantity -= qty;
+          if (newEntries[removeIdx].quantity <= 0) {
             newEntries.splice(removeIdx, 1);
           }
         }
 
-        // Add: increment quantity if exists, add new entry if not
+        // Add: increment quantity by swapQty amount
         const addIdx = newEntries.findIndex((e) => e.card_id === selectedCardId);
         if (addIdx !== -1) {
-          newEntries[addIdx].quantity += 1;
+          newEntries[addIdx].quantity += qty;
         } else {
-          newEntries.push({ card_id: selectedCardId, quantity: 1 });
+          newEntries.push({ card_id: selectedCardId, quantity: qty });
         }
       }
 
@@ -286,13 +294,33 @@ export default function SwapConfirmModal({
                             </span>
                             <span className="text-[10px] text-red-500/70">(remove)</span>
                           </div>
-                          <div className="flex items-center gap-2 mt-1">
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
                             <span className="text-[10px] text-gray-500">Role needed:</span>
                             <span
                               className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${roleStyle.bg} ${roleStyle.text} ${roleStyle.border} capitalize`}
                             >
                               {swap.role_needed}
                             </span>
+                            {(() => {
+                              const maxQty = deckEntries.find((e) => e.card_id === swap.remove)?.quantity ?? 1;
+                              const qty = swapQty[i] ?? 1;
+                              return maxQty > 1 ? (
+                                <span className="flex items-center gap-1 ml-2">
+                                  <span className="text-[10px] text-gray-500">Swap</span>
+                                  <select
+                                    value={qty}
+                                    onChange={(e) => setSwapQty((prev) => ({ ...prev, [i]: parseInt(e.target.value, 10) }))}
+                                    className="bg-gray-800 border border-gray-600 rounded px-1 py-0 text-[10px] text-white w-10"
+                                    disabled={!enabled[i]}
+                                  >
+                                    {Array.from({ length: maxQty }, (_, k) => k + 1).map((n) => (
+                                      <option key={n} value={n}>{n}</option>
+                                    ))}
+                                  </select>
+                                  <span className="text-[10px] text-gray-500">of {maxQty} copies</span>
+                                </span>
+                              ) : null;
+                            })()}
                           </div>
                           <p className="text-[11px] text-gray-500 mt-1 italic">
                             &ldquo;{swap.reason}&rdquo;
