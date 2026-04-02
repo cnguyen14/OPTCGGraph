@@ -180,7 +180,7 @@ export default function SwapConfirmModal({
     } finally {
       setApplying(false);
     }
-  }, [deckEntries, swaps, enabled, selectedCandidates, deckId, deckName, leaderId, onSaved]);
+  }, [deckEntries, swaps, enabled, candidateQtys, swapQty, deckId, deckName, leaderId, onSaved]);
 
   const modal = (
     <div
