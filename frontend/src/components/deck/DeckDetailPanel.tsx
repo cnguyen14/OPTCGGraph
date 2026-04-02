@@ -317,11 +317,39 @@ function DeckMapTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[]
     return () => { cancelled = true; };
   }, [leaderId, cardIds]);
 
+  const [fullscreen, setFullscreen] = useState(false);
+
   if (loading) return <Spinner text="Loading deck map..." />;
 
+  if (fullscreen) {
+    return (
+      <>
+        <div className="fixed inset-0 bg-gray-950 z-50 flex flex-col">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700 bg-gray-900">
+            <span className="text-sm text-gray-300">Deck Map — {entries.size} cards</span>
+            <button onClick={() => setFullscreen(false)} className="text-gray-400 hover:text-white text-lg">&times;</button>
+          </div>
+          <div className="flex-1">
+            <DeckMap leader={leader} entries={entries} onCardSelect={() => {}} />
+          </div>
+        </div>
+      </>
+    );
+  }
+
   return (
-    <div className="h-[500px]">
-      <DeckMap leader={leader} entries={entries} onCardSelect={() => {}} />
+    <div>
+      <div className="flex justify-end mb-2">
+        <button
+          onClick={() => setFullscreen(true)}
+          className="text-[10px] text-blue-400 hover:text-blue-300"
+        >
+          Fullscreen
+        </button>
+      </div>
+      <div className="h-[600px] border border-gray-700 rounded-lg overflow-hidden">
+        <DeckMap leader={leader} entries={entries} onCardSelect={() => {}} />
+      </div>
     </div>
   );
 }
