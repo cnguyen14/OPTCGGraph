@@ -63,7 +63,7 @@ export default function SwapConfirmModal({
   onSaved,
   onSimulate,
 }: SwapConfirmModalProps) {
-  const [enabled, setEnabled] = useState<boolean[]>(() => swaps.map((s) => s.candidates.length > 0));
+  const [enabled, setEnabled] = useState<boolean[]>(() => swaps.map((s) => (s.candidates?.length ?? 0) > 0));
   // candidateQtys[swapIdx][card_id] = quantity to add for that candidate
   const [candidateQtys, setCandidateQtys] = useState<Record<number, Record<string, number>>>({});
   const [deckEntries, setDeckEntries] = useState<{ card_id: string; quantity: number }[]>([]);
@@ -90,7 +90,7 @@ export default function SwapConfirmModal({
             qtyInit[i] = qty;
             // Default: all copies go to first candidate
             const m: Record<string, number> = {};
-            swap.candidates.forEach((c, j) => { m[c.card_id] = j === 0 ? qty : 0; });
+            (swap.candidates ?? []).forEach((c, j) => { m[c.card_id] = j === 0 ? qty : 0; });
             cqInit[i] = m;
           });
           setSwapQty(qtyInit);
@@ -127,7 +127,7 @@ export default function SwapConfirmModal({
     }));
   }, []);
 
-  const enabledCount = enabled.filter((v, i) => v && swaps[i].candidates.length > 0).length;
+  const enabledCount = enabled.filter((v, i) => v && (swaps[i]?.candidates?.length ?? 0) > 0).length;
 
   const handleApply = useCallback(async () => {
     setApplying(true);
@@ -139,7 +139,7 @@ export default function SwapConfirmModal({
       for (let i = 0; i < swaps.length; i++) {
         if (!enabled[i]) continue;
         const swap = swaps[i];
-        if (swap.candidates.length === 0) continue;
+        if (!swap.candidates || swap.candidates.length === 0) continue;
 
         // Calculate total adds from candidate selections
         const selections = candidateQtys[i] ?? {};
@@ -259,7 +259,7 @@ export default function SwapConfirmModal({
               </p>
 
               {swaps.map((swap, i) => {
-                const hasCandidates = swap.candidates.length > 0;
+                const hasCandidates = (swap.candidates?.length ?? 0) > 0;
                 const roleStyle = getRoleStyle(swap.role_needed);
 
                 return (
@@ -359,7 +359,7 @@ export default function SwapConfirmModal({
                           );
                         })()}
                         <div className="rounded-lg border border-gray-700 bg-gray-800/40 divide-y divide-gray-700/50">
-                          {swap.candidates.map((candidate) => {
+                          {(swap.candidates ?? []).map((candidate) => {
                             const qty = candidateQtys[i]?.[candidate.card_id] ?? 0;
                             const isActive = qty > 0;
                             return (
