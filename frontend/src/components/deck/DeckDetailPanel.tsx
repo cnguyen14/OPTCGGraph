@@ -972,14 +972,24 @@ export default function DeckDetailPanel({
   const [swapModalData, setSwapModalData] = useState<{ swaps: SwapWithCandidates[] } | null>(null);
 
   const handleApplySwaps = useCallback((swaps: SwapInput[]) => {
-    const swapsWithCandidates: SwapWithCandidates[] = swaps.map((s) => ({
-      remove: s.remove,
-      remove_name: s.remove_name ?? s.remove,
-      remove_image: s.remove_image ?? '',
-      role_needed: s.role_needed ?? '',
-      reason: s.reason,
-      candidates: s.candidates ?? [],
-    }));
+    const swapsWithCandidates: SwapWithCandidates[] = swaps
+      .filter((s) => Array.isArray(s.candidates) && s.candidates.length > 0)
+      .map((s) => ({
+        remove: s.remove ?? '',
+        remove_name: s.remove_name ?? s.remove ?? 'Unknown',
+        remove_image: s.remove_image ?? '',
+        role_needed: s.role_needed ?? '',
+        reason: s.reason ?? '',
+        candidates: (s.candidates ?? []).map((c) => ({
+          ...c,
+          power: c.power ?? 0,
+          cost: c.cost ?? 0,
+          counter: c.counter ?? 0,
+          synergy_score: c.synergy_score ?? 0,
+          image: c.image ?? '',
+        })),
+      }));
+    if (swapsWithCandidates.length === 0) return;
     setSwapModalData({ swaps: swapsWithCandidates });
   }, []);
 

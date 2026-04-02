@@ -16,9 +16,9 @@ interface SwapCandidate {
   card_id: string;
   name: string;
   image: string;
-  power: number;
-  cost: number;
-  counter: number;
+  power: number | null;
+  cost: number | null;
+  counter: number | null;
   synergy_score: number;
 }
 
@@ -406,14 +406,14 @@ export default function SwapConfirmModal({
                                   </div>
                                   <div className="flex items-center gap-3 mt-0.5">
                                     <span className="text-[10px] text-gray-500">
-                                      Cost {candidate.cost}
+                                      Cost {candidate.cost ?? 0}
                                     </span>
                                     <span className="text-[10px] text-gray-500">
-                                      Power {candidate.power}
+                                      Power {candidate.power ?? 0}
                                     </span>
-                                    {candidate.counter > 0 && (
+                                    {(candidate.counter ?? 0) > 0 && (
                                       <span className="text-[10px] text-gray-500">
-                                        Counter +{candidate.counter}
+                                        Counter +{candidate.counter ?? 0}
                                       </span>
                                     )}
                                   </div>
