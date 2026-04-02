@@ -64,15 +64,8 @@ export default function SwapConfirmModal({
   onSimulate,
 }: SwapConfirmModalProps) {
   const [enabled, setEnabled] = useState<boolean[]>(() => swaps.map((s) => s.candidates.length > 0));
-  const [selectedCandidates, setSelectedCandidates] = useState<Record<number, string>>(() => {
-    const initial: Record<number, string> = {};
-    swaps.forEach((swap, i) => {
-      if (swap.candidates.length > 0) {
-        initial[i] = swap.candidates[0].card_id;
-      }
-    });
-    return initial;
-  });
+  // candidateQtys[swapIdx][card_id] = quantity to add for that candidate
+  const [candidateQtys, setCandidateQtys] = useState<Record<number, Record<string, number>>>({});
   const [deckEntries, setDeckEntries] = useState<{ card_id: string; quantity: number }[]>([]);
   const [swapQty, setSwapQty] = useState<Record<number, number>>({});  // how many copies to swap per index
   const [loading, setLoading] = useState(true);
@@ -90,11 +83,18 @@ export default function SwapConfirmModal({
           setDeckEntries(deck.entries);
           // Default swap quantity = how many copies of remove card in deck
           const qtyInit: Record<number, number> = {};
+          const cqInit: Record<number, Record<string, number>> = {};
           swaps.forEach((swap, i) => {
             const entry = deck.entries.find((e) => e.card_id === swap.remove);
-            qtyInit[i] = entry ? entry.quantity : 1;
+            const qty = entry ? entry.quantity : 1;
+            qtyInit[i] = qty;
+            // Default: all copies go to first candidate
+            const m: Record<string, number> = {};
+            swap.candidates.forEach((c, j) => { m[c.card_id] = j === 0 ? qty : 0; });
+            cqInit[i] = m;
           });
           setSwapQty(qtyInit);
+          setCandidateQtys(cqInit);
           setLoading(false);
         }
       })
@@ -120,8 +120,11 @@ export default function SwapConfirmModal({
     setEnabled((prev) => prev.map((v, i) => (i === index ? !v : v)));
   }, []);
 
-  const selectCandidate = useCallback((swapIndex: number, cardId: string) => {
-    setSelectedCandidates((prev) => ({ ...prev, [swapIndex]: cardId }));
+  const setCandidateQty = useCallback((swapIdx: number, cardId: string, qty: number) => {
+    setCandidateQtys((prev) => ({
+      ...prev,
+      [swapIdx]: { ...prev[swapIdx], [cardId]: Math.max(0, qty) },
+    }));
   }, []);
 
   const enabledCount = enabled.filter((v, i) => v && swaps[i].candidates.length > 0).length;
@@ -136,25 +139,31 @@ export default function SwapConfirmModal({
       for (let i = 0; i < swaps.length; i++) {
         if (!enabled[i]) continue;
         const swap = swaps[i];
-        const selectedCardId = selectedCandidates[i];
-        if (!selectedCardId || swap.candidates.length === 0) continue;
+        if (swap.candidates.length === 0) continue;
 
-        // Remove: decrement quantity by swapQty amount
-        const qty = swapQty[i] ?? 1;
+        // Calculate total adds from candidate selections
+        const selections = candidateQtys[i] ?? {};
+        const totalAdds = Object.values(selections).reduce((s, v) => s + v, 0);
+        if (totalAdds === 0) continue;
+
+        // Remove: decrement quantity by total adds
         const removeIdx = newEntries.findIndex((e) => e.card_id === swap.remove);
         if (removeIdx !== -1) {
-          newEntries[removeIdx].quantity -= qty;
+          newEntries[removeIdx].quantity -= totalAdds;
           if (newEntries[removeIdx].quantity <= 0) {
             newEntries.splice(removeIdx, 1);
           }
         }
 
-        // Add: increment quantity by swapQty amount
-        const addIdx = newEntries.findIndex((e) => e.card_id === selectedCardId);
-        if (addIdx !== -1) {
-          newEntries[addIdx].quantity += qty;
-        } else {
-          newEntries.push({ card_id: selectedCardId, quantity: qty });
+        // Add: each selected candidate by its quantity
+        for (const [cardId, addQty] of Object.entries(selections)) {
+          if (addQty <= 0) continue;
+          const addIdx = newEntries.findIndex((e) => e.card_id === cardId);
+          if (addIdx !== -1) {
+            newEntries[addIdx].quantity += addQty;
+          } else {
+            newEntries.push({ card_id: cardId, quantity: addQty });
+          }
         }
       }
 
@@ -332,36 +341,53 @@ export default function SwapConfirmModal({
                     {/* Candidates selection */}
                     {hasCandidates ? (
                       <div className="mt-3 ml-7">
-                        <p className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-2">
-                          Select replacement:
-                        </p>
+                        {(() => {
+                          const totalSwap = swapQty[i] ?? 1;
+                          const allocated = Object.values(candidateQtys[i] ?? {}).reduce((s, v) => s + v, 0);
+                          const remaining = totalSwap - allocated;
+                          return (
+                            <div className="flex items-center gap-2 mb-2">
+                              <p className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">
+                                Select replacement{totalSwap > 1 ? 's' : ''}:
+                              </p>
+                              {totalSwap > 1 && (
+                                <span className={`text-[10px] font-medium ${remaining === 0 ? 'text-green-400' : 'text-amber-400'}`}>
+                                  {allocated}/{totalSwap} allocated
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                         <div className="rounded-lg border border-gray-700 bg-gray-800/40 divide-y divide-gray-700/50">
                           {swap.candidates.map((candidate) => {
-                            const isSelected = selectedCandidates[i] === candidate.card_id;
+                            const qty = candidateQtys[i]?.[candidate.card_id] ?? 0;
+                            const isActive = qty > 0;
                             return (
-                              <label
+                              <div
                                 key={candidate.card_id}
-                                className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors ${
-                                  isSelected
+                                className={`flex items-center gap-3 px-3 py-2.5 transition-colors ${
+                                  isActive
                                     ? 'bg-blue-900/20 border-l-2 border-l-blue-500'
                                     : 'hover:bg-gray-700/30 border-l-2 border-l-transparent'
                                 }`}
                               >
-                                <input
-                                  type="radio"
-                                  name={`swap-candidate-${i}`}
-                                  checked={isSelected}
-                                  onChange={() => selectCandidate(i, candidate.card_id)}
+                                <select
+                                  value={qty}
+                                  onChange={(e) => setCandidateQty(i, candidate.card_id, parseInt(e.target.value, 10))}
                                   disabled={!enabled[i]}
-                                  className="w-3.5 h-3.5 border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 shrink-0"
-                                />
+                                  className="bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-[10px] text-white w-10 shrink-0"
+                                >
+                                  {Array.from({ length: (swapQty[i] ?? 1) + 1 }, (_, k) => k).map((n) => (
+                                    <option key={n} value={n}>{n}x</option>
+                                  ))}
+                                </select>
 
                                 {candidate.image ? (
                                   <img
                                     src={candidate.image}
                                     alt={candidate.name}
                                     className={`w-10 h-[56px] rounded object-cover shrink-0 border-2 cursor-pointer hover:opacity-80 ${
-                                      isSelected ? 'border-green-500/60' : 'border-gray-600/40'
+                                      isActive ? 'border-green-500/60' : 'border-gray-600/40'
                                     }`}
                                     onClick={(e) => { e.preventDefault(); setPreviewCard({ image: candidate.image, name: candidate.name }); }}
                                   />
@@ -374,7 +400,7 @@ export default function SwapConfirmModal({
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2">
                                     <span className="text-[10px] text-gray-500 font-mono">{candidate.card_id}</span>
-                                    <span className={`text-xs font-medium truncate ${isSelected ? 'text-green-400' : 'text-gray-300'}`}>
+                                    <span className={`text-xs font-medium truncate ${isActive ? 'text-green-400' : 'text-gray-300'}`}>
                                       {candidate.name}
                                     </span>
                                   </div>
@@ -404,7 +430,7 @@ export default function SwapConfirmModal({
                                     </span>
                                   </div>
                                 </div>
-                              </label>
+                              </div>
                             );
                           })}
                         </div>
