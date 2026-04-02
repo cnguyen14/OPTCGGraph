@@ -347,7 +347,7 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
     const maxY = Math.max(...allY) + cardH + 40;
     const contentW = maxX - minX;
     const contentH = maxY - minY;
-    const scale = Math.min(width / contentW, height / contentH, 1.2);
+    const scale = Math.min(width / contentW, height / contentH, 2.5);
     const tx = (width - contentW * scale) / 2 - minX * scale;
     const ty = (height - contentH * scale) / 2 - minY * scale;
 
