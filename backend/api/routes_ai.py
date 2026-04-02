@@ -8,10 +8,10 @@ from neo4j import AsyncDriver
 
 from backend.api.models import ChatRequest
 from backend.graph.connection import get_driver
-from backend.agent.loop import run_agent, run_agent_streaming
-from backend.agent.providers import get_provider
+from backend.agent.runtime import OPTCGAgent
+from backend.agent.types import DeckContext, ModelConfig
 from backend.agent.session import Session
-from backend.agent.ag_ui import stream_agent_response, stream_from_queue
+from backend.agent.ag_ui import stream_from_queue
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -20,16 +20,39 @@ async def _get_driver() -> AsyncDriver:
     return await get_driver()
 
 
+def _build_agent(session: Session) -> OPTCGAgent:
+    """Create an OPTCGAgent from session config."""
+    from backend.services.settings_service import get_active_api_key
+
+    config = session.model_config
+    api_key = get_active_api_key(config["provider"])
+    return OPTCGAgent(
+        model_config=ModelConfig(
+            provider=config["provider"],
+            model=config["model"],
+            api_key=api_key or None,
+        ),
+    )
+
+
+def _build_deck_context(req: ChatRequest) -> DeckContext:
+    """Build DeckContext from request."""
+    if req.deck_card_ids:
+        return DeckContext(
+            leader_id=req.leader_id,
+            card_ids=tuple(req.deck_card_ids),
+            total_cost=len(req.deck_card_ids),
+        )
+    return DeckContext(leader_id=req.leader_id)
+
+
 @router.post("/chat")
 async def chat(req: ChatRequest, driver: AsyncDriver = Depends(_get_driver)):
     """AI chat endpoint with real-time AG-UI SSE streaming."""
-    # Get or create session
     session = Session(req.session_id)
 
     if req.leader_id:
         session.selected_leader = req.leader_id
-
-    # Sync frontend deck state into session
     if req.deck_card_ids:
         session.current_deck = {
             "leader": req.leader_id,
@@ -37,32 +60,29 @@ async def chat(req: ChatRequest, driver: AsyncDriver = Depends(_get_driver)):
             "total_cost": len(req.deck_card_ids),
         }
 
-    # Get provider from session config, with runtime API key support
-    from backend.api.routes_settings import get_active_api_key
-    config = session.model_config
-    api_key = get_active_api_key(config["provider"])
-    provider = get_provider(config["provider"], config["model"], api_key=api_key or None)
-
-    # Create queue for real-time event streaming
+    agent = _build_agent(session)
+    deck_context = _build_deck_context(req)
     queue: asyncio.Queue = asyncio.Queue()
 
-    # Start agent in background — pushes events to queue as they happen
-    agent_task = asyncio.create_task(run_agent_streaming(
-        user_message=req.message,
-        provider=provider,
+    agent_task = asyncio.create_task(agent.run(
+        message=req.message,
         driver=driver,
-        event_queue=queue,
         conversation_history=session.get_messages(),
-        current_deck=session.current_deck,
+        current_deck=deck_context,
         selected_leader=session.selected_leader,
+        active_skill=session.model_config.get("active_skill"),
+        event_queue=queue,
     ))
 
     async def generate():
         async for event in stream_from_queue(queue):
             yield event
-        # After streaming completes, save session from agent result
         result = await agent_task
-        session.save_messages(result["messages"])
+        session.save_messages(list(result.messages))
+        # Persist active skill for context continuity
+        config = session.model_config
+        config["active_skill"] = result.active_skill
+        session.model_config = config
 
     return StreamingResponse(
         generate(),
@@ -82,8 +102,6 @@ async def chat_sync(req: ChatRequest, driver: AsyncDriver = Depends(_get_driver)
 
     if req.leader_id:
         session.selected_leader = req.leader_id
-
-    # Sync frontend deck state into session
     if req.deck_card_ids:
         session.current_deck = {
             "leader": req.leader_id,
@@ -91,25 +109,26 @@ async def chat_sync(req: ChatRequest, driver: AsyncDriver = Depends(_get_driver)
             "total_cost": len(req.deck_card_ids),
         }
 
-    from backend.api.routes_settings import get_active_api_key
-    config = session.model_config
-    api_key = get_active_api_key(config["provider"])
-    provider = get_provider(config["provider"], config["model"], api_key=api_key or None)
+    agent = _build_agent(session)
+    deck_context = _build_deck_context(req)
 
-    result = await run_agent(
-        user_message=req.message,
-        provider=provider,
+    result = await agent.run(
+        message=req.message,
         driver=driver,
         conversation_history=session.get_messages(),
-        current_deck=session.current_deck,
+        current_deck=deck_context,
         selected_leader=session.selected_leader,
+        active_skill=session.model_config.get("active_skill"),
     )
 
-    session.save_messages(result["messages"])
+    session.save_messages(list(result.messages))
+    config = session.model_config
+    config["active_skill"] = result.active_skill
+    session.model_config = config
 
     # Build tool call summaries for frontend display
     tool_summaries = []
-    for tc in result["tool_calls"]:
+    for tc in result.tool_calls:
         name = tc["name"]
         inp = tc.get("input", {})
         if name == "get_card":
@@ -128,9 +147,10 @@ async def chat_sync(req: ChatRequest, driver: AsyncDriver = Depends(_get_driver)
             tool_summaries.append(f"Used {name}")
 
     return {
-        "text": result["text"],
+        "text": result.text,
         "session_id": session.id,
-        "tool_calls_count": len(result["tool_calls"]),
+        "active_skill": result.active_skill,
+        "tool_calls_count": len(result.tool_calls),
         "tool_summaries": tool_summaries,
-        "ui_updates": result["ui_updates"],
+        "ui_updates": list(result.ui_updates),
     }

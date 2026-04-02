@@ -2,8 +2,11 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from backend.core.exceptions import OPTCGError
 
 from backend.graph.connection import get_driver, close_driver
 from backend.storage.redis_client import get_redis, close_redis, verify_redis
@@ -44,6 +47,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Global exception handler for application errors
+@app.exception_handler(OPTCGError)
+async def optcg_error_handler(request: Request, exc: OPTCGError):
+    return JSONResponse(status_code=exc.status_code, content={"error": exc.message})
+
 
 # Mount routers
 app.include_router(graph_router)

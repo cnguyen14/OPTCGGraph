@@ -1,6 +1,6 @@
 """LLM provider abstraction — Claude (direct) and OpenRouter."""
 
-from typing import Protocol, Any
+from typing import Protocol
 import logging
 
 import anthropic

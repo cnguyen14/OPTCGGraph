@@ -42,5 +42,8 @@ docker-data/
 
 # Crawl cache (raw API responses)
 .crawl-cache/
+
+# Simulation data (generated locally)
+data/simulations/
 .playwright-mcp/
 .claude/worktrees/

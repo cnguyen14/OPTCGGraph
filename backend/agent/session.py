@@ -1,6 +1,5 @@
 """Session memory management — stores conversation history and deck state."""
 
-import json
 import uuid
 import logging
 from datetime import datetime

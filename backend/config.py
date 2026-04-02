@@ -1,38 +1,35 @@
-"""Application configuration loaded from environment variables."""
+"""Application configuration — re-export shim.
 
-import os
-from pathlib import Path
+All configuration now lives in backend.core.config (pydantic-settings).
+This file re-exports values so existing imports continue to work.
+"""
 
-from dotenv import load_dotenv
+from backend.core.config import get_settings as _get_settings
 
-# Load .env from project root
-_project_root = Path(__file__).resolve().parent.parent
-load_dotenv(_project_root / ".env")
-
+_s = _get_settings()
 
 # Data Sources
-APITCG_API_KEY: str = os.getenv("APITCG_API_KEY", "")
-APITCG_BASE_URL: str = "https://apitcg.com/api/one-piece/cards"
-
-OPTCGAPI_BASE_URL: str = "https://optcgapi.com/api"
+APITCG_API_KEY: str = _s.apitcg_api_key
+APITCG_BASE_URL: str = _s.apitcg_base_url
+OPTCGAPI_BASE_URL: str = _s.optcgapi_base_url
+OPTCGAPI_DELAY: float = _s.optcgapi_delay
+LIMITLESSTCG_BASE_URL: str = _s.limitlesstcg_base_url
+LIMITLESSTCG_DELAY: float = _s.limitlesstcg_delay
+APITCG_DELAY: float = _s.apitcg_delay
 
 # Neo4j
-NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-NEO4J_USER: str = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD", "optcg_graph_2026")
+NEO4J_URI: str = _s.neo4j_uri
+NEO4J_USER: str = _s.neo4j_user
+NEO4J_PASSWORD: str = _s.neo4j_password
 
 # Redis
-REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379")
+REDIS_URL: str = _s.redis_url
 
 # LLM Providers
-ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
-OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
-DEFAULT_PROVIDER: str = os.getenv("DEFAULT_PROVIDER", "claude")
-DEFAULT_MODEL: str = os.getenv("DEFAULT_MODEL", "claude-sonnet-4-20250514")
+ANTHROPIC_API_KEY: str = _s.anthropic_api_key
+OPENROUTER_API_KEY: str = _s.openrouter_api_key
+DEFAULT_PROVIDER: str = _s.default_provider
+DEFAULT_MODEL: str = _s.default_model
 
 # Crawl settings
-CRAWL_CACHE_DIR: Path = _project_root / ".crawl-cache"
-APITCG_DELAY: float = 1.0  # seconds between requests
-OPTCGAPI_DELAY: float = 1.5
-LIMITLESSTCG_DELAY: float = 2.0
-LIMITLESSTCG_BASE_URL: str = "https://onepiece.limitlesstcg.com"
+CRAWL_CACHE_DIR = _s.crawl_cache_dir
