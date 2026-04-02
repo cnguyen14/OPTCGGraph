@@ -347,7 +347,7 @@ function DeckMapTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[]
           Fullscreen
         </button>
       </div>
-      <div className="border border-gray-700 rounded-lg overflow-hidden" style={{ height: 'calc(100vh - 300px)', minHeight: '400px' }}>
+      <div className="border border-gray-700 rounded-lg overflow-hidden flex flex-col" style={{ height: 'calc(100vh - 300px)', minHeight: '400px' }}>
         <DeckMap leader={leader} entries={entries} onCardSelect={() => {}} />
       </div>
     </div>
