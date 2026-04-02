@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { analyzeDeck, getDeckSimHistory, improveDeck, fetchSimDetail, analyzeMatchup, fetchCard } from '../../lib/api';
-import type { SimHistoryEntry, DeckImprovement, MatchupAnalysis } from '../../types';
+import type { SimHistoryEntry, DeckImprovement, MatchupAnalysis, Card, DeckEntry } from '../../types';
 import SwapConfirmModal from './SwapConfirmModal';
 import type { SwapWithCandidates } from './SwapConfirmModal';
+import DeckMap from '../deck-builder/DeckMap';
 
-type TabId = 'decklist' | 'analysis' | 'history' | 'improve';
+type TabId = 'decklist' | 'deckmap' | 'analysis' | 'history' | 'improve';
 
 const CHECK_LABELS: Record<string, string> = {
   DECK_SIZE: 'Deck Size',
@@ -272,6 +273,55 @@ function DeckListTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[
           <img src={previewImage} alt="" className="max-h-[80vh] max-w-[90vw] rounded-xl shadow-2xl" />
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab: Deck Map (D3 synergy visualization)
+// ---------------------------------------------------------------------------
+
+function DeckMapTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[] }) {
+  const [leader, setLeader] = useState<Card | null>(null);
+  const [entries, setEntries] = useState<Map<string, DeckEntry>>(new Map());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const counts = new Map<string, number>();
+      for (const id of cardIds) counts.set(id, (counts.get(id) || 0) + 1);
+
+      try {
+        const ld = await fetchCard(leaderId);
+        if (!cancelled && ld) setLeader(ld as Card);
+      } catch { /* skip */ }
+
+      const entryMap = new Map<string, DeckEntry>();
+      await Promise.all(
+        [...counts.keys()].map(async (id) => {
+          try {
+            const card = await fetchCard(id);
+            if (!cancelled && card) {
+              entryMap.set(id, { card: card as Card, quantity: counts.get(id) || 1 });
+            }
+          } catch { /* skip */ }
+        }),
+      );
+      if (!cancelled) {
+        setEntries(entryMap);
+        setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [leaderId, cardIds]);
+
+  if (loading) return <Spinner text="Loading deck map..." />;
+
+  return (
+    <div className="h-[500px]">
+      <DeckMap leader={leader} entries={entries} onCardSelect={() => {}} />
     </div>
   );
 }
@@ -953,6 +1003,7 @@ function ImproveTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[]
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'decklist', label: 'Deck List' },
+  { id: 'deckmap', label: 'Deck Map' },
   { id: 'analysis', label: 'Analysis' },
   { id: 'history', label: 'Sim History' },
   { id: 'improve', label: 'Improve' },
@@ -1027,6 +1078,7 @@ export default function DeckDetailPanel({
       {/* Tab content */}
       <div className="p-4">
         {activeTab === 'decklist' && <DeckListTab leaderId={leaderId} cardIds={cardIds} />}
+        {activeTab === 'deckmap' && <DeckMapTab leaderId={leaderId} cardIds={cardIds} />}
         {activeTab === 'analysis' && <AnalysisTab leaderId={leaderId} cardIds={cardIds} />}
         {activeTab === 'history' && (
           <SimHistoryTab
