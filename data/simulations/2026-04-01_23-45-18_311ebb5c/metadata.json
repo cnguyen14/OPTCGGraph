@@ -1,0 +1,15 @@
+{
+  "p1_leader": "Yamato",
+  "p1_leader_id": "OP06-022",
+  "p2_leader": "Dracule Mihawk - OP14-020",
+  "p2_leader_id": "OP14-020",
+  "num_games": 20,
+  "mode": "virtual",
+  "p1_level": "pro",
+  "p2_level": "hard",
+  "llm_model": null,
+  "base_seed": 1263221516,
+  "timestamp": "2026-04-01T23:45:18.379424+00:00",
+  "sim_id": "311ebb5c-6b55-4919-a0a7-b9c158dce057",
+  "folder": "2026-04-01_23-45-18_311ebb5c"
+}

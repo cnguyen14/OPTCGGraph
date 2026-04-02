@@ -1,0 +1,147 @@
+@import "tailwindcss";
+
+/* ============================================
+   OPTCG Knowledge Graph — Glassmorphism Theme
+   ============================================ */
+
+@font-face {
+  font-family: 'OnePiece';
+  src: url('/fonts/OnePiece.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  /* --- One Piece Color Palette --- */
+  --color-op-navy: #0f1331;
+  --color-op-navy-light: #1a1f4e;
+  --color-op-red: #b91d22;
+  --color-op-red-light: #dc2626;
+  --color-op-gold: #d1bc00;
+  --color-op-gold-light: #facc15;
+  --color-op-ocean: #0ea5e9;
+  --color-op-ocean-deep: #0369a1;
+
+  /* --- Surface Colors (glass layers) --- */
+  --color-surface-base: #030712;
+  --color-surface-1: rgba(255, 255, 255, 0.06);
+  --color-surface-2: rgba(255, 255, 255, 0.12);
+  --color-surface-3: rgba(255, 255, 255, 0.18);
+  --color-surface-4: rgba(255, 255, 255, 0.24);
+
+  /* --- Glass Borders --- */
+  --color-glass-border: rgba(255, 255, 255, 0.12);
+  --color-glass-border-hover: rgba(255, 255, 255, 0.22);
+  --color-glass-border-active: rgba(255, 255, 255, 0.35);
+
+  /* --- Text --- */
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #94a3b8;
+  --color-text-accent: var(--color-op-gold);
+
+  /* --- Card Game Colors --- */
+  --color-card-red: #ef4444;
+  --color-card-blue: #3b82f6;
+  --color-card-green: #22c55e;
+  --color-card-purple: #a855f7;
+  --color-card-black: #6b7280;
+  --color-card-yellow: #eab308;
+
+  /* --- Border radius --- */
+  --radius-glass: 1rem;
+  --radius-glass-sm: 0.625rem;
+  --radius-glass-lg: 1.25rem;
+  --radius-glass-xl: 1.5rem;
+
+  /* --- Shadows --- */
+  --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --shadow-glass-hover: 0 12px 40px rgba(0, 0, 0, 0.5);
+  --shadow-glow-red: 0 0 30px rgba(185, 29, 34, 0.3);
+  --shadow-glow-gold: 0 0 30px rgba(209, 188, 0, 0.3);
+  --shadow-glow-ocean: 0 0 30px rgba(14, 165, 233, 0.3);
+
+  /* --- Backdrop blur --- */
+  --blur-glass: 12px;
+  --blur-glass-heavy: 20px;
+
+  /* --- Fonts --- */
+  --font-display: 'OnePiece', 'Poppins', system-ui, sans-serif;
+  --font-heading: 'Poppins', system-ui, sans-serif;
+  --font-body: system-ui, -apple-system, sans-serif;
+
+  /* --- Animation --- */
+  --ease-glass: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 300ms;
+}
+
+/* --- Global Base --- */
+body {
+  margin: 0;
+  background: var(--color-surface-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+}
+
+/* --- Glass Utility Classes --- */
+
+.glass {
+  background: var(--color-surface-2);
+  backdrop-filter: blur(var(--blur-glass));
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-glass);
+  box-shadow: var(--shadow-glass);
+}
+
+.glass-subtle {
+  background: var(--color-surface-1);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-glass-sm);
+}
+
+.glass-heavy {
+  background: var(--color-surface-3);
+  backdrop-filter: blur(var(--blur-glass-heavy));
+  -webkit-backdrop-filter: blur(var(--blur-glass-heavy));
+  border: 1px solid var(--color-glass-border-hover);
+  border-radius: var(--radius-glass-lg);
+  box-shadow: var(--shadow-glass);
+}
+
+.glass-hover {
+  transition: all var(--duration-normal) var(--ease-glass);
+}
+
+.glass-hover:hover {
+  background: var(--color-surface-3);
+  border-color: var(--color-glass-border-hover);
+  box-shadow: var(--shadow-glass-hover);
+  transform: translateY(-2px);
+}
+
+/* Navy gradient background */
+.bg-op-gradient {
+  background: linear-gradient(
+    135deg,
+    var(--color-op-navy) 0%,
+    #0c0f28 40%,
+    #090d20 100%
+  );
+}
+
+/* Subtle radial glow overlay */
+.bg-op-glow::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 20% 80%, rgba(185, 29, 34, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(14, 165, 233, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 50%, rgba(209, 188, 0, 0.03) 0%, transparent 40%);
+  pointer-events: none;
+}

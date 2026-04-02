@@ -1,32 +1,36 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useDeckState } from './hooks/useDeckState';
-import SettingsPage from './components/SettingsPage';
-import CardBrowser from './components/CardBrowser';
-import DeckBuilder from './components/deck-builder/DeckBuilder';
-import MetaExplorer from './components/MetaExplorer';
-import CardDetail from './components/CardDetail';
-import FloatingChat from './components/FloatingChat';
-import SimulatorPage from './components/simulator/SimulatorPage';
-import MyDecksPage from './components/MyDecksPage';
+import SettingsPage from './features/settings/SettingsPage';
+import CardBrowser from './features/cards/CardBrowser';
+import DeckBuilder from './features/deck-builder/DeckBuilder';
+import MetaExplorer from './features/meta/MetaExplorer';
+import CardDetail from './features/cards/CardDetail';
+import FloatingChat from './features/chat/FloatingChat';
+import SimulatorPage from './features/simulator/SimulatorPage';
+import MyDecksPage from './features/my-decks/MyDecksPage';
+import AppLayout from './layouts/AppLayout';
+import LandingPage from './pages/LandingPage';
+import { PageTransition } from './components/ui';
 import type { Card } from './types';
 
-type Tab = 'cards' | 'deck' | 'mydecks' | 'meta' | 'simulator' | 'settings';
+type Tab = 'landing' | 'cards' | 'deck' | 'mydecks' | 'meta' | 'simulator' | 'settings';
 
-const VALID_TABS: Tab[] = ['cards', 'deck', 'mydecks', 'meta', 'simulator', 'settings'];
+const APP_TABS: Tab[] = ['cards', 'deck', 'mydecks', 'meta', 'simulator', 'settings'];
 
 function getTabFromHash(): Tab {
   const hash = window.location.hash.slice(1);
-  // Backward compat: old #graph → cards
   if (hash === 'graph') return 'cards';
-  return VALID_TABS.includes(hash as Tab) ? (hash as Tab) : 'cards';
+  if (hash === '' || hash === 'landing') return 'landing';
+  return APP_TABS.includes(hash as Tab) ? (hash as Tab) : 'landing';
 }
 
 function App() {
   const [activeTab, setActiveTabState] = useState<Tab>(getTabFromHash);
 
-  const setActiveTab = useCallback((tab: Tab) => {
-    setActiveTabState(tab);
-    window.location.hash = tab;
+  const setActiveTab = useCallback((tab: string) => {
+    const validTab = tab as Tab;
+    setActiveTabState(validTab);
+    window.location.hash = validTab === 'landing' ? '' : validTab;
   }, []);
 
   useEffect(() => {
@@ -34,6 +38,7 @@ function App() {
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
+
   const [selectedCard, setSelectedCard] = useState<Card | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
 
@@ -42,6 +47,7 @@ function App() {
 
   // State for pre-selecting a deck in the simulator
   const [simDeck, setSimDeck] = useState<{ leaderId: string; cardIds: string[] } | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
 
   // Build deck card IDs for chat context
   const deckCardIds: string[] = [];
@@ -67,40 +73,58 @@ function App() {
     }
   };
 
-  return (
-    <div className="h-screen flex flex-col bg-gray-950 text-white">
-      {/* Header */}
-      <header className="flex items-center justify-between px-6 py-3 border-b border-gray-800 shrink-0">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-bold tracking-tight">OPTCG Knowledge Graph</h1>
-          <span className="text-xs text-gray-500 bg-gray-800 rounded px-2 py-0.5">v0.1</span>
-        </div>
-        <nav className="flex gap-1">
-          {[
-            { key: 'cards' as Tab, label: 'Cards' },
-            { key: 'deck' as Tab, label: 'Deck Builder' },
-            { key: 'mydecks' as Tab, label: 'My Decks' },
-            { key: 'meta' as Tab, label: 'Meta Explorer' },
-            { key: 'simulator' as Tab, label: 'Simulator' },
-            { key: 'settings' as Tab, label: 'Settings' },
-          ].map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`px-4 py-1.5 rounded text-sm transition-colors ${
-                activeTab === tab.key
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-      </header>
+  // Transition between landing ↔ app
+  const [landingExit, setLandingExit] = useState(false);
+  const [showLanding, setShowLanding] = useState(activeTab === 'landing');
+  const landingTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto">
+  const handleLandingNavigate = useCallback((tab: string) => {
+    setLandingExit(true);
+    clearTimeout(landingTimerRef.current);
+    landingTimerRef.current = setTimeout(() => {
+      setShowLanding(false);
+      setLandingExit(false);
+      setActiveTab(tab);
+    }, 400);
+  }, [setActiveTab]);
+
+  // When navigating back to landing
+  useEffect(() => {
+    if (activeTab === 'landing') {
+      setShowLanding(true);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    return () => clearTimeout(landingTimerRef.current);
+  }, []);
+
+  // Landing page — full-screen with exit transition
+  if (showLanding || activeTab === 'landing') {
+    return (
+      <div className={landingExit ? 'landing-exit' : 'landing-enter'}>
+        <LandingPage onNavigate={handleLandingNavigate} />
+      </div>
+    );
+  }
+
+  return (
+    <AppLayout
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      chatSidebar={
+        <FloatingChat
+          sessionId={sessionId}
+          onSessionId={setSessionId}
+          leaderId={deckState.leader?.id}
+          deckCardIds={deckCardIds.length > 0 ? deckCardIds : undefined}
+          onUiUpdate={handleUiUpdate}
+          onOpenChange={setChatOpen}
+        />
+      }
+    >
+      {/* Main Content with page transition */}
+      <PageTransition transitionKey={activeTab} className="h-full">
         {activeTab === 'settings' && (
           <SettingsPage />
         )}
@@ -108,7 +132,7 @@ function App() {
           <CardBrowser onCardSelect={setSelectedCard} />
         )}
         {activeTab === 'deck' && (
-          <DeckBuilder onCardSelect={setSelectedCard} deckState={deckState} />
+          <DeckBuilder onCardSelect={setSelectedCard} deckState={deckState} chatOpen={chatOpen} />
         )}
         {activeTab === 'mydecks' && (
           <MyDecksPage
@@ -138,20 +162,11 @@ function App() {
             }
           />
         )}
-      </main>
+      </PageTransition>
 
       {/* Card Detail Slide-over */}
       <CardDetail card={selectedCard} onClose={() => setSelectedCard(null)} />
-
-      {/* Floating AI Chat — always visible, aware of deck state */}
-      <FloatingChat
-        sessionId={sessionId}
-        onSessionId={setSessionId}
-        leaderId={deckState.leader?.id}
-        deckCardIds={deckCardIds.length > 0 ? deckCardIds : undefined}
-        onUiUpdate={handleUiUpdate}
-      />
-    </div>
+    </AppLayout>
   );
 }
 

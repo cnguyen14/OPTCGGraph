@@ -1,0 +1,15 @@
+{
+  "p1_leader": "Yamato",
+  "p1_leader_id": "OP06-022",
+  "p2_leader": "Dracule Mihawk - OP14-020",
+  "p2_leader_id": "OP14-020",
+  "num_games": 20,
+  "mode": "real",
+  "p1_level": "pro",
+  "p2_level": "hard",
+  "llm_model": "claude-sonnet-4-6",
+  "base_seed": 1288027094,
+  "timestamp": "2026-04-02T00:11:56.010403+00:00",
+  "sim_id": "bd46e4ca-8092-48c3-bed1-b2a639c78b2b",
+  "folder": "2026-04-02_00-11-56_bd46e4ca"
+}
