@@ -362,6 +362,12 @@ export default function SwapConfirmModal({
                           {(swap.candidates ?? []).map((candidate) => {
                             const qty = candidateQtys[i]?.[candidate.card_id] ?? 0;
                             const isActive = qty > 0;
+                            // Max for this candidate = current qty + remaining unallocated
+                            const totalSwap = swapQty[i] ?? 1;
+                            const allocatedToOthers = Object.entries(candidateQtys[i] ?? {})
+                              .filter(([cid]) => cid !== candidate.card_id)
+                              .reduce((s, [, v]) => s + v, 0);
+                            const maxForThis = totalSwap - allocatedToOthers;
                             return (
                               <div
                                 key={candidate.card_id}
@@ -377,7 +383,7 @@ export default function SwapConfirmModal({
                                   disabled={!enabled[i]}
                                   className="bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-[10px] text-white w-10 shrink-0"
                                 >
-                                  {Array.from({ length: (swapQty[i] ?? 1) + 1 }, (_, k) => k).map((n) => (
+                                  {Array.from({ length: maxForThis + 1 }, (_, k) => k).map((n) => (
                                     <option key={n} value={n}>{n}x</option>
                                   ))}
                                 </select>
