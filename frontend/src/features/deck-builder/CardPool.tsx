@@ -359,7 +359,7 @@ export default function CardPool({ leader, getQuantity, onAddCard, onCardSelect 
                           style={{ backgroundColor: COLOR_MAP[c] ?? '#6b7280' }}
                         />
                       ))}
-                      {card.market_price !== null && (
+                      {card.market_price != null && (
                         <span className="text-[10px] text-green-500 ml-auto">${card.market_price.toFixed(2)}</span>
                       )}
                     </div>

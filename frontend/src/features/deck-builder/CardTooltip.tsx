@@ -133,7 +133,7 @@ export default function CardTooltip({ tooltip }: Props) {
       )}
 
       {/* Footer */}
-      {c.market_price !== null && (
+      {c.market_price != null && (
         <div className="mt-2 pt-2 border-t border-glass-border text-[10px] text-right">
           <span className="text-green-400">${c.market_price.toFixed(2)}</span>
         </div>

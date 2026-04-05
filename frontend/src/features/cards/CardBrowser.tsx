@@ -464,7 +464,7 @@ export default function CardBrowser({ onCardSelect }: CardBrowserProps) {
                         </span>
                       </td>
                       <td className="py-1.5 px-2 text-text-secondary">
-                        {card.market_price !== null ? `$${card.market_price.toFixed(2)}` : '-'}
+                        {card.market_price != null ? `$${card.market_price.toFixed(2)}` : '-'}
                       </td>
                     </tr>
                   ))}

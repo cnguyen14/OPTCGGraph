@@ -994,7 +994,7 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
 
               <div className="flex justify-between items-center mt-2 pt-2 border-t border-glass-border text-[10px]">
                 <span className="text-text-muted">{connCounts.get(n.id) ?? 0} connections</span>
-                {n.market_price !== null && <span className="text-green-400">${n.market_price.toFixed(2)}</span>}
+                {n.market_price != null && <span className="text-green-400">${n.market_price.toFixed(2)}</span>}
               </div>
             </div>
           );
