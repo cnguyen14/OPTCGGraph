@@ -492,6 +492,15 @@ class HeuristicAgent:
         player = state.active_player
         opponent = state.defending_player
         action = legal_actions[chosen_idx] if chosen_idx < len(legal_actions) else None
+
+        # Extract card_id for play_card actions
+        source_card_id = ""
+        if action and action.action_type == ActionType.PLAY_CARD and action.source_id:
+            for card in player.hand:
+                if card.instance_id == action.source_id:
+                    source_card_id = card.card_id
+                    break
+
         self._decision_collector.append(
             DecisionPoint(
                 turn=state.turn,
@@ -511,6 +520,7 @@ class HeuristicAgent:
                 chosen_action_index=chosen_idx,
                 chosen_action_type=(action.action_type.value if action else "pass"),
                 chosen_action_desc=(action.description if action else "pass"),
+                source_card_id=source_card_id,
             )
         )
 

@@ -93,6 +93,8 @@ class SimulationDataExporter:
                     "p2_effects_fired": result.p2_effects_fired,
                     "p1_cards_played": result.p1_cards_played,
                     "p2_cards_played": result.p2_cards_played,
+                    "p1_cards_drawn": result.p1_cards_drawn,
+                    "p2_cards_drawn": result.p2_cards_drawn,
                     "decision_count": len(result.decision_points),
                 }
                 f.write(json.dumps(record) + "\n")

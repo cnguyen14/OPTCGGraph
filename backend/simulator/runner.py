@@ -320,6 +320,18 @@ class SimulationRunner:
                         "p2_level": self.p2_level,
                         "llm_model": self.llm_model,
                         "base_seed": self.base_seed,
+                        "p1_deck_cards": [
+                            {"id": c.card_id, "name": c.name, "cost": c.cost,
+                             "power": c.power, "counter": c.counter,
+                             "card_type": c.card_type, "keywords": c.keywords}
+                            for c in p1_deck
+                        ],
+                        "p2_deck_cards": [
+                            {"id": c.card_id, "name": c.name, "cost": c.cost,
+                             "power": c.power, "counter": c.counter,
+                             "card_type": c.card_type, "keywords": c.keywords}
+                            for c in p2_deck
+                        ],
                     },
                 )
                 export_path = str(export_dir)

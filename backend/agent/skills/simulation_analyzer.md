@@ -61,14 +61,27 @@ When the user asks about a specific deck or simulation:
 4. Analyze action_patterns for tempo discipline and combat efficiency
 5. Present recommendations with specific numbers
 
-### Draw Probability Analysis
-When simulation data includes `draw_probability`, use it to assess deck consistency:
+### Draw Probability & Accuracy Analysis
+When simulation data includes `draw_probability` or `draw_accuracy`, use it to assess deck consistency:
 - `early_game_access.probability < 0.80` → "Deck struggles to play on curve early — needs more low-cost cards"
 - `consistency_score < 65` → "Deck lacks consistency — consider more 4x playsets or searcher cards"
-- Compare `per_card.p_opening_hand` with actual `play_rate` from simulation:
-  - If p_opening_hand is HIGH but play_rate is LOW → card is drawn but not played (dead draw)
-  - If p_opening_hand is LOW but play_rate is HIGH → card is good when drawn, consider adding more copies
+- **Draw Accuracy (post-sim)**: Compare predicted P(draw) with actual draw/play rates:
+  - `dead_draw = true` → card is drawn often but rarely played — consider cutting
+  - `actual_play_rate` much lower than `actual_draw_rate` → card sits in hand unused
+  - `actual_draw_rate` much lower than `predicted_p` → bad luck or deck shuffle issues
 - `role_access` shows P(draw ≥1 of each role by target turn) — critical for strategy viability
+
+### Mulligan Analysis
+When recommendations mention mulligan patterns:
+- High mulligan rate (>50%) → deck has too many unplayable opening hands
+- Mulligan win rate << keep win rate → mulliganing hurts, improve early game cards
+- Suggest: add more 1-2 cost cards, increase 4x playsets of key early cards
+
+### Matchup Analysis
+When recommendations mention specific matchup struggles:
+- Win rate < 35% vs an opponent → suggest specific counter strategies
+- Connect matchup weakness to card pool: "Against aggro, add more Blockers; against control, add more Rush"
+- Consider if the weakness is structural (deck archetype mismatch) or fixable (tech cards)
 
 ### MANDATORY TOOL USE
 - Call `analyze_simulations` for global/cross-simulation analysis

@@ -267,6 +267,40 @@ async def _handle_analyze_deck_simulation(
                 f"despite being played {times}x) — consider replacing"
             )
 
+    # Matchup analysis from game data
+    games = detailed.get("games", [])
+    if games:
+        opponent_leader = metadata.get("p2_leader" if player == "p1" else "p1_leader", "Unknown")
+        wins_vs = sum(1 for g in games if g.get("winner") == player)
+        matchup_wr = wins_vs / len(games) if games else 0
+        if len(games) >= 3 and matchup_wr < 0.35:
+            recommendations.append(
+                f"Struggling vs {opponent_leader}: {matchup_wr:.0%} win rate over {len(games)} games. "
+                f"Consider tech cards to counter this matchup."
+            )
+
+    # Mulligan analysis
+    mulligan_games = [g for g in games if g.get(f"{player}_mulligan")]
+    keep_games = [g for g in games if not g.get(f"{player}_mulligan")]
+    if mulligan_games and keep_games:
+        mull_wr = sum(1 for g in mulligan_games if g.get("winner") == player) / len(mulligan_games)
+        keep_wr = sum(1 for g in keep_games if g.get("winner") == player) / len(keep_games)
+        if len(mulligan_games) >= 3 and mull_wr < keep_wr - 0.15:
+            recommendations.append(
+                f"Mulligan hurts: {mull_wr:.0%} win rate when mulliganing vs {keep_wr:.0%} when keeping. "
+                f"Improve early-game card quality."
+            )
+
+    # Draw accuracy insights
+    draw_accuracy = detailed.get("draw_accuracy", [])
+    dead_draws = [d for d in draw_accuracy if d.get("dead_draw")]
+    if dead_draws:
+        for dd in dead_draws[:3]:
+            recommendations.append(
+                f"Dead draw: {dd['name']} drawn {dd['actual_draw_rate']:.0%} of games but "
+                f"only played {dd['actual_play_rate']:.0%}. Consider cutting."
+            )
+
     if not recommendations:
         recommendations.append("Not enough data for strong recommendations.")
 

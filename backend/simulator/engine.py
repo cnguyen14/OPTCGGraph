@@ -338,6 +338,8 @@ class GameEngine:
             p2_total_damage_dealt=self._damage_p2,
             p1_effects_fired=self._effects_p1,
             p2_effects_fired=self._effects_p2,
+            p1_cards_drawn=dict(self._cards_drawn_p1),
+            p2_cards_drawn=dict(self._cards_drawn_p2),
         )
 
     # --- Phase implementations ---

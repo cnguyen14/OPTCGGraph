@@ -72,6 +72,44 @@ def _compute_game_stats(games: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _compute_mulligan_analysis(games: list[dict[str, Any]]) -> dict[str, Any]:
+    """Analyze mulligan impact on win rates.
+
+    Returns mulligan frequency, win rate when mulliganing vs keeping,
+    and recommendation on whether deck has mulligan issues.
+    """
+    if not games:
+        return {}
+
+    n = len(games)
+    p1_mulligan_games = [g for g in games if g.get("p1_mulligan")]
+    p1_keep_games = [g for g in games if not g.get("p1_mulligan")]
+
+    mulligan_wins = sum(1 for g in p1_mulligan_games if g.get("winner") == "p1")
+    keep_wins = sum(1 for g in p1_keep_games if g.get("winner") == "p1")
+
+    mulligan_rate = len(p1_mulligan_games) / n if n else 0
+    mulligan_win_rate = mulligan_wins / len(p1_mulligan_games) if p1_mulligan_games else 0
+    keep_win_rate = keep_wins / len(p1_keep_games) if p1_keep_games else 0
+
+    # Recommendation
+    recommendation = ""
+    if mulligan_rate > 0.5:
+        recommendation = "High mulligan rate (>50%) — deck may lack early-game consistency. Consider more low-cost cards."
+    if p1_mulligan_games and p1_keep_games:
+        if mulligan_win_rate < keep_win_rate - 0.15:
+            recommendation += " Mulliganing hurts win rate significantly — improve opening hand quality."
+
+    return {
+        "mulligan_rate": round(mulligan_rate, 3),
+        "mulligan_win_rate": round(mulligan_win_rate, 3),
+        "keep_win_rate": round(keep_win_rate, 3),
+        "mulligan_games": len(p1_mulligan_games),
+        "keep_games": len(p1_keep_games),
+        "recommendation": recommendation,
+    }
+
+
 def _compute_decision_stats(decisions: list[dict[str, Any]]) -> dict[str, Any]:
     """Compute aggregate stats from decisions.jsonl records."""
     if not decisions:
@@ -317,6 +355,58 @@ def _compute_per_card_detail(
 
     result.sort(key=lambda x: x["times_played"], reverse=True)
     return result
+
+
+def _compute_draw_accuracy(
+    draw_prob_data: dict | None,
+    games: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Compare predicted draw probability vs actual draw rates from simulation.
+
+    Returns per-card comparison: predicted P(draw), actual draw rate, delta.
+    Helps identify dead draws (high P but low play) and lucky draws (low P but high play).
+    """
+    if not draw_prob_data or not games:
+        return []
+
+    # Use p1 draw probability data (primary deck under analysis)
+    per_card = draw_prob_data.get("p1", draw_prob_data).get("per_card", [])
+    if not per_card:
+        return []
+
+    num_games = len(games)
+    if num_games == 0:
+        return []
+
+    # Count actual draws per card across all games
+    actual_draws: dict[str, int] = {}
+    actual_plays: dict[str, int] = {}
+    for game in games:
+        for card_id, count in game.get("p1_cards_drawn", {}).items():
+            actual_draws[card_id] = actual_draws.get(card_id, 0) + (1 if count > 0 else 0)
+        for card_id, count in game.get("p1_cards_played", {}).items():
+            actual_plays[card_id] = actual_plays.get(card_id, 0) + (1 if count > 0 else 0)
+
+    results = []
+    for pc in per_card:
+        card_id = pc["card_id"]
+        predicted_p = pc.get("p_by_turn_5", 0)
+        actual_draw_rate = actual_draws.get(card_id, 0) / num_games
+        actual_play_rate = actual_plays.get(card_id, 0) / num_games
+        delta = actual_draw_rate - predicted_p
+
+        results.append({
+            "card_id": card_id,
+            "name": pc.get("name", ""),
+            "copies": pc.get("copies", 0),
+            "predicted_p": round(predicted_p, 3),
+            "actual_draw_rate": round(actual_draw_rate, 3),
+            "actual_play_rate": round(actual_play_rate, 3),
+            "delta": round(delta, 3),
+            "dead_draw": actual_draw_rate > 0.3 and actual_play_rate < 0.15,
+        })
+
+    return sorted(results, key=lambda x: x["delta"])
 
 
 def _compute_critical_turns(
@@ -626,6 +716,10 @@ def aggregate_deck_health(sim_folders: list[str]) -> dict[str, Any]:
         except Exception:
             pass
 
+    # Draw accuracy: compare predicted vs actual draw rates
+    draw_accuracy = _compute_draw_accuracy(draw_probability, all_games)
+    mulligan_analysis = _compute_mulligan_analysis(all_games)
+
     result = {
         "total_games": total_games,
         "total_wins": total_wins,
@@ -642,6 +736,10 @@ def aggregate_deck_health(sim_folders: list[str]) -> dict[str, Any]:
     }
     if draw_probability:
         result["draw_probability"] = draw_probability
+    if draw_accuracy:
+        result["draw_accuracy"] = draw_accuracy
+    if mulligan_analysis:
+        result["mulligan_analysis"] = mulligan_analysis
     return result
 
 

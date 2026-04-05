@@ -293,9 +293,10 @@ class DecisionPoint:
     chosen_action_index: int = 0
     chosen_action_type: str = ""
     chosen_action_desc: str = ""
+    source_card_id: str = ""  # Card ID for play_card actions
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "turn": self.turn,
             "phase": self.phase,
             "player": self.player_id,
@@ -312,6 +313,9 @@ class DecisionPoint:
             "action": self.chosen_action_type,
             "desc": self.chosen_action_desc,
         }
+        if self.source_card_id:
+            d["card_id"] = self.source_card_id
+        return d
 
 
 @dataclass
@@ -384,6 +388,9 @@ class GameResult:
     p2_total_damage_dealt: int = 0
     p1_effects_fired: int = 0
     p2_effects_fired: int = 0
+    # Cards drawn tracking (card_id -> times drawn)
+    p1_cards_drawn: dict[str, int] = dataclass_field(default_factory=dict)
+    p2_cards_drawn: dict[str, int] = dataclass_field(default_factory=dict)
 
 
 @dataclass
