@@ -364,22 +364,22 @@ export default function CardPool({ leader, getQuantity, onAddCard, onCardSelect 
                       )}
                     </div>
                     {/* Synergy badges (suggested mode) */}
-                    {mode === 'suggested' && (card.shared_families?.length > 0 || card.shared_keywords?.length > 0) && (
+                    {mode === 'suggested' && ((card.shared_families?.length ?? 0) > 0 || (card.shared_keywords?.length ?? 0) > 0) && (
                       <div className="flex items-center gap-1 mt-1">
-                        {card.shared_families?.length > 0 && (
+                        {(card.shared_families?.length ?? 0) > 0 && (
                           <span
                             className="text-[10px] bg-amber-900/50 text-amber-400 rounded px-1 py-0.5"
-                            title={`Family: ${card.shared_families.join(', ')}`}
+                            title={`Family: ${card.shared_families!.join(', ')}`}
                           >
-                            F:{card.shared_families.length}
+                            F:{card.shared_families!.length}
                           </span>
                         )}
-                        {card.shared_keywords?.length > 0 && (
+                        {(card.shared_keywords?.length ?? 0) > 0 && (
                           <span
                             className="text-[10px] bg-purple-900/50 text-purple-400 rounded px-1 py-0.5"
-                            title={`Keywords: ${card.shared_keywords.join(', ')}`}
+                            title={`Keywords: ${card.shared_keywords!.join(', ')}`}
                           >
-                            K:{card.shared_keywords.length}
+                            K:{card.shared_keywords!.length}
                           </span>
                         )}
                       </div>

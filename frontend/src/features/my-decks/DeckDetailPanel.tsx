@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { analyzeDeck, getDeckSimHistory, improveDeck, fetchSimDetail, analyzeMatchup, aggregateDeckAnalysis, clearSimHistory, fetchCard } from '../../lib/api';
 import type { SimHistoryEntry, DeckImprovement, MatchupAnalysis, DeckHealthAnalysis, Card, DeckEntry } from '../../types';
-import SwapConfirmModal from './SwapConfirmModal';
-import type { SwapWithCandidates } from './SwapConfirmModal';
 import DeckMap from '../deck-builder/DeckMap';
 import { GlassCard, Button } from '../../components/ui';
 
@@ -869,25 +867,6 @@ function SimDetailPanel({
   );
 }
 
-interface SwapCandidate {
-  card_id: string;
-  name: string;
-  image: string;
-  power: number;
-  cost: number;
-  counter: number;
-  synergy_score: number;
-}
-
-interface SwapInput {
-  remove: string;
-  remove_name?: string;
-  remove_image?: string;
-  role_needed?: string;
-  reason: string;
-  candidates?: SwapCandidate[];
-}
-
 function DeckHealthPanel({ health }: { health: DeckHealthAnalysis }) {
   const consistencyColor =
     health.consistency_rating === 'high'
@@ -1503,7 +1482,7 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 
 export default function DeckDetailPanel({
-  deckId,
+  deckId: _deckId,
   leaderId,
   cardIds,
   deckName,
@@ -1511,7 +1490,7 @@ export default function DeckDetailPanel({
   onOpenBuilder,
   onSimulate,
   onDelete,
-  onDeckChanged,
+  onDeckChanged: _onDeckChanged,
   isConfirmingDelete,
   isDeletingDeck,
   onCancelDelete,
@@ -1524,30 +1503,7 @@ export default function DeckDetailPanel({
   useEffect(() => {
     setMountedTabs((prev) => (prev.has(activeTab) ? prev : new Set(prev).add(activeTab)));
   }, [activeTab]);
-  const [swapModalData, setSwapModalData] = useState<{ swaps: SwapWithCandidates[] } | null>(null);
   const [healthReport, setHealthReport] = useState<DeckHealthAnalysis | null>(null);
-
-  const handleApplySwaps = useCallback((swaps: SwapInput[]) => {
-    const swapsWithCandidates: SwapWithCandidates[] = swaps
-      .filter((s) => Array.isArray(s.candidates) && s.candidates.length > 0)
-      .map((s) => ({
-        remove: s.remove ?? '',
-        remove_name: s.remove_name ?? s.remove ?? 'Unknown',
-        remove_image: s.remove_image ?? '',
-        role_needed: s.role_needed ?? '',
-        reason: s.reason ?? '',
-        candidates: (s.candidates ?? []).map((c) => ({
-          ...c,
-          power: c.power ?? 0,
-          cost: c.cost ?? 0,
-          counter: c.counter ?? 0,
-          synergy_score: c.synergy_score ?? 0,
-          image: c.image ?? '',
-        })),
-      }));
-    if (swapsWithCandidates.length === 0) return;
-    setSwapModalData({ swaps: swapsWithCandidates });
-  }, []);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -1661,21 +1617,6 @@ export default function DeckDetailPanel({
         </div>
       </div>
 
-      {/* Swap confirmation modal */}
-      {swapModalData && (
-        <SwapConfirmModal
-          deckId={deckId}
-          deckName={deckName}
-          leaderId={leaderId}
-          swaps={swapModalData.swaps}
-          onClose={() => setSwapModalData(null)}
-          onSaved={() => {
-            setSwapModalData(null);
-            onDeckChanged?.();
-          }}
-          onSimulate={onSimulate}
-        />
-      )}
     </div>
   );
 }

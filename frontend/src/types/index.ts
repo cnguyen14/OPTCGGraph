@@ -22,6 +22,8 @@ export interface Card {
   keywords: string[];
   banned?: boolean;
   ban_reason?: string;
+  shared_families?: string[];
+  shared_keywords?: string[];
 }
 
 export interface SynergyPartner {

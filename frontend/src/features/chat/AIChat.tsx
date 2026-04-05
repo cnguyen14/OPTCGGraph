@@ -3,10 +3,6 @@ import Markdown from 'react-markdown';
 import type { ChatMessage } from '../../types';
 import { chatSync } from '../../lib/api';
 
-interface ToolSummary {
-  text: string;
-}
-
 interface EnrichedMessage extends ChatMessage {
   toolSummaries?: string[];
 }

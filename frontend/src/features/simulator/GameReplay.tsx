@@ -24,7 +24,7 @@ export default function GameReplay({ games }: Props) {
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-text-primary">Game Replay</h3>
         <div className="flex gap-1">
-          {games.map((g, i) => (
+          {games.map((_g, i) => (
             <Button
               key={i}
               onClick={() => setActiveGame(i)}

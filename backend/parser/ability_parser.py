@@ -186,7 +186,6 @@ def _regex_parse(card: dict) -> dict:
 
 async def build_keyword_graph(driver, parsed_results: list[dict], cards: list[dict]) -> int:
     """Create Keyword nodes, HAS_KEYWORD edges, CostTier nodes, and IN_COST_TIER edges."""
-    card_map = {c["id"]: c for c in cards}
     edges_created = 0
 
     async with driver.session() as session:

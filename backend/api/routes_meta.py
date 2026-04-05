@@ -380,8 +380,6 @@ async def suggest_swap(
         return None
 
     weakest = candidates[0][1]
-    incoming_val = card_value(incoming)
-    weakest_val = candidates[0][0]
 
     reason_parts = []
     if (incoming.get("tournament_pick_rate") or 0) > (weakest.get("tournament_pick_rate") or 0):

@@ -169,7 +169,7 @@ async def build_deck(
     # 5. Validate and self-correct
     report = validate_deck(leader, deck)
     if not report.is_legal:
-        logger.warning(f"Deck failed validation, attempting self-correction...")
+        logger.warning("Deck failed validation, attempting self-correction...")
         deck = _fix_violations(deck, report, candidates, leader_colors)
         report = validate_deck(leader, deck)
 
@@ -554,7 +554,6 @@ def _fix_violations(
 ) -> list[dict]:
     """Fix rule violations by swapping illegal cards with valid alternatives."""
     fixed = list(deck)
-    deck_ids = Counter(c["id"] for c in fixed)
 
     # Fix: remove LEADER cards
     fixed = [c for c in fixed if c.get("card_type") != "LEADER"]

@@ -6,7 +6,6 @@ import {
   fetchMetaDecks,
   fetchMetaDeckDetail,
   fetchCard,
-  fetchDeckSynergies,
   suggestSwap,
 } from '../../lib/api';
 import type { MetaDeckFilters } from '../../lib/api';

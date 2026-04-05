@@ -1,7 +1,6 @@
 """Crawl tournament deck data from Limitless TCG and load into Neo4j."""
 
 import asyncio
-import json
 import logging
 import sys
 from pathlib import Path
