@@ -7,17 +7,24 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-import anthropic
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from neo4j import AsyncDriver
 
-from backend.services.settings_service import get_active_api_key
+from backend.services.llm_service import (
+    LLMNotAvailableError,
+    has_any_llm_key,
+    llm_complete,
+    strip_json_fences,
+)
 from backend.graph.connection import get_driver
 from backend.graph.queries import get_card_by_id
 from backend.ai.deck_validator import validate_deck
 from backend.ai.deck_suggestions import suggest_fixes
-from backend.simulator.analytics import aggregate_deck_health, compute_detailed_sim_stats
+from backend.simulator.analytics import (
+    aggregate_deck_health,
+    compute_detailed_sim_stats,
+)
 from backend.storage.redis_client import get_redis
 from backend.api.models import (
     DeckAnalyzeRequest,
@@ -181,7 +188,8 @@ def _count_card_roles(cards: list[dict]) -> dict[str, int]:
     roles: dict[str, int] = {
         "blockers": 0,
         "removal": 0,
-        "draw_search": 0,
+        "draw": 0,
+        "searcher": 0,
         "rush": 0,
         "finishers": 0,
     }
@@ -191,8 +199,10 @@ def _count_card_roles(cards: list[dict]) -> dict[str, int]:
             roles["blockers"] += 1
         if keywords & {"KO", "Bounce", "Trash", "Power Debuff"}:
             roles["removal"] += 1
-        if keywords & {"Draw", "Search"}:
-            roles["draw_search"] += 1
+        if "Draw" in keywords:
+            roles["draw"] += 1
+        if "Search" in keywords:
+            roles["searcher"] += 1
         if "Rush" in keywords:
             roles["rush"] += 1
         if (card.get("cost") or 0) >= 7 and (card.get("power") or 0) >= 7000:
@@ -331,6 +341,7 @@ async def clear_sim_history(req: SimHistoryRequest) -> dict[str, str]:
                 sim_dir = _find_sim_dir(sim_id)
                 if sim_dir and sim_dir.exists():
                     import shutil
+
                     shutil.rmtree(sim_dir)
                     deleted_count += 1
             except (json.JSONDecodeError, ValueError, OSError):
@@ -647,31 +658,19 @@ IMPORTANT for suggested_swaps:
 - For "role_needed", specify what type of replacement the deck needs: blocker, removal, finisher, draw, rush, or counter.
 - Only suggest removing cards that appear in the card performance list above."""
 
-    api_key = get_active_api_key("claude")
-    if not api_key:
-        raise HTTPException(400, "Anthropic API key not configured. Set it in Settings > BYOK.")
+    if not has_any_llm_key():
+        raise HTTPException(
+            400, "No LLM API key configured. Set one in Settings > BYOK."
+        )
 
     try:
-        client = anthropic.AsyncAnthropic(
-            api_key=api_key,
-            timeout=60.0,
+        raw_text = await llm_complete(
+            "", prompt, prefer="fast", max_tokens=2048, timeout=60.0
         )
-        response = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=2048,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        raw_text = response.content[0].text.strip()
 
         # Try to parse JSON from the response
         try:
-            # Handle possible markdown code fences
-            json_text = raw_text
-            if "```json" in json_text:
-                json_text = json_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in json_text:
-                json_text = json_text.split("```")[1].split("```")[0].strip()
+            json_text = strip_json_fences(raw_text)
 
             parsed = json.loads(json_text)
             result = MatchupAnalysisResponse(
@@ -873,9 +872,8 @@ IMPORTANT for suggested_swaps:
             pass
         return result
 
-    except anthropic.APIError as e:
-        logger.exception("Claude API error during matchup analysis")
-        raise HTTPException(502, f"AI analysis failed: {e}")
+    except LLMNotAvailableError as e:
+        raise HTTPException(400, str(e))
     except Exception as e:
         logger.exception("Matchup analysis failed")
         raise HTTPException(500, f"Analysis failed: {e}")
@@ -986,7 +984,7 @@ async def aggregate_analysis(
     prompt = f"""You are an OPTCG (One Piece TCG) deck health analyst. Analyze this deck's OVERALL performance across ALL simulations — focus on holistic deck health, not any specific matchup.
 
 Deck: {leader_name} (Leader ID: {req.leader_id})
-Total simulations: {len(sim_folders)} | Total games: {health_data['total_games']} | Overall win rate: {health_data['overall_win_rate']:.0%}
+Total simulations: {len(sim_folders)} | Total games: {health_data["total_games"]} | Overall win rate: {health_data["overall_win_rate"]:.0%}
 
 Card performance (aggregated across all matchups):
 {chr(10).join(card_stats_lines) if card_stats_lines else "No card data"}
@@ -998,12 +996,12 @@ Matchup spread:
 {chr(10).join(matchup_lines) if matchup_lines else "No matchup data"}
 
 Action patterns:
-- Play before attack: {action.get('play_before_attack_pct', 0):.0%}
-- Leader attack rate: {action.get('leader_attack_pct', 0):.0%}
-- Losing attack rate: {action.get('losing_attack_pct', 0):.0%}
-- Avg decisions/game: {action.get('avg_decisions_per_game', 0):.1f}
+- Play before attack: {action.get("play_before_attack_pct", 0):.0%}
+- Leader attack rate: {action.get("leader_attack_pct", 0):.0%}
+- Losing attack rate: {action.get("losing_attack_pct", 0):.0%}
+- Avg decisions/game: {action.get("avg_decisions_per_game", 0):.1f}
 
-Deck card IDs in this deck: {', '.join(req.card_ids[:10])}{'...' if len(req.card_ids) > 10 else ''}
+Deck card IDs in this deck: {", ".join(req.card_ids[:10])}{"..." if len(req.card_ids) > 10 else ""}
 
 Analyze the deck's OVERALL HEALTH — not matchup-specific. Provide your analysis in this exact JSON format:
 {{
@@ -1025,27 +1023,16 @@ Focus on:
 4. Are card SYNERGIES being utilized effectively?
 5. How CONSISTENT is the deck across different matchups?"""
 
-    api_key = get_active_api_key("claude")
-    if not api_key:
-        raise HTTPException(400, "Anthropic API key not configured. Set it in Settings > BYOK.")
+    if not has_any_llm_key():
+        raise HTTPException(
+            400, "No LLM API key configured. Set one in Settings > BYOK."
+        )
 
     try:
-        client = anthropic.AsyncAnthropic(
-            api_key=api_key,
-            timeout=60.0,
+        raw_text = await llm_complete(
+            "", prompt, prefer="fast", max_tokens=2048, timeout=60.0
         )
-        response = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=2048,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        raw_text = response.content[0].text.strip()
-        json_text = raw_text
-        if "```json" in json_text:
-            json_text = json_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in json_text:
-            json_text = json_text.split("```")[1].split("```")[0].strip()
+        json_text = strip_json_fences(raw_text)
 
         parsed = json.loads(json_text)
 
@@ -1082,11 +1069,19 @@ Focus on:
                 card_id=c.get("card_id", ""),
                 card_name=card_names.get(c.get("card_id", ""), c.get("card_id", "")),
                 play_rate=next(
-                    (ch["play_rate"] for ch in health_data.get("card_health", []) if ch["card_id"] == c.get("card_id")),
+                    (
+                        ch["play_rate"]
+                        for ch in health_data.get("card_health", [])
+                        if ch["card_id"] == c.get("card_id")
+                    ),
                     0.0,
                 ),
                 win_correlation=next(
-                    (ch["win_correlation"] for ch in health_data.get("card_health", []) if ch["card_id"] == c.get("card_id")),
+                    (
+                        ch["win_correlation"]
+                        for ch in health_data.get("card_health", [])
+                        if ch["card_id"] == c.get("card_id")
+                    ),
                     0.0,
                 ),
                 category="core_engine",
@@ -1098,11 +1093,19 @@ Focus on:
                 card_id=c.get("card_id", ""),
                 card_name=card_names.get(c.get("card_id", ""), c.get("card_id", "")),
                 play_rate=next(
-                    (ch["play_rate"] for ch in health_data.get("card_health", []) if ch["card_id"] == c.get("card_id")),
+                    (
+                        ch["play_rate"]
+                        for ch in health_data.get("card_health", [])
+                        if ch["card_id"] == c.get("card_id")
+                    ),
                     0.0,
                 ),
                 win_correlation=next(
-                    (ch["win_correlation"] for ch in health_data.get("card_health", []) if ch["card_id"] == c.get("card_id")),
+                    (
+                        ch["win_correlation"]
+                        for ch in health_data.get("card_health", [])
+                        if ch["card_id"] == c.get("card_id")
+                    ),
                     0.0,
                 ),
                 category="dead_card",
@@ -1156,9 +1159,8 @@ Focus on:
 
         return result
 
-    except anthropic.APIError as e:
-        logger.exception("Claude API error during aggregate analysis")
-        raise HTTPException(502, f"AI analysis failed: {e}")
+    except LLMNotAvailableError as e:
+        raise HTTPException(400, str(e))
     except json.JSONDecodeError:
         logger.exception("Failed to parse AI response")
         raise HTTPException(502, "AI returned invalid JSON")

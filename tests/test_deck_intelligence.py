@@ -149,7 +149,7 @@ def compute_playability(
         + 20 * min(overlap, 1.0)
         + 15 * min(syn_density / 0.10, 1.0)
         + 10 * (1 if four_copies >= 6 else 0)
-        + 5 * (1 if avg_counter >= 800 else 0),
+        + 5 * (1 if avg_counter >= 900 else 0),
         1,
     )
 

@@ -106,6 +106,23 @@ class SimulationDataExporter:
                     record["game_idx"] = game_idx
                     f.write(json.dumps(record) + "\n")
 
+        # draw_probability.json — deck consistency analysis
+        try:
+            from backend.ai.draw_probability import analyze_deck_draw_probability
+
+            p1_cards = metadata.get("p1_deck_cards", [])
+            p2_cards = metadata.get("p2_deck_cards", [])
+            if p1_cards or p2_cards:
+                draw_prob_data: dict = {}
+                if p1_cards:
+                    draw_prob_data["p1"] = analyze_deck_draw_probability(p1_cards)
+                if p2_cards:
+                    draw_prob_data["p2"] = analyze_deck_draw_probability(p2_cards)
+                draw_prob_path = sim_dir / "draw_probability.json"
+                draw_prob_path.write_text(json.dumps(draw_prob_data, indent=2, default=str))
+        except Exception as e:
+            logger.warning("Failed to export draw probability: %s", e)
+
         logger.info(
             "Exported sim %s: %d games, %d decisions, %d snapshots → %s",
             sim_id,

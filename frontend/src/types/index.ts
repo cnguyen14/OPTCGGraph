@@ -428,7 +428,8 @@ export interface DeckAnalysis {
   card_roles: {
     blockers: number;
     removal: number;
-    draw_search: number;
+    draw: number;
+    searcher: number;
     rush: number;
     finishers: number;
   };

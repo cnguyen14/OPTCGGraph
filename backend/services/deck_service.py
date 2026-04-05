@@ -62,7 +62,8 @@ def count_card_roles(cards: list[dict]) -> dict[str, int]:
     roles: dict[str, int] = {
         "blockers": 0,
         "removal": 0,
-        "draw_search": 0,
+        "draw": 0,
+        "searcher": 0,
         "rush": 0,
         "finishers": 0,
     }
@@ -72,8 +73,10 @@ def count_card_roles(cards: list[dict]) -> dict[str, int]:
             roles["blockers"] += 1
         if keywords & {"KO", "Bounce", "Trash", "Power Debuff"}:
             roles["removal"] += 1
-        if keywords & {"Draw", "Search"}:
-            roles["draw_search"] += 1
+        if "Draw" in keywords:
+            roles["draw"] += 1
+        if "Search" in keywords:
+            roles["searcher"] += 1
         if "Rush" in keywords:
             roles["rush"] += 1
         if (card.get("cost") or 0) >= 7 and (card.get("power") or 0) >= 7000:

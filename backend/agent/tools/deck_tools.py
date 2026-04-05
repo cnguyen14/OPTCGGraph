@@ -52,12 +52,16 @@ async def _handle_suggest_deck_fixes(args: dict, ctx: ToolExecutionContext) -> s
 
 
 async def _handle_suggest_card_swap(args: dict, ctx: ToolExecutionContext) -> str:
+    from backend.ai.deck_builder import ROLE_KEYWORDS, STRATEGY_TEMPLATES
+
     deck_ids = args.get("deck_card_ids", [])
     incoming_id = args["incoming_card_id"]
 
     async with ctx.driver.session() as session:
         inc_r = await session.run(
-            "MATCH (c:Card {id: $card_id}) RETURN c",
+            "MATCH (c:Card {id: $card_id}) "
+            "OPTIONAL MATCH (c)-[:HAS_KEYWORD]->(k:Keyword) "
+            "RETURN c, collect(DISTINCT k.name) AS keywords",
             card_id=incoming_id,
         )
         inc_rec = await inc_r.single()
@@ -65,19 +69,54 @@ async def _handle_suggest_card_swap(args: dict, ctx: ToolExecutionContext) -> st
             return json.dumps({"error": f"Card {incoming_id} not found"})
 
         incoming = dict(inc_rec["c"])
+        incoming["keywords"] = inc_rec["keywords"]
 
+        # Fetch deck cards with keywords + synergy counts
         deck_r = await session.run(
             """
             UNWIND $card_ids AS cid
             MATCH (c:Card {id: cid})
-            RETURN c
+            OPTIONAL MATCH (c)-[:HAS_KEYWORD]->(k:Keyword)
+            OPTIONAL MATCH (c)-[syn:SYNERGY]-(other:Card)
+                WHERE other.id IN $card_ids AND other.id <> c.id
+            OPTIONAL MATCH (c)-[msyn:MECHANICAL_SYNERGY]-(other2:Card)
+                WHERE other2.id IN $card_ids AND other2.id <> c.id
+            WITH c, collect(DISTINCT k.name) AS keywords,
+                 count(DISTINCT syn) AS syn_count,
+                 count(DISTINCT msyn) AS msyn_count
+            RETURN c, keywords, syn_count, msyn_count
             """,
             card_ids=deck_ids,
         )
-        deck_cards = [dict(r["c"]) async for r in deck_r]
+        deck_cards = []
+        async for r in deck_r:
+            card = dict(r["c"])
+            card["keywords"] = r["keywords"]
+            card["syn_count"] = r["syn_count"]
+            card["msyn_count"] = r["msyn_count"]
+            deck_cards.append(card)
 
     if not deck_cards:
         return json.dumps({"error": "No deck cards found"})
+
+    # Use midrange role targets as baseline
+    role_targets = STRATEGY_TEMPLATES["midrange"]["role_targets"]
+    cost_targets = STRATEGY_TEMPLATES["midrange"]["cost_targets"]
+
+    # Count current roles
+    role_counts: dict[str, int] = {role: 0 for role in ROLE_KEYWORDS}
+    for card in deck_cards:
+        kws = set(card.get("keywords", []))
+        for role, role_kws in ROLE_KEYWORDS.items():
+            if kws & set(role_kws):
+                role_counts[role] += 1
+
+    # Count current cost curve
+    cost_counts: dict[tuple, int] = {}
+    for (cmin, cmax), _ in cost_targets.items():
+        cost_counts[(cmin, cmax)] = sum(
+            1 for c in deck_cards if cmin <= (c.get("cost") or 0) <= cmax
+        )
 
     def card_value(card: dict) -> float:
         score = 0.0
@@ -86,21 +125,59 @@ async def _handle_suggest_card_swap(args: dict, ctx: ToolExecutionContext) -> st
         score += min((card.get("counter") or 0) / 1000, 2.0)
         return score
 
+    def removal_penalty(card: dict) -> float:
+        """Penalty for removing this card based on role/curve/synergy impact."""
+        penalty = 0.0
+        kws = set(card.get("keywords", []))
+
+        # Role impact: penalize if removal drops a role below target
+        for role, role_kws in ROLE_KEYWORDS.items():
+            if kws & set(role_kws):
+                target = role_targets.get(role, 0)
+                if role_counts.get(role, 0) <= target:
+                    penalty += 5.0  # Critical: would drop below target
+                    break
+
+        # Curve impact: penalize if removal thins a cost tier below minimum
+        card_cost = card.get("cost") or 0
+        for (cmin, cmax), (tmin, _) in cost_targets.items():
+            if cmin <= card_cost <= cmax:
+                if cost_counts.get((cmin, cmax), 0) <= tmin:
+                    penalty += 3.0
+                break
+
+        # Synergy loss: penalize cards with many connections
+        syn = card.get("syn_count", 0)
+        msyn = card.get("msyn_count", 0)
+        penalty += (syn + msyn) * 0.5
+
+        return penalty
+
     incoming_cost = incoming.get("cost") or 0
     candidates = []
     for card in deck_cards:
-        cost_penalty = abs((card.get("cost") or 0) - incoming_cost) * 0.1
-        candidates.append((card_value(card) - cost_penalty, card))
+        cost_diff_penalty = abs((card.get("cost") or 0) - incoming_cost) * 0.1
+        swap_score = card_value(card) - cost_diff_penalty - removal_penalty(card)
+        candidates.append((swap_score, card))
 
     candidates.sort(key=lambda x: x[0])
     weakest = candidates[0][1]
+
+    # Build detailed reason
+    reasons = []
+    reasons.append("Lowest swap score in deck")
+    if weakest.get("syn_count", 0) == 0 and weakest.get("msyn_count", 0) == 0:
+        reasons.append("no synergy edges with other deck cards")
+    pick = weakest.get("tournament_pick_rate") or 0
+    if pick < 0.1:
+        reasons.append(f"low tournament pick rate ({pick:.0%})")
 
     return json.dumps({
         "remove_id": weakest.get("id", ""),
         "remove_name": weakest.get("name", ""),
         "add_id": incoming.get("id", ""),
         "add_name": incoming.get("name", ""),
-        "reason": "Swap recommended: lower tournament value card replaced",
+        "reason": f"Swap recommended: {'; '.join(reasons)}",
     }, default=str)
 
 

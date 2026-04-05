@@ -46,7 +46,72 @@ STRATEGIC_CONCEPTS = """
 - COUNTER DENSITY: Having enough counter values to survive attacks
 - AGGRO vs CONTROL: Fast damage vs resource denial
 - MIDRANGE: Balancing board presence with removal
+
+## Color Strengths
+- RED: Rush-heavy aggro, DON!! power boosts, fast damage — close games early
+- GREEN: DON!! ramp, big bodies, rest opponent characters — play ahead of curve
+- BLUE: Bounce/banish removal, hand advantage, deck manipulation — strongest removal color
+- PURPLE: DON!! manipulation, trash recursion, cost cheating — explosive combos
+- BLACK: KO removal via cost reduction, board control — uses trash as second hand
+- YELLOW: Life manipulation, Trigger effects, defensive value — turns damage into advantage
 """
+
+COLOR_STRATEGIES: dict[str, dict] = {
+    "Red": {
+        "strengths": "Rush aggro, fast tempo, DON!! power boosts",
+        "preferred_roles": {"rush": 1.5, "finishers": 1.2},
+        "description": (
+            "Red excels at fast aggro with Rush attackers and DON!! power boosts. "
+            "Prioritize low-cost Rush characters for early pressure. "
+            "Close games before opponent stabilizes."
+        ),
+    },
+    "Green": {
+        "strengths": "DON!! ramp, big bodies, rest opponent characters",
+        "preferred_roles": {"finishers": 1.5, "blockers": 1.2},
+        "description": (
+            "Green ramps DON!! to deploy large characters ahead of curve. "
+            "Use resting effects to control opponent tempo. "
+            "Prioritize high-cost finishers and DON!! acceleration."
+        ),
+    },
+    "Blue": {
+        "strengths": "Bounce removal, hand advantage, deck manipulation",
+        "preferred_roles": {"removal": 1.4, "draw": 1.3, "searcher": 1.2},
+        "description": (
+            "Blue bounces threats and generates card advantage. "
+            "Banish (bottom-deck) is the strongest removal — cards are gone for the entire game. "
+            "Prioritize draw engines and bounce/banish effects."
+        ),
+    },
+    "Purple": {
+        "strengths": "DON!! manipulation, trash recursion, cost cheating",
+        "preferred_roles": {"removal": 1.3, "draw": 1.2},
+        "description": (
+            "Purple manipulates DON!! economy and recurs from trash. "
+            "Can cheat costs via DON!! ramp or trash-based recursion. "
+            "Prioritize DON!! manipulation effects and trash synergy."
+        ),
+    },
+    "Black": {
+        "strengths": "KO removal, cost reduction, board control",
+        "preferred_roles": {"removal": 1.5, "blockers": 1.3},
+        "description": (
+            "Black KOs threats via cost reduction (reduce cost to 0, then KO). "
+            "Uses trash as a second hand for recursion. "
+            "Prioritize removal events and cost-reduction characters."
+        ),
+    },
+    "Yellow": {
+        "strengths": "Life manipulation, Trigger effects, defensive value",
+        "preferred_roles": {"blockers": 1.3, "draw": 1.2},
+        "description": (
+            "Yellow manipulates life cards for Trigger value and defense. "
+            "Turns damage taken into advantage via powerful Trigger effects. "
+            "Prioritize cards with Trigger keyword and life manipulation."
+        ),
+    },
+}
 
 AGENT_INSTRUCTIONS = """
 # Agent Instructions

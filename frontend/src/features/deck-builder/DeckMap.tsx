@@ -24,7 +24,8 @@ const EDGE_COLORS: Record<string, string> = {
 const ROLE_MAP = {
   blockers: { label: 'Blockers', keywords: ['Blocker'], color: '#3b82f6' },
   removal: { label: 'Removal', keywords: ['KO', 'Bounce', 'Trash', 'Power Debuff', 'Rest'], color: '#ef4444' },
-  draw_search: { label: 'Draw/Search', keywords: ['Draw', 'Search'], color: '#22c55e' },
+  draw: { label: 'Draw', keywords: ['Draw'], color: '#22c55e' },
+  searcher: { label: 'Searcher', keywords: ['Search'], color: '#10b981' },
   rush: { label: 'Rush', keywords: ['Rush'], color: '#f59e0b' },
   finishers: { label: 'Finishers', keywords: [] as string[], color: '#a855f7' },
   counter: { label: 'Counter', keywords: [] as string[], color: '#06b6d4' },
@@ -46,7 +47,7 @@ function classifyRoles(node: { keywords: string[]; cost: number | null; power: n
   return [...new Set(roles)];
 }
 
-const EMPTY_ROLE_COUNTS: Record<RoleKey, number> = { blockers: 0, removal: 0, draw_search: 0, rush: 0, finishers: 0, counter: 0 };
+const EMPTY_ROLE_COUNTS: Record<RoleKey, number> = { blockers: 0, removal: 0, draw: 0, searcher: 0, rush: 0, finishers: 0, counter: 0 };
 
 interface MapNode extends d3.SimulationNodeDatum {
   id: string;

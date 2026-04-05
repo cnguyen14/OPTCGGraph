@@ -352,8 +352,11 @@ def _find_replacement(
     min_power: int | None = None,
     required_keyword: str | None = None,
     exclude_ids: set[str] | None = None,
+    needed_roles: list[str] | None = None,
 ) -> dict | None:
     """Find the best replacement card from pool matching criteria."""
+    from backend.ai.deck_builder import ROLE_KEYWORDS
+
     candidates = pool
     if exclude_ids:
         candidates = [c for c in candidates if c["id"] not in exclude_ids]
@@ -371,7 +374,7 @@ def _find_replacement(
     if not candidates:
         return None
 
-    # Sort by best match (includes synergy with existing deck)
+    # Sort by best match (includes synergy with existing deck + role coverage)
     def score(c):
         s = 0.0
         if target_cost is not None:
@@ -382,6 +385,13 @@ def _find_replacement(
         s += len(c.get("keywords") or []) * 0.3
         s += c.get("syn_connections", 0) * 1.5
         s += c.get("msyn_connections", 0) * 1.0
+        # Bonus for filling needed roles
+        if needed_roles:
+            card_kws = set(c.get("keywords") or [])
+            for role in needed_roles:
+                role_kws = ROLE_KEYWORDS.get(role, [])
+                if card_kws & set(role_kws):
+                    s += 2.0
         return s
 
     candidates.sort(key=lambda c: -score(c))

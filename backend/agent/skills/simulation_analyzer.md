@@ -61,6 +61,15 @@ When the user asks about a specific deck or simulation:
 4. Analyze action_patterns for tempo discipline and combat efficiency
 5. Present recommendations with specific numbers
 
+### Draw Probability Analysis
+When simulation data includes `draw_probability`, use it to assess deck consistency:
+- `early_game_access.probability < 0.80` → "Deck struggles to play on curve early — needs more low-cost cards"
+- `consistency_score < 65` → "Deck lacks consistency — consider more 4x playsets or searcher cards"
+- Compare `per_card.p_opening_hand` with actual `play_rate` from simulation:
+  - If p_opening_hand is HIGH but play_rate is LOW → card is drawn but not played (dead draw)
+  - If p_opening_hand is LOW but play_rate is HIGH → card is good when drawn, consider adding more copies
+- `role_access` shows P(draw ≥1 of each role by target turn) — critical for strategy viability
+
 ### MANDATORY TOOL USE
 - Call `analyze_simulations` for global/cross-simulation analysis
 - Call `analyze_deck_simulation` for single-simulation deck analysis

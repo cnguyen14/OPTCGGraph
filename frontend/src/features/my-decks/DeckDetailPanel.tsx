@@ -271,7 +271,7 @@ function DeckListTab({ leaderId, cardIds }: { leaderId: string; cardIds: string[
       {/* Full image preview */}
       {previewImage && (
         <div
-          className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center cursor-pointer"
+          className="fixed inset-0 bg-surface-base/85 backdrop-blur-md z-[9999] flex items-center justify-center cursor-pointer"
           onClick={() => setPreviewImage(null)}
         >
           <img src={previewImage} alt="" className="max-h-[50vh] max-w-[60vw] rounded-xl shadow-2xl" />
@@ -384,7 +384,8 @@ function AnalysisTab({ leaderId, cardIds, healthData, onHealthReportChange }: {
   const roleIcons: Record<string, string> = {
     blockers: '\u{1F6E1}',
     removal: '\u{1F5D1}',
-    draw_search: '\u{1F50D}',
+    draw: '\u{1F0CF}',
+    searcher: '\u{1F50D}',
     rush: '\u{26A1}',
     finishers: '\u{2694}',
   };

@@ -185,10 +185,25 @@ def validate_deck(leader: dict, cards: list[dict]) -> ValidationReport:
     counter_1k = sum(1 for c in counters if c == 1000)
     counter_0 = sum(1 for c in counters if c == 0)
     counter_details = {"total": total_counter, "average": round(avg_counter), "2000_count": counter_2k, "1000_count": counter_1k, "0_count": counter_0}
-    if avg_counter >= 800:
+    if avg_counter >= 900:
         report.add(CheckResult("COUNTER_DENSITY", "PASS", f"Average counter: {round(avg_counter)} per card (total: {total_counter})", counter_details))
     else:
-        report.add(CheckResult("COUNTER_DENSITY", "WARNING", f"Low counter density: avg {round(avg_counter)} per card (target: 800+)", counter_details))
+        report.add(CheckResult("COUNTER_DENSITY", "WARNING", f"Low counter density: avg {round(avg_counter)} per card (target: 900+)", counter_details))
+
+    # 7b. COUNTER_DISTRIBUTION
+    high_counter_total = counter_2k + counter_1k
+    if high_counter_total >= 10:
+        report.add(CheckResult(
+            "COUNTER_DISTRIBUTION", "PASS",
+            f"{counter_2k} cards at +2000 counter, {counter_1k} at +1000 (total high-counter: {high_counter_total})",
+            {"2000_count": counter_2k, "1000_count": counter_1k, "0_count": counter_0},
+        ))
+    else:
+        report.add(CheckResult(
+            "COUNTER_DISTRIBUTION", "WARNING",
+            f"Only {high_counter_total} cards with counter >= 1000 (target: 10+). 2000: {counter_2k}, 1000: {counter_1k}",
+            {"2000_count": counter_2k, "1000_count": counter_1k, "0_count": counter_0},
+        ))
 
     # 8. TYPE_RATIO
     type_counts = Counter(c.get("card_type", "") for c in cards)
@@ -243,6 +258,39 @@ def validate_deck(leader: dict, cards: list[dict]) -> ValidationReport:
         report.add(CheckResult("REMOVAL_OPTIONS", "PASS", f"{len(removal_cards)} cards with removal effects"))
     else:
         report.add(CheckResult("REMOVAL_OPTIONS", "WARNING", f"Only {len(removal_cards)} removal cards (target: 4+ for board control)"))
+
+    # 14. EARLY_GAME_ACCESS (draw probability)
+    from backend.ai.draw_probability import analyze_deck_draw_probability
+
+    draw_probs = analyze_deck_draw_probability(cards)
+    early = draw_probs["early_game_access"]
+    if early["probability"] >= early["threshold"]:
+        report.add(CheckResult(
+            "EARLY_GAME_ACCESS", "PASS",
+            f"P(playable turn 1-2) = {early['probability']:.0%} ({early['eligible_cards']} cards cost ≤2)",
+            early,
+        ))
+    else:
+        report.add(CheckResult(
+            "EARLY_GAME_ACCESS", "WARNING",
+            f"Low early game access: P(cost ≤2 in opening hand) = {early['probability']:.0%} (target: ≥{early['threshold']:.0%})",
+            early,
+        ))
+
+    # 15. CONSISTENCY_SCORE
+    consistency = draw_probs["consistency_score"]
+    if consistency >= 65:
+        report.add(CheckResult(
+            "CONSISTENCY_SCORE", "PASS",
+            f"Deck consistency: {consistency}/100 (draw probability + role access + searcher coverage)",
+            {"score": consistency, "details": draw_probs["role_access"]},
+        ))
+    else:
+        report.add(CheckResult(
+            "CONSISTENCY_SCORE", "WARNING",
+            f"Low consistency: {consistency}/100 (target: 65+). Consider more 4x playsets or searchers.",
+            {"score": consistency, "details": draw_probs["role_access"]},
+        ))
 
     # Build summary
     if report.is_legal:

@@ -18,6 +18,7 @@ Quality targets based on pro tournament data:
 - Character-heavy composition (~77%)
 """
 
+import asyncio
 import copy
 import json
 import logging
@@ -48,7 +49,8 @@ STRATEGY_TEMPLATES = {
         "role_targets": {
             "blockers": 4,
             "removal": 4,
-            "draw_search": 4,
+            "draw": 2,
+            "searcher": 2,
             "rush": 6,
             "finishers": 2,
         },
@@ -64,7 +66,8 @@ STRATEGY_TEMPLATES = {
         "role_targets": {
             "blockers": 6,
             "removal": 6,
-            "draw_search": 6,
+            "draw": 3,
+            "searcher": 3,
             "rush": 4,
             "finishers": 4,
         },
@@ -80,7 +83,8 @@ STRATEGY_TEMPLATES = {
         "role_targets": {
             "blockers": 8,
             "removal": 8,
-            "draw_search": 8,
+            "draw": 4,
+            "searcher": 4,
             "rush": 2,
             "finishers": 6,
         },
@@ -91,7 +95,8 @@ STRATEGY_TEMPLATES = {
 ROLE_KEYWORDS = {
     "blockers": ["Blocker"],
     "removal": ["KO", "Bounce", "Trash", "Power Debuff", "Rest"],
-    "draw_search": ["Draw", "Search"],
+    "draw": ["Draw"],
+    "searcher": ["Search"],
     "rush": ["Rush"],
 }
 
@@ -113,8 +118,11 @@ def _apply_playstyle_hints(template: dict, hints: str) -> dict:
         t["cost_targets"][(0, 2)] = (16, 20)
         t["type_targets"]["CHARACTER"] = (40, 44)
     if "card_advantage" in hint_set or "value" in hint_set:
-        t["role_targets"]["draw_search"] = max(
-            t["role_targets"].get("draw_search", 0), 8
+        t["role_targets"]["draw"] = max(
+            t["role_targets"].get("draw", 0), 5
+        )
+        t["role_targets"]["searcher"] = max(
+            t["role_targets"].get("searcher", 0), 5
         )
     if "defensive" in hint_set or "blockers" in hint_set:
         t["role_targets"]["blockers"] = max(t["role_targets"].get("blockers", 0), 10)
@@ -154,8 +162,21 @@ async def build_deck(
     strategy = strategy if strategy in STRATEGY_TEMPLATES else "midrange"
     template = _apply_playstyle_hints(STRATEGY_TEMPLATES[strategy], playstyle_hints)
 
-    # 2. Get ALL eligible candidates from Neo4j
-    candidates = await _get_candidates(driver, leader_id, leader_colors)
+    # Apply color-specific role adjustments
+    from backend.ai.game_rules import COLOR_STRATEGIES
+
+    for color in leader_colors:
+        color_strat = COLOR_STRATEGIES.get(color, {})
+        for role, multiplier in color_strat.get("preferred_roles", {}).items():
+            if role in template["role_targets"]:
+                original = template["role_targets"][role]
+                template["role_targets"][role] = min(
+                    round(original * multiplier),
+                    original * 2,  # Cap at 2x to prevent extreme stacking
+                )
+
+    # 2. Get candidates via parallel queries (synergy + curve scores + counter pool)
+    candidates = await _get_candidates_parallel(driver, leader_id, leader_colors)
     if not candidates:
         return {
             "error": f"No eligible cards found for leader {leader_id} colors {leader_colors}"
@@ -295,12 +316,117 @@ async def _get_candidates(
     return candidates
 
 
+async def _get_curve_scores(
+    driver: AsyncDriver, leader_id: str, leader_colors: set[str]
+) -> dict[str, float]:
+    """Get CURVES_INTO scores in a separate lightweight query.
+
+    Returns a dict of card_id -> curve_score (1.0 if card curves into
+    a card associated with the leader, 0.0 otherwise).
+    Kept separate from main query to avoid OPTIONAL MATCH memory explosion.
+    """
+    color_list = list(leader_colors)
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (c:Card)-[:HAS_COLOR]->(color:Color)
+            WHERE color.name IN $colors
+              AND c.card_type IN ['CHARACTER', 'EVENT', 'STAGE']
+            WITH DISTINCT c
+            MATCH (c)-[:CURVES_INTO]-(other:Card)-[:LED_BY]->(:Card {id: $leader_id})
+            RETURN DISTINCT c.id AS card_id
+            """,
+            colors=color_list,
+            leader_id=leader_id,
+        )
+        return {record["card_id"]: 1.0 async for record in result}
+
+
+async def _get_counter_pool(
+    driver: AsyncDriver, leader_colors: set[str]
+) -> list[dict]:
+    """Get high-counter cards that may be missed by synergy scoring."""
+    color_list = list(leader_colors)
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (c:Card)-[:HAS_COLOR]->(color:Color)
+            WHERE color.name IN $colors
+              AND c.card_type IN ['CHARACTER', 'EVENT', 'STAGE']
+              AND (c.banned IS NULL OR c.banned = false)
+              AND c.counter >= 2000
+            OPTIONAL MATCH (c)-[:HAS_KEYWORD]->(k:Keyword)
+            RETURN c, collect(DISTINCT k.name) AS keywords,
+                   collect(DISTINCT color.name) AS colors,
+                   (c.counter / 1000.0) AS relevance,
+                   c.tournament_pick_rate AS tournament_pick_rate,
+                   c.top_cut_rate AS top_cut_rate,
+                   c.avg_copies AS avg_copies
+            ORDER BY c.counter DESC
+            LIMIT 30
+            """,
+            colors=color_list,
+        )
+        cards = []
+        async for record in result:
+            card = dict(record["c"])
+            card["keywords"] = record["keywords"]
+            card["colors"] = record["colors"]
+            card["relevance"] = record["relevance"]
+            card["tournament_pick_rate"] = record["tournament_pick_rate"]
+            card["top_cut_rate"] = record["top_cut_rate"]
+            card["avg_copies"] = record["avg_copies"]
+            cards.append(card)
+        return cards
+
+
+async def _get_candidates_parallel(
+    driver: AsyncDriver, leader_id: str, leader_colors: set[str]
+) -> list[dict]:
+    """Get candidates via 3 parallel queries, then merge.
+
+    Runs simultaneously:
+    1. Main synergy-scored candidates (LED_BY, SYNERGY, MECHANICAL_SYNERGY)
+    2. CURVES_INTO scores (lightweight, separate to avoid memory explosion)
+    3. High-counter pool (ensures +2000 counter cards are well-represented)
+
+    Merges curve scores into candidates, adds missing counter cards.
+    """
+    # Run 3 independent queries in parallel
+    main_candidates, curve_scores, counter_pool = await asyncio.gather(
+        _get_candidates(driver, leader_id, leader_colors),
+        _get_curve_scores(driver, leader_id, leader_colors),
+        _get_counter_pool(driver, leader_colors),
+    )
+
+    # Merge curve scores into main candidates
+    for card in main_candidates:
+        card["relevance"] += curve_scores.get(card["id"], 0.0)
+
+    # Add counter pool cards not already in candidates
+    existing_ids = {c["id"] for c in main_candidates}
+    for card in counter_pool:
+        if card["id"] not in existing_ids:
+            main_candidates.append(card)
+            existing_ids.add(card["id"])
+
+    # Re-sort by updated relevance
+    main_candidates.sort(key=lambda c: (-c.get("relevance", 0), c.get("cost") or 0))
+
+    logger.info(
+        f"Parallel search: {len(main_candidates)} candidates "
+        f"({len(curve_scores)} with curve bonus, {len(counter_pool)} counter pool)"
+    )
+    return main_candidates
+
+
 def _categorize(candidates: list[dict]) -> dict[str, list[dict]]:
     """Categorize candidates by gameplay role based on keywords and stats."""
     buckets: dict[str, list[dict]] = {
         "blockers": [],
         "removal": [],
-        "draw_search": [],
+        "draw": [],
+        "searcher": [],
         "rush": [],
         "finishers": [],
         "counter_cards": [],
@@ -343,9 +469,9 @@ def _score_card(card: dict) -> float:
     score = card.get("relevance", 0) * 2.0
     counter = card.get("counter") or 0
     if counter >= 2000:
-        score += 2.0
+        score += 3.0  # +2000 counters are premium defensive assets
     elif counter >= 1000:
-        score += 1.0
+        score += 1.5
     keywords = set(card.get("keywords", []))
     roles_covered = sum(1 for kws in ROLE_KEYWORDS.values() if keywords & set(kws))
     score += roles_covered * 0.5
@@ -457,12 +583,14 @@ def _fill_deck(
             if card and card.get("card_type") != "LEADER":
                 add_card(card, copies=min(qty, 4))
 
-    # === Phase -1: Lock in signature cards at 4 copies ===
+    # === Phase -1: Lock in signature cards (use tournament avg_copies) ===
     if signature_cards:
         for card_id in signature_cards:
             card = candidate_map.get(card_id)
             if card and can_add(card):
-                add_card(card, copies=4)
+                avg = card.get("avg_copies") or 4
+                copies = max(2, min(4, round(avg)))
+                add_card(card, copies=copies)
 
     # === Phase 0: Select CORE CHARACTER cards (4x copies each) ===
     # Reserve slots for Events/Stages — only fill CHARACTER portion of core
@@ -677,6 +805,9 @@ Strategy: {strategy}
 ## Available Replacement Candidates (not in deck, sorted by tournament performance)
 {replacement_pool}
 
+## Color-Specific Evaluation
+{color_guidance}
+
 ## Your Task
 Analyze EACH card's ability text and how it synergizes with the leader and other cards.
 Look for:
@@ -768,11 +899,13 @@ def _build_replacement_pool(
     for c in pool[:limit]:
         ability = (c.get("ability") or "No ability")[:100]
         keywords = ", ".join(c.get("keywords", [])) or "none"
+        pick = c.get("tournament_pick_rate") or 0
+        top_cut = c.get("top_cut_rate") or 0
         lines.append(
             f"  {c['id']} — {c.get('name', '')} ({c.get('card_type', '')}) "
-            f"Cost:{c.get('cost', 0)} Power:{c.get('power', 0)} Counter:{c.get('counter', 0)} "
-            f"Keywords:[{keywords}] Pick:{c.get('tournament_pick_rate', 0):.0%} "
-            f"TopCut:{c.get('top_cut_rate', 0):.0%}\n"
+            f"Cost:{c.get('cost') or 0} Power:{c.get('power') or 0} Counter:{c.get('counter') or 0} "
+            f"Keywords:[{keywords}] Pick:{pick:.0%} "
+            f"TopCut:{top_cut:.0%}\n"
             f"     Ability: {ability}"
         )
 
@@ -806,6 +939,19 @@ async def _qc_review(
     if playstyle_hints:
         playstyle_context = f"\nPlaystyle Preferences: {playstyle_hints}\nEvaluate cards specifically against these playstyle goals.\n"
 
+    # Build color-specific guidance
+    from backend.ai.game_rules import COLOR_STRATEGIES
+
+    color_lines = []
+    for color in leader.get("colors", []):
+        cs = COLOR_STRATEGIES.get(color, {})
+        if cs:
+            color_lines.append(
+                f"- **{color}**: {cs['description']} "
+                f"Preferred roles: {', '.join(cs.get('preferred_roles', {}).keys())}"
+            )
+    color_guidance = "\n".join(color_lines) if color_lines else "No color-specific guidance."
+
     prompt = QC_REVIEW_PROMPT.format(
         leader_name=leader.get("name", ""),
         leader_id=leader["id"],
@@ -814,6 +960,7 @@ async def _qc_review(
         leader_ability=leader.get("ability", "N/A"),
         strategy=strategy,
         playstyle_context=playstyle_context,
+        color_guidance=color_guidance,
         total_cards=len(deck),
         deck_summary=_build_deck_summary(leader, deck),
         validation_summary=validation_report.summary

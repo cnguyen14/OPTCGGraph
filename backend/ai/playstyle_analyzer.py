@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 EFFECT_KEYWORDS = {
     "rush": ["Rush"],
     "blocker": ["Blocker"],
-    "draw_search": ["Draw", "Search"],
+    "draw": ["Draw"],
+    "searcher": ["Search"],
     "removal": ["KO", "Bounce", "Trash", "Power Debuff", "Rest"],
     "double_attack": ["Double Attack"],
     "banish": ["Banish"],
@@ -53,7 +54,8 @@ class _DeckFeatures:
     avg_cost: float = 0.0
     rush_ratio: float = 0.0
     blocker_ratio: float = 0.0
-    draw_search_ratio: float = 0.0
+    draw_ratio: float = 0.0
+    searcher_ratio: float = 0.0
     removal_ratio: float = 0.0
     counter_density: float = 0.0
     low_cost_ratio: float = 0.0  # cost <= 2
@@ -68,7 +70,7 @@ def _classify_deck(f: _DeckFeatures) -> str:
             return "Rush Aggro"
         return "Wide Aggro"
     elif f.avg_cost <= 4.5:
-        if f.draw_search_ratio > 0.12:
+        if (f.draw_ratio + f.searcher_ratio) > 0.12:
             return "Midrange Value"
         return "Midrange Balanced"
     else:
@@ -252,7 +254,8 @@ async def _load_deck_features(
                 avg_cost=total_cost / total_cards,
                 rush_ratio=keyword_counts["rush"] / total_cards,
                 blocker_ratio=keyword_counts["blocker"] / total_cards,
-                draw_search_ratio=keyword_counts["draw_search"] / total_cards,
+                draw_ratio=keyword_counts["draw"] / total_cards,
+                searcher_ratio=keyword_counts["searcher"] / total_cards,
                 removal_ratio=keyword_counts["removal"] / total_cards,
                 counter_density=total_counter / total_cards,
                 low_cost_ratio=low_cost / total_cards,

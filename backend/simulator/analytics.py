@@ -614,7 +614,19 @@ def aggregate_deck_health(sim_folders: list[str]) -> dict[str, Any]:
     # --- Aggregated action patterns ---
     decision_stats = _compute_decision_stats(all_decisions)
 
-    return {
+    # Draw probability — load from exported file if available
+    draw_probability = None
+    if sim_folders:
+        try:
+            from pathlib import Path
+
+            dp_path = Path(sim_folders[0]) / "draw_probability.json"
+            if dp_path.exists():
+                draw_probability = json.loads(dp_path.read_text())
+        except Exception:
+            pass
+
+    result = {
         "total_games": total_games,
         "total_wins": total_wins,
         "overall_win_rate": round(overall_win_rate, 4),
@@ -628,6 +640,9 @@ def aggregate_deck_health(sim_folders: list[str]) -> dict[str, Any]:
             "avg_decisions_per_game": decision_stats.get("avg_decisions_per_game", 0.0),
         },
     }
+    if draw_probability:
+        result["draw_probability"] = draw_probability
+    return result
 
 
 def aggregate_all_simulations() -> list[dict[str, Any]]:
