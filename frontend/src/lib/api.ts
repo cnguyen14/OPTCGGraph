@@ -135,6 +135,43 @@ export async function chatSync(
   return resp.json();
 }
 
+// --- Chat session history ---
+
+export interface SessionSummary {
+  session_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface SessionDetail {
+  session_id: string;
+  title: string;
+  messages: { role: string; content: string }[];
+  created_at: string;
+  updated_at: string;
+}
+
+export async function fetchChatSessions(clientId: string): Promise<SessionSummary[]> {
+  const resp = await fetch(`${BASE_URL}/ai/sessions?client_id=${encodeURIComponent(clientId)}`);
+  const data = await resp.json();
+  return data.sessions ?? [];
+}
+
+export async function loadChatSession(sessionId: string): Promise<SessionDetail | null> {
+  const resp = await fetch(`${BASE_URL}/ai/sessions/${sessionId}`);
+  const data = await resp.json();
+  if (data.error) return null;
+  return data;
+}
+
+export async function deleteChatSession(sessionId: string, clientId: string): Promise<void> {
+  await fetch(`${BASE_URL}/ai/sessions/${sessionId}?client_id=${encodeURIComponent(clientId)}`, {
+    method: 'DELETE',
+  });
+}
+
 export async function fetchModels(): Promise<ModelsResponse> {
   const resp = await fetch(`${BASE_URL}/settings/models`);
   return resp.json();
@@ -275,7 +312,7 @@ export async function fetchSimulationResult(simId: string): Promise<SimulationRe
 
 const CLIENT_ID_KEY = 'optcg-client-id';
 
-function getClientId(): string {
+export function getClientId(): string {
   let id = localStorage.getItem(CLIENT_ID_KEY);
   if (!id) {
     id = crypto.randomUUID();

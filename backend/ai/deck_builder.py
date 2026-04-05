@@ -607,6 +607,9 @@ def _score_card(card: dict) -> float:
     top_cut_rate = card.get("top_cut_rate") or 0
     avg_copies = card.get("avg_copies") or 0
     score += pick_rate * 3.0 + top_cut_rate * 5.0 + avg_copies * 0.5
+    # Parallel art penalty: same gameplay but higher price — prefer base art
+    if _PARALLEL_ART_RE.search(card.get("id", "")):
+        score -= 0.5
     return score
 
 

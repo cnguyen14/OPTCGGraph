@@ -16,7 +16,7 @@ JSONDict = dict[str, Any]
 class ModelConfig:
     """LLM provider and model configuration."""
 
-    provider: str = "claude"  # "claude" or "openrouter"
+    provider: str = "anthropic"  # "anthropic" or "openrouter"
     model: str = "claude-sonnet-4-20250514"
     api_key: str | None = None
     temperature: float = 0.0

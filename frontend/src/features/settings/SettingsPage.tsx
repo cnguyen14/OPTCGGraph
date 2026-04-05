@@ -251,7 +251,61 @@ function ApiKeyRow({
   );
 }
 
-// --- AI Model Selector (simplified — keys managed in API Keys section) ---
+// --- Vendor categorization for OpenRouter models ---
+const VENDOR_CONFIG: Record<string, { label: string; color: string }> = {
+  anthropic: { label: 'Anthropic', color: 'bg-amber-600/20 text-amber-400 border-amber-600/30' },
+  openai: { label: 'OpenAI', color: 'bg-green-600/20 text-green-400 border-green-600/30' },
+  google: { label: 'Google', color: 'bg-blue-600/20 text-blue-400 border-blue-600/30' },
+  deepseek: { label: 'DeepSeek', color: 'bg-cyan-600/20 text-cyan-400 border-cyan-600/30' },
+  meta: { label: 'Meta', color: 'bg-indigo-600/20 text-indigo-400 border-indigo-600/30' },
+  mistralai: { label: 'Mistral', color: 'bg-orange-600/20 text-orange-400 border-orange-600/30' },
+  qwen: { label: 'Qwen', color: 'bg-purple-600/20 text-purple-400 border-purple-600/30' },
+  other: { label: 'Other', color: 'bg-gray-600/20 text-gray-400 border-gray-600/30' },
+};
+
+function getVendorKey(modelId: string): string {
+  const prefix = modelId.split('/')[0]?.toLowerCase() ?? '';
+  // Normalize vendor prefixes
+  if (prefix.includes('meta')) return 'meta';
+  if (prefix.includes('qwen')) return 'qwen';
+  if (prefix in VENDOR_CONFIG) return prefix;
+  return 'other';
+}
+
+function groupModelsByVendor(models: ModelInfo[]): Record<string, ModelInfo[]> {
+  const groups: Record<string, ModelInfo[]> = {};
+  for (const m of models) {
+    const vendor = getVendorKey(m.id);
+    if (!groups[vendor]) groups[vendor] = [];
+    groups[vendor].push(m);
+  }
+  // Sort vendors: put ones with more models first, "other" last
+  const sorted: Record<string, ModelInfo[]> = {};
+  const keys = Object.keys(groups).sort((a, b) => {
+    if (a === 'other') return 1;
+    if (b === 'other') return -1;
+    return (groups[b]?.length ?? 0) - (groups[a]?.length ?? 0);
+  });
+  for (const k of keys) sorted[k] = groups[k];
+  return sorted;
+}
+
+// --- Tier badge ---
+function TierBadge({ tier }: { tier: number }) {
+  const colors =
+    tier === 1
+      ? 'bg-green-900/40 text-green-400 border-green-700/30'
+      : tier === 2
+        ? 'bg-yellow-900/40 text-yellow-400 border-yellow-700/30'
+        : 'bg-gray-900/40 text-gray-500 border-gray-700/30';
+  return (
+    <span className={`inline-flex px-1.5 py-0.5 text-[9px] font-medium rounded border ${colors}`}>
+      T{tier}
+    </span>
+  );
+}
+
+// --- AI Model Selector ---
 function AIModelSelector({
   models,
   sysStatus,
@@ -265,7 +319,7 @@ function AIModelSelector({
 }) {
   type AIProvider = 'anthropic' | 'openrouter';
   const AI_PROVIDERS: { key: AIProvider; label: string; backendKey: string }[] = [
-    { key: 'anthropic', label: 'Anthropic (Claude)', backendKey: 'claude' },
+    { key: 'anthropic', label: 'Anthropic (Direct)', backendKey: 'claude' },
     { key: 'openrouter', label: 'OpenRouter', backendKey: 'openrouter' },
   ];
 
@@ -275,12 +329,14 @@ function AIModelSelector({
   });
   const [providerModels, setProviderModels] = useState<ModelInfo[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
+  const [selectedVendor, setSelectedVendor] = useState<string | null>(null);
 
   const info = AI_PROVIDERS.find((p) => p.key === selectedProvider)!;
   const hasKey = sysStatus?.api_keys[selectedProvider] ?? false;
 
   useEffect(() => {
     setProviderModels([]);
+    setSelectedVendor(null);
     if (hasKey) {
       loadModels();
     }
@@ -303,59 +359,146 @@ function AIModelSelector({
     }
   };
 
+  const vendorGroups = selectedProvider === 'openrouter' ? groupModelsByVendor(providerModels) : null;
+  const vendorKeys = vendorGroups ? Object.keys(vendorGroups) : [];
+  const displayModels =
+    selectedProvider === 'openrouter' && selectedVendor && vendorGroups
+      ? vendorGroups[selectedVendor] ?? []
+      : providerModels;
+
+  // Auto-select the vendor of the active model
+  useEffect(() => {
+    if (selectedProvider === 'openrouter' && models?.current.provider === 'openrouter' && !selectedVendor && providerModels.length > 0) {
+      const activeVendor = getVendorKey(models.current.model);
+      setSelectedVendor(activeVendor);
+    }
+  }, [selectedProvider, models, providerModels, selectedVendor]);
+
   return (
     <div className="space-y-4">
+      {/* Active model display */}
       {models && (
-        <div className="text-sm text-text-secondary">
-          Active:{' '}
-          <span className="text-text-primary font-medium">
-            {models.current.provider} / {models.current.model}
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-text-muted">Active:</span>
+          <span className="px-2.5 py-1 rounded-lg bg-op-ocean/15 border border-op-ocean/30 text-op-ocean font-medium text-xs">
+            {models.current.model}
           </span>
+          <span className="text-[10px] text-text-muted">via {models.current.provider}</span>
         </div>
       )}
 
       {/* Provider tabs */}
       <div className="flex gap-2">
-        {AI_PROVIDERS.map((p) => (
-          <Button
-            key={p.key}
-            onClick={() => setSelectedProvider(p.key)}
-            variant={selectedProvider === p.key ? 'primary' : 'secondary'}
-            size="sm"
-          >
-            {p.label}
-          </Button>
-        ))}
+        {AI_PROVIDERS.map((p) => {
+          const active = selectedProvider === p.key;
+          const providerHasKey = sysStatus?.api_keys[p.key] ?? false;
+          return (
+            <button
+              key={p.key}
+              onClick={() => setSelectedProvider(p.key)}
+              className={`px-4 py-2 text-xs font-medium rounded-lg border transition-all ${
+                active
+                  ? 'bg-op-ocean/20 border-op-ocean/50 text-op-ocean shadow-sm'
+                  : 'bg-surface-1 border-glass-border text-text-secondary hover:bg-surface-2 hover:text-text-primary'
+              }`}
+            >
+              {p.label}
+              {!providerHasKey && (
+                <span className="ml-1.5 text-[9px] text-red-400">No Key</span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Model list */}
+      {/* Content */}
       {!hasKey ? (
-        <p className="text-xs text-text-muted">
-          Configure an API key for {info.label} in the API Keys section above to see available models.
-        </p>
+        <div className="px-4 py-6 text-center border border-dashed border-glass-border rounded-xl">
+          <p className="text-sm text-text-muted">
+            Configure an API key for <span className="text-text-secondary font-medium">{info.label}</span> in
+            the API Keys section above.
+          </p>
+        </div>
       ) : loadingModels ? (
-        <div className="flex items-center gap-2 text-xs text-text-muted">
+        <div className="flex items-center gap-2 py-4 text-xs text-text-muted">
           <Spinner size="sm" />
-          Loading models...
+          Loading models from {info.label}...
         </div>
       ) : providerModels.length > 0 ? (
-        <div className="flex flex-wrap gap-2 max-h-52 overflow-y-auto">
-          {providerModels.map((m) => {
-            const isActive =
-              models?.current.provider === info.backendKey && models?.current.model === m.id;
-            return (
-              <Button
-                key={m.id}
-                onClick={() => onModelSwitch(info.backendKey, m.id)}
-                variant={isActive ? 'primary' : 'secondary'}
-                size="sm"
-                title={m.id}
+        <div className="space-y-3">
+          {/* Vendor category pills (OpenRouter only) */}
+          {selectedProvider === 'openrouter' && vendorKeys.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {vendorKeys.map((vendor) => {
+                const cfg = VENDOR_CONFIG[vendor] ?? VENDOR_CONFIG.other;
+                const count = vendorGroups![vendor]?.length ?? 0;
+                const active = selectedVendor === vendor;
+                return (
+                  <button
+                    key={vendor}
+                    onClick={() => setSelectedVendor(active ? null : vendor)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-full border transition-all ${
+                      active
+                        ? `${cfg.color} ring-1 ring-current/20`
+                        : 'bg-surface-1 border-glass-border text-text-muted hover:text-text-secondary hover:bg-surface-2'
+                    }`}
+                  >
+                    {cfg.label}
+                    <span className={`text-[9px] ${active ? 'opacity-70' : 'text-text-muted'}`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Model grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-64 overflow-y-auto pr-1">
+            {displayModels.map((m) => {
+              const isActive =
+                models?.current.provider === info.backendKey && models?.current.model === m.id;
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => onModelSwitch(info.backendKey, m.id)}
+                  title={m.id}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-left transition-all ${
+                    isActive
+                      ? 'bg-op-ocean/15 border-op-ocean/40 ring-1 ring-op-ocean/20'
+                      : 'bg-surface-1 border-glass-border hover:bg-surface-2 hover:border-text-muted/30'
+                  }`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div
+                      className={`text-xs font-medium truncate ${isActive ? 'text-op-ocean' : 'text-text-primary'}`}
+                    >
+                      {m.name}
+                    </div>
+                    <div className="text-[10px] text-text-muted truncate">{m.id}</div>
+                  </div>
+                  <TierBadge tier={m.tier} />
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Footer info */}
+          <div className="flex items-center justify-between text-[10px] text-text-muted pt-1">
+            <span>
+              {selectedVendor
+                ? `${displayModels.length} models from ${VENDOR_CONFIG[selectedVendor]?.label ?? selectedVendor}`
+                : `${providerModels.length} models available`}
+            </span>
+            {selectedProvider === 'openrouter' && selectedVendor && (
+              <button
+                onClick={() => setSelectedVendor(null)}
+                className="text-op-ocean hover:underline"
               >
-                {m.name}
-                <span className="ml-1.5 text-[10px] text-text-muted">T{m.tier}</span>
-              </Button>
-            );
-          })}
+                Show all
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <Button onClick={loadModels} variant="secondary" size="sm">
@@ -406,6 +549,7 @@ export default function SettingsPage() {
   }, [loadAll]);
 
   // Auto-refresh crawl status while polling
+  const [banPanelOpen, setBanPanelOpen] = useState(true);
   const [polling, setPolling] = useState(false);
   useEffect(() => {
     if (!polling) return;
@@ -653,54 +797,87 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Right Panel — Banned Cards */}
-      <div className="glass w-[380px] shrink-0 flex flex-col overflow-hidden">
-        <div className="shrink-0 px-4 py-2.5 border-b border-glass-border/50 flex items-center justify-between">
-          <p className="text-text-secondary text-xs font-semibold uppercase tracking-wider">
-            Banned Cards <span className="text-text-muted font-normal">({bannedCards.length})</span>
-          </p>
-          {crawlStatus?.banned.last_run && (
-            <span className="text-[10px] text-text-muted">
-              {timeAgo(crawlStatus.banned.last_run)}
-            </span>
-          )}
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {bannedCards.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center h-full text-text-muted">
-              <div className="text-center">
-                <p className="text-sm">No banned cards found</p>
-                <p className="text-xs mt-1 mb-3">Fetch the ban list from Bandai</p>
-                <Button onClick={handleBanCrawl} variant="danger" size="sm">
-                  Fetch Ban List
-                </Button>
+      {/* Right Panel — Banned Cards (collapsible) */}
+      <div
+        className={`glass shrink-0 flex flex-col overflow-hidden transition-all duration-300 ease-in-out ${
+          banPanelOpen ? 'w-[380px]' : 'w-12'
+        }`}
+      >
+        {banPanelOpen ? (
+          <>
+            <div className="shrink-0 px-4 py-2.5 border-b border-glass-border/50 flex items-center justify-between">
+              <p className="text-text-secondary text-xs font-semibold uppercase tracking-wider">
+                Banned Cards <span className="text-text-muted font-normal">({bannedCards.length})</span>
+              </p>
+              <div className="flex items-center gap-2">
+                {crawlStatus?.banned.last_run && (
+                  <span className="text-[10px] text-text-muted">
+                    {timeAgo(crawlStatus.banned.last_run)}
+                  </span>
+                )}
+                <button
+                  onClick={() => setBanPanelOpen(false)}
+                  className="text-text-muted hover:text-text-primary transition-colors p-0.5"
+                  title="Collapse"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </button>
               </div>
             </div>
-          ) : (
-            <div className="divide-y divide-glass-border/50">
-              {bannedCards.map((card) => (
-                <div key={card.id} className="flex items-center gap-3 px-4 py-2.5">
-                  {card.image_small ? (
-                    <img
-                      src={card.image_small}
-                      alt={card.name}
-                      className="w-10 h-14 object-cover rounded border border-glass-border shrink-0"
-                    />
-                  ) : (
-                    <div className="w-10 h-14 bg-surface-2 rounded border border-glass-border flex items-center justify-center shrink-0">
-                      <span className="text-[8px] text-text-muted">{card.id}</span>
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs text-text-primary font-medium truncate">{card.name || card.id}</div>
-                    <div className="text-[10px] text-text-muted">{card.id}</div>
+            <div className="flex-1 overflow-y-auto">
+              {bannedCards.length === 0 ? (
+                <div className="flex-1 flex items-center justify-center h-full text-text-muted">
+                  <div className="text-center">
+                    <p className="text-sm">No banned cards found</p>
+                    <p className="text-xs mt-1 mb-3">Fetch the ban list from Bandai</p>
+                    <Button onClick={handleBanCrawl} variant="danger" size="sm">
+                      Fetch Ban List
+                    </Button>
                   </div>
-                  <Badge variant="red">Banned</Badge>
                 </div>
-              ))}
+              ) : (
+                <div className="divide-y divide-glass-border/50">
+                  {bannedCards.map((card) => (
+                    <div key={card.id} className="flex items-center gap-3 px-4 py-2.5">
+                      {card.image_small ? (
+                        <img
+                          src={card.image_small}
+                          alt={card.name}
+                          className="w-10 h-14 object-cover rounded border border-glass-border shrink-0"
+                        />
+                      ) : (
+                        <div className="w-10 h-14 bg-surface-2 rounded border border-glass-border flex items-center justify-center shrink-0">
+                          <span className="text-[8px] text-text-muted">{card.id}</span>
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-text-primary font-medium truncate">{card.name || card.id}</div>
+                        <div className="text-[10px] text-text-muted">{card.id}</div>
+                      </div>
+                      <Badge variant="red">Banned</Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        ) : (
+          <button
+            onClick={() => setBanPanelOpen(true)}
+            className="flex flex-col items-center justify-center h-full gap-2 hover:bg-surface-1 transition-colors cursor-pointer"
+            title="Show Banned Cards"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+            </svg>
+            <span className="text-[10px] text-text-muted font-medium [writing-mode:vertical-lr] tracking-wider">
+              BANNED ({bannedCards.length})
+            </span>
+          </button>
+        )}
       </div>
     </div>
   );

@@ -11,13 +11,14 @@ export default function CardDetail({ card, onClose }: Props) {
   if (!card) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface-base/80 backdrop-blur-md" onClick={onClose}>
       <div
         className="relative flex max-w-3xl w-full max-h-[85vh] glass-heavy text-text-primary shadow-2xl rounded-xl overflow-hidden border border-glass-border"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Left: Card Image */}
-        <div className="shrink-0 w-72 bg-surface-base flex items-center justify-center p-4">
+        <div className="shrink-0 w-72 bg-surface-1 flex items-center justify-center p-4 relative">
+          <div className="absolute inset-0 opacity-[0.06] bg-cover bg-center pointer-events-none" style={{ backgroundImage: 'url(/images/op-world-map.jpg)' }} />
           <img
             src={card.image_large || card.image_small}
             alt={card.name}

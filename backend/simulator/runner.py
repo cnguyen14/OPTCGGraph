@@ -168,7 +168,9 @@ class SimulationRunner:
         )
 
         is_real = self.mode == "real"
-        model = self.llm_model or "claude-haiku-4-5-20251001"
+        from backend.services.llm_service import get_default_model
+
+        model = self.llm_model or get_default_model("fast")
         # Parallel concurrency: user-configurable, defaults to 10 for real, all for virtual
         if self.concurrency is not None:
             concurrency = max(1, self.concurrency)

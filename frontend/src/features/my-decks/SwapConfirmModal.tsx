@@ -6,8 +6,8 @@ import { Modal, Button, Spinner } from '../../components/ui';
 // Click card image to show large preview
 function CardPreviewOverlay({ image, name, onClose }: { image: string; name: string; onClose: () => void }) {
   return createPortal(
-    <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center cursor-pointer" onClick={onClose}>
-      <img src={image} alt={name} className="max-h-[80vh] max-w-[90vw] rounded-xl shadow-2xl" />
+    <div className="fixed inset-0 bg-surface-base/85 backdrop-blur-md z-[9999] flex items-center justify-center cursor-pointer" onClick={onClose}>
+      <img src={image} alt={name} className="max-h-[80vh] max-w-[90vw] rounded-xl shadow-2xl border border-glass-border" />
     </div>,
     document.body,
   );

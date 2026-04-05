@@ -39,7 +39,7 @@ export default function Modal({ open, onClose, title, size = 'md', children }: M
       onClick={(e) => { if (e.target === overlayRef.current) onClose(); }}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-surface-base/80 backdrop-blur-md" />
 
       {/* Panel */}
       <div

@@ -22,7 +22,11 @@ from typing import Any
 import anthropic
 import httpx
 
-from backend.services.settings_service import get_active_api_key
+from backend.services.llm_service import MODEL_PREFERENCE
+from backend.services.settings_service import (
+    get_active_api_key,
+    get_current_model_config,
+)
 
 from .models import (
     ActionType,
@@ -38,11 +42,24 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
-HAIKU_MODEL = "claude-haiku-4-5-20251001"
-
-# Models that use Anthropic API directly (all others go through OpenRouter)
-ANTHROPIC_MODELS = {"claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-6"}
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+
+def _is_anthropic_model(model: str) -> bool:
+    """Check if a model ID should use the direct Anthropic API."""
+    return model.startswith("claude-")
+
+
+def _resolve_sim_model(model: str | None) -> str:
+    """Resolve the simulator model from explicit value or active provider settings."""
+    if model:
+        return model
+    config = get_current_model_config()
+    provider = config.get("provider", "anthropic")
+    if provider in ("claude", "anthropic"):
+        return MODEL_PREFERENCE["anthropic"]["fast"]
+    return MODEL_PREFERENCE["openrouter"]["fast"]
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -1265,25 +1282,39 @@ class LLMAgent:
         self,
         role: str = "player",
         level: str = "amateur",
-        model: str = HAIKU_MODEL,
+        model: str | None = None,
     ) -> None:
-        self.model = model
+        self.model = _resolve_sim_model(model)
         self.role = role
         self.level = level
-        self._use_openrouter = model not in ANTHROPIC_MODELS
+        self._use_openrouter = not _is_anthropic_model(self.model)
         if self._use_openrouter:
             self._openrouter_key = get_active_api_key("openrouter")
             if not self._openrouter_key:
-                raise ValueError("OpenRouter API key not configured. Set it in Settings > BYOK.")
+                raise ValueError(
+                    "OpenRouter API key not configured. Set it in Settings > BYOK."
+                )
             self.client = None
             self._http_client = httpx.AsyncClient(timeout=15)
         else:
-            claude_key = get_active_api_key("claude")
+            claude_key = get_active_api_key("anthropic")
             if not claude_key:
-                raise ValueError("Anthropic API key not configured. Set it in Settings > BYOK.")
-            self._openrouter_key = ""
-            self._http_client = None
-            self.client = anthropic.AsyncAnthropic(api_key=claude_key)
+                # Fallback: try OpenRouter if anthropic key missing
+                or_key = get_active_api_key("openrouter")
+                if or_key:
+                    self._use_openrouter = True
+                    self._openrouter_key = or_key
+                    self.model = MODEL_PREFERENCE["openrouter"]["fast"]
+                    self.client = None
+                    self._http_client = httpx.AsyncClient(timeout=15)
+                else:
+                    raise ValueError(
+                        "No LLM API key configured. Set one in Settings > BYOK."
+                    )
+            else:
+                self._openrouter_key = ""
+                self._http_client = None
+                self.client = anthropic.AsyncAnthropic(api_key=claude_key)
         prompt_key = f"{role}_{level}"
         self._system = (
             LLM_PROMPTS.get(prompt_key, LLM_PROMPTS["bot_medium"])
@@ -1316,7 +1347,8 @@ class LLMAgent:
         rush_count = sum(1 for c in deck if "Rush" in c.keywords)
         blocker_count = sum(1 for c in deck if "Blocker" in c.keywords)
         removal_count = sum(
-            1 for c in deck
+            1
+            for c in deck
             if any(k.lower() in ("ko", "bounce", "rest") for k in c.keywords)
         )
         counter_count = sum(1 for c in deck if c.counter > 0)
@@ -1332,12 +1364,22 @@ class LLMAgent:
             f"{removal_count} Removal, {counter_count}/{len(deck)} Counter)"
         )
         if archetype == "Aggro":
-            self._game_strategy = "Rush damage early, use Rush characters, go for lethal by Turn 7"
+            self._game_strategy = (
+                "Rush damage early, use Rush characters, go for lethal by Turn 7"
+            )
         elif archetype == "Control":
-            self._game_strategy = "Survive early, remove threats, win with high-cost finishers"
+            self._game_strategy = (
+                "Survive early, remove threats, win with high-cost finishers"
+            )
         else:
-            self._game_strategy = "Build board efficiently, apply steady pressure, adapt to opponent"
-        logger.info("LLM deck profile: %s | Strategy: %s", self._deck_profile, self._game_strategy)
+            self._game_strategy = (
+                "Build board efficiently, apply steady pressure, adapt to opponent"
+            )
+        logger.info(
+            "LLM deck profile: %s | Strategy: %s",
+            self._deck_profile,
+            self._game_strategy,
+        )
 
     def set_decision_collector(self, collector: list[DecisionPoint]) -> None:
         """Set collector for both LLM and fallback agents."""
@@ -1405,21 +1447,34 @@ class LLMAgent:
                 me = state.active_player
                 opp = state.defending_player
             score = evaluate_board(state, me.player_id)
-            phase = "early" if state.turn <= 3 else ("mid" if state.turn <= 6 else "late")
+            phase = (
+                "early" if state.turn <= 3 else ("mid" if state.turn <= 6 else "late")
+            )
             game_state = {
-                "life": len(me.life), "opp_life": len(opp.life),
-                "don": me.don_field, "hand_size": len(me.hand),
-                "field_size": len(me.characters), "board_eval": round(score, 1),
+                "life": len(me.life),
+                "opp_life": len(opp.life),
+                "don": me.don_field,
+                "hand_size": len(me.hand),
+                "field_size": len(me.characters),
+                "board_eval": round(score, 1),
                 "phase": phase,
             }
         self._tracer.log(
-            game_idx=self._game_idx, turn=turn, player=player,
-            decision_type=decision_type, model=self.model,
-            prompt=prompt, raw_response=raw_response,
-            parsed_json=parsed_json, chosen_action=chosen_action,
-            was_fallback=was_fallback, latency_ms=latency_ms,
-            error=error, game_state=game_state,
-            deck_profile=self._deck_profile, strategy=self._game_strategy,
+            game_idx=self._game_idx,
+            turn=turn,
+            player=player,
+            decision_type=decision_type,
+            model=self.model,
+            prompt=prompt,
+            raw_response=raw_response,
+            parsed_json=parsed_json,
+            chosen_action=chosen_action,
+            was_fallback=was_fallback,
+            latency_ms=latency_ms,
+            error=error,
+            game_state=game_state,
+            deck_profile=self._deck_profile,
+            strategy=self._game_strategy,
         )
 
     async def choose_mulligan(self, hand: list[GameCard]) -> bool:
@@ -1432,19 +1487,42 @@ class LLMAgent:
             try:
                 data = json.loads(text)
                 result = bool(data.get("mulligan", False))
-                self._trace(turn=0, player=self.role, decision_type="mulligan",
-                            prompt=prompt, raw_response=text, parsed_json=data,
-                            chosen_action=f"mulligan={result}", latency_ms=latency)
+                self._trace(
+                    turn=0,
+                    player=self.role,
+                    decision_type="mulligan",
+                    prompt=prompt,
+                    raw_response=text,
+                    parsed_json=data,
+                    chosen_action=f"mulligan={result}",
+                    latency_ms=latency,
+                )
                 return result
             except (json.JSONDecodeError, KeyError, ValueError) as e:
-                self._trace(turn=0, player=self.role, decision_type="mulligan",
-                            prompt=prompt, raw_response=text, parsed_json=None,
-                            was_fallback=True, latency_ms=latency, error=str(e))
+                self._trace(
+                    turn=0,
+                    player=self.role,
+                    decision_type="mulligan",
+                    prompt=prompt,
+                    raw_response=text,
+                    parsed_json=None,
+                    was_fallback=True,
+                    latency_ms=latency,
+                    error=str(e),
+                )
                 logger.debug(f"LLM mulligan parse error: {e}")
         else:
-            self._trace(turn=0, player=self.role, decision_type="mulligan",
-                        prompt=prompt, raw_response=None, parsed_json=None,
-                        was_fallback=True, latency_ms=latency, error="no response")
+            self._trace(
+                turn=0,
+                player=self.role,
+                decision_type="mulligan",
+                prompt=prompt,
+                raw_response=None,
+                parsed_json=None,
+                was_fallback=True,
+                latency_ms=latency,
+                error="no response",
+            )
         return await self._fallback.choose_mulligan(hand)
 
     def _build_mulligan_prompt(self, hand: list[GameCard]) -> str:
@@ -1458,7 +1536,9 @@ class LLMAgent:
             if card.ability_text:
                 txt = card.ability_text[:80]
                 ability = f" — {txt}"
-            lines.append(f"  {card.name} (Cost:{card.cost} P:{card.power}{kw}){ability}")
+            lines.append(
+                f"  {card.name} (Cost:{card.cost} P:{card.power}{kw}){ability}"
+            )
         lines.append("")
         if self._deck_profile:
             lines.append(f"Deck: {self._deck_profile}")
@@ -1471,15 +1551,14 @@ class LLMAgent:
         )
         return "\n".join(lines)
 
-    def _is_trivial_decision(
-        self, legal_actions: list[GameAction]
-    ) -> int | None:
+    def _is_trivial_decision(self, legal_actions: list[GameAction]) -> int | None:
         """Return action index if the decision is trivial enough to skip LLM."""
         if len(legal_actions) <= 1:
             return 0
 
         non_pass = [
-            (i, a) for i, a in enumerate(legal_actions)
+            (i, a)
+            for i, a in enumerate(legal_actions)
             if a.action_type != ActionType.PASS
         ]
         # Only pass available (all other actions filtered)
@@ -1537,11 +1616,16 @@ class LLMAgent:
 
         # Trace
         self._trace(
-            turn=state.turn, player=player.player_id,
-            decision_type="main_action", prompt=prompt,
-            raw_response=None, parsed_json={"action_index": choice},
-            chosen_action=action.description, was_fallback=was_fallback,
-            latency_ms=latency, state=state,
+            turn=state.turn,
+            player=player.player_id,
+            decision_type="main_action",
+            prompt=prompt,
+            raw_response=None,
+            parsed_json={"action_index": choice},
+            chosen_action=action.description,
+            was_fallback=was_fallback,
+            latency_ms=latency,
+            state=state,
         )
 
         # Log decision to history for future prompts
@@ -1570,26 +1654,49 @@ class LLMAgent:
                 data = json.loads(text)
                 block_val = data.get("block")
                 chosen = f"block={block_val}"
-                self._trace(turn=state.turn, player=state.defending_player.player_id,
-                            decision_type="blocker", prompt=prompt,
-                            raw_response=text, parsed_json=data,
-                            chosen_action=chosen, latency_ms=latency, state=state)
+                self._trace(
+                    turn=state.turn,
+                    player=state.defending_player.player_id,
+                    decision_type="blocker",
+                    prompt=prompt,
+                    raw_response=text,
+                    parsed_json=data,
+                    chosen_action=chosen,
+                    latency_ms=latency,
+                    state=state,
+                )
                 if block_val is None:
                     return None
                 idx = int(block_val)
                 if 0 <= idx < len(blockers):
                     return blockers[idx]
             except (json.JSONDecodeError, KeyError, IndexError, ValueError) as e:
-                self._trace(turn=state.turn, player=state.defending_player.player_id,
-                            decision_type="blocker", prompt=prompt,
-                            raw_response=text, parsed_json=None,
-                            was_fallback=True, latency_ms=latency, error=str(e), state=state)
+                self._trace(
+                    turn=state.turn,
+                    player=state.defending_player.player_id,
+                    decision_type="blocker",
+                    prompt=prompt,
+                    raw_response=text,
+                    parsed_json=None,
+                    was_fallback=True,
+                    latency_ms=latency,
+                    error=str(e),
+                    state=state,
+                )
                 logger.debug(f"LLM blocker parse error: {e}")
         else:
-            self._trace(turn=state.turn, player=state.defending_player.player_id,
-                        decision_type="blocker", prompt=prompt,
-                        raw_response=None, parsed_json=None,
-                        was_fallback=True, latency_ms=latency, error="no response", state=state)
+            self._trace(
+                turn=state.turn,
+                player=state.defending_player.player_id,
+                decision_type="blocker",
+                prompt=prompt,
+                raw_response=None,
+                parsed_json=None,
+                was_fallback=True,
+                latency_ms=latency,
+                error="no response",
+                state=state,
+            )
         return await self._fallback.choose_blockers(state, blockers, attacker, target)
 
     def _build_blocker_prompt(
@@ -1641,10 +1748,17 @@ class LLMAgent:
             try:
                 data = json.loads(text)
                 indices = data.get("counters", [])
-                self._trace(turn=state.turn, player=state.defending_player.player_id,
-                            decision_type="counter", prompt=prompt,
-                            raw_response=text, parsed_json=data,
-                            chosen_action=f"counters={indices}", latency_ms=latency, state=state)
+                self._trace(
+                    turn=state.turn,
+                    player=state.defending_player.player_id,
+                    decision_type="counter",
+                    prompt=prompt,
+                    raw_response=text,
+                    parsed_json=data,
+                    chosen_action=f"counters={indices}",
+                    latency_ms=latency,
+                    state=state,
+                )
                 if isinstance(indices, list):
                     selected = [
                         counter_cards[i]
@@ -1653,16 +1767,32 @@ class LLMAgent:
                     ]
                     return selected
             except (json.JSONDecodeError, KeyError, ValueError) as e:
-                self._trace(turn=state.turn, player=state.defending_player.player_id,
-                            decision_type="counter", prompt=prompt,
-                            raw_response=text, parsed_json=None,
-                            was_fallback=True, latency_ms=latency, error=str(e), state=state)
+                self._trace(
+                    turn=state.turn,
+                    player=state.defending_player.player_id,
+                    decision_type="counter",
+                    prompt=prompt,
+                    raw_response=text,
+                    parsed_json=None,
+                    was_fallback=True,
+                    latency_ms=latency,
+                    error=str(e),
+                    state=state,
+                )
                 logger.debug(f"LLM counter parse error: {e}")
         else:
-            self._trace(turn=state.turn, player=state.defending_player.player_id,
-                        decision_type="counter", prompt=prompt,
-                        raw_response=None, parsed_json=None,
-                        was_fallback=True, latency_ms=latency, error="no response", state=state)
+            self._trace(
+                turn=state.turn,
+                player=state.defending_player.player_id,
+                decision_type="counter",
+                prompt=prompt,
+                raw_response=None,
+                parsed_json=None,
+                was_fallback=True,
+                latency_ms=latency,
+                error="no response",
+                state=state,
+            )
         return await self._fallback.choose_counters(
             state, hand, attacker, target, power_gap
         )
@@ -1766,7 +1896,9 @@ class LLMAgent:
             if card.ability_text:
                 txt = card.ability_text[:80]
                 ability = f" — {txt}"
-            lines.append(f"  {card.name} (Cost:{card.cost} P:{card.power}{kw}){ability}")
+            lines.append(
+                f"  {card.name} (Cost:{card.cost} P:{card.power}{kw}){ability}"
+            )
 
         lines.append("Your field:")
         lines.append(
@@ -1851,7 +1983,7 @@ class LLMAgent:
             max_tokens=200,
         )
         block = response.content[0]
-        if not isinstance(block, anthropic.types.TextBlock):
+        if not hasattr(block, "text"):
             return None
         return self._extract_json(block.text.strip())
 
@@ -1884,7 +2016,7 @@ class LLMAgent:
         first_brace = text.rfind("{", 0, last_brace)
         if first_brace == -1:
             return text
-        return text[first_brace:last_brace + 1]
+        return text[first_brace : last_brace + 1]
 
     async def _ask_llm(self, prompt: str, num_options: int) -> int:
         """Ask LLM to choose a main-phase action index."""
