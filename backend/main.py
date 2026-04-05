@@ -2,9 +2,12 @@
 
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from backend.core.exceptions import OPTCGError
 
@@ -56,6 +59,11 @@ app.add_middleware(
 async def optcg_error_handler(request: Request, exc: OPTCGError):
     return JSONResponse(status_code=exc.status_code, content={"error": exc.message})
 
+
+# Serve local card images
+_images_dir = Path("data/card_images")
+if _images_dir.exists():
+    app.mount("/api/images", StaticFiles(directory=str(_images_dir)), name="card_images")
 
 # Mount routers
 app.include_router(graph_router)
