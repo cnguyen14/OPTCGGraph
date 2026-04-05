@@ -488,15 +488,22 @@ def compute_detailed_sim_stats(sim_folder: str) -> dict[str, Any] | None:
     card performance, turn momentum, action patterns, and game summaries.
     """
     logger.info("Computing detailed stats for simulation: %s", sim_folder)
-    sim_dir = SIMULATIONS_DIR / sim_folder
+    # Handle both absolute paths and folder names
+    candidate = Path(sim_folder)
+    if candidate.is_absolute() and candidate.exists():
+        sim_dir = candidate
+    else:
+        sim_dir = SIMULATIONS_DIR / Path(sim_folder).name
     if not sim_dir.exists():
         # Try to find by partial match
+        folder_name = Path(sim_folder).name
         if SIMULATIONS_DIR.exists():
             for d in SIMULATIONS_DIR.iterdir():
-                if d.is_dir() and sim_folder in d.name:
+                if d.is_dir() and folder_name in d.name:
                     sim_dir = d
                     break
             else:
+                logger.warning("Simulation folder not found: %s", sim_folder)
                 return None
         else:
             return None
@@ -589,18 +596,26 @@ def aggregate_deck_health(sim_folders: list[str]) -> dict[str, Any]:
     )
 
     for folder in sim_folders:
-        sim_dir = SIMULATIONS_DIR / folder
+        # Handle both absolute paths and folder names
+        candidate = Path(folder)
+        if candidate.is_absolute() and candidate.exists():
+            sim_dir = candidate
+        else:
+            sim_dir = SIMULATIONS_DIR / Path(folder).name
         if not sim_dir.exists():
             # Try partial match
+            folder_name = Path(folder).name
             if SIMULATIONS_DIR.exists():
                 for d in SIMULATIONS_DIR.iterdir():
-                    if d.is_dir() and folder in d.name:
+                    if d.is_dir() and folder_name in d.name:
                         sim_dir = d
                         break
                 else:
+                    logger.warning("Simulation folder not found: %s", folder)
                     continue
             else:
                 continue
+        logger.debug("Processing simulation folder: %s", sim_dir)
 
         meta_path = sim_dir / "metadata.json"
         opponent = ""
@@ -715,8 +730,6 @@ def aggregate_deck_health(sim_folders: list[str]) -> dict[str, Any]:
     draw_probability = None
     if sim_folders:
         try:
-            from pathlib import Path
-
             dp_path = Path(sim_folders[0]) / "draw_probability.json"
             if dp_path.exists():
                 draw_probability = json.loads(dp_path.read_text())
