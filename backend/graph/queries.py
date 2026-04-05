@@ -194,22 +194,21 @@ async def search_cards(
         count_record = await count_result.single()
         total = count_record["total"] if count_record else 0
 
-        # Data query with joins
+        # Data query — paginate first, then join relationships (avoids memory explosion)
         data_result = await session.run(
             f"""
             MATCH (c:Card) {where}
-            OPTIONAL MATCH (c)-[:HAS_COLOR]->(clr:Color)
-            OPTIONAL MATCH (c)-[:BELONGS_TO]->(fam:Family)
-            OPTIONAL MATCH (c)-[:FROM_SET]->(s:Set)
-            OPTIONAL MATCH (c)-[:HAS_KEYWORD]->(kw:Keyword)
-            WITH c,
-                 collect(DISTINCT clr.name) AS colors,
-                 collect(DISTINCT fam.name) AS families,
-                 s.name AS set_name,
-                 collect(DISTINCT kw.name) AS keywords
-            RETURN c, colors, families, set_name, keywords
-            ORDER BY {sort_field} {order}
+            WITH c ORDER BY {sort_field} {order}
             SKIP $offset LIMIT $limit
+            OPTIONAL MATCH (c)-[:HAS_COLOR]->(clr:Color)
+            WITH c, collect(DISTINCT clr.name) AS colors
+            OPTIONAL MATCH (c)-[:BELONGS_TO]->(fam:Family)
+            WITH c, colors, collect(DISTINCT fam.name) AS families
+            OPTIONAL MATCH (c)-[:FROM_SET]->(s:Set)
+            WITH c, colors, families, coalesce(s.name, '') AS set_name
+            OPTIONAL MATCH (c)-[:HAS_KEYWORD]->(kw:Keyword)
+            RETURN c, colors, families, set_name,
+                   collect(DISTINCT kw.name) AS keywords
             """,
             **params,
         )
