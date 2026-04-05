@@ -118,11 +118,14 @@ class GameEngine:
                 if player.deck:
                     player.life.append(player.deck.pop(0))
 
-        # Draw starting hands (5 cards each)
+        # Draw starting hands (5 cards each) — track in cards_drawn
         for player in (p1, p2):
+            tracker = self._cards_drawn_p1 if player.player_id == "p1" else self._cards_drawn_p2
             for _ in range(5):
                 if player.deck:
-                    player.hand.append(player.deck.pop(0))
+                    card = player.deck.pop(0)
+                    player.hand.append(card)
+                    tracker[card.card_id] = tracker.get(card.card_id, 0) + 1
 
         # Coin flip for who goes first
         first = self.rng.choice(["p1", "p2"])
@@ -381,12 +384,17 @@ class GameEngine:
             )
 
             if did_mulligan:
+                # Reset drawn tracking for this player (old hand returned to deck)
+                tracker = self._cards_drawn_p1 if player_id == "p1" else self._cards_drawn_p2
+                tracker.clear()
                 player.deck.extend(player.hand)
                 player.hand.clear()
                 self.rng.shuffle(player.deck)
                 for _ in range(5):
                     if player.deck:
-                        player.hand.append(player.deck.pop(0))
+                        card = player.deck.pop(0)
+                        player.hand.append(card)
+                        tracker[card.card_id] = tracker.get(card.card_id, 0) + 1
                 if player_id == "p1":
                     self._p1_mulligan = True
                 else:

@@ -645,6 +645,21 @@ def aggregate_deck_health(sim_folders: list[str]) -> dict[str, Any]:
     total_games = len(all_games)
     total_wins = sum(1 for g in all_games if g.get("winner") == "p1")
 
+    # --- Build card name lookup from metadata deck cards ---
+    card_names: dict[str, str] = {}
+    for folder in sim_folders:
+        candidate = Path(folder)
+        meta_path = (candidate if candidate.is_absolute() else SIMULATIONS_DIR / Path(folder).name) / "metadata.json"
+        if meta_path.exists():
+            try:
+                m = json.loads(meta_path.read_text())
+                for c in m.get("p1_deck_cards", []):
+                    card_names[c["id"]] = c.get("name", c["id"])
+                for c in m.get("p2_deck_cards", []):
+                    card_names[c["id"]] = c.get("name", c["id"])
+            except (json.JSONDecodeError, OSError, KeyError):
+                pass
+
     # --- Per-card stats (P1 only) ---
     card_data: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"times_played": 0, "games_appeared": 0, "wins": 0}
@@ -672,6 +687,7 @@ def aggregate_deck_health(sim_folders: list[str]) -> dict[str, Any]:
         win_corr = round(stats["wins"] / appeared, 4) if appeared else 0.0
         card_health.append({
             "card_id": card_id,
+            "card_name": card_names.get(card_id, card_id),
             "times_played": stats["times_played"],
             "play_rate": play_rate,
             "win_correlation": win_corr,
@@ -706,7 +722,9 @@ def aggregate_deck_health(sim_folders: list[str]) -> dict[str, Any]:
         lift = pair_win_rate / overall_win_rate if overall_win_rate > 0 else 1.0
         synergy_pairs.append({
             "card_a": pair[0],
+            "card_a_name": card_names.get(pair[0], pair[0]),
             "card_b": pair[1],
+            "card_b_name": card_names.get(pair[1], pair[1]),
             "co_occurrence_rate": round(total / total_games, 4),
             "win_lift": round(lift, 4),
         })
