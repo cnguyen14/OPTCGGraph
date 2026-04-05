@@ -52,10 +52,11 @@ export default function LeaderPickerModal({ open, onClose, onSelect }: Props) {
       .then((res) => {
         let filtered = res.cards;
         // Client-side filter for multi-color selection
-        if (colorFilters.size > 1) {
+        // Skip filter when all colors selected (6) or none (0) — show everything
+        if (colorFilters.size >= 1 && colorFilters.size < 6) {
           filtered = filtered.filter((card) => {
             const cardColors = card.colors?.length ? card.colors : card.color ? [card.color] : [];
-            return [...colorFilters].every((c) => cardColors.includes(c));
+            return [...colorFilters].some((c) => cardColors.includes(c));
           });
         }
         setLeaders(filtered);
