@@ -1,14 +1,21 @@
 """Crawler for onepiece.limitlesstcg.com — tournament deck lists and meta data."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
 import re
+import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 
 from backend.config import LIMITLESSTCG_BASE_URL, LIMITLESSTCG_DELAY, CRAWL_CACHE_DIR
+
+if TYPE_CHECKING:
+    from backend.crawlers.tracer import CrawlTracer
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +30,7 @@ TOP_PLACEMENTS = 32
 async def crawl_limitlesstcg(
     max_tournaments: int = 30,
     top_n: int = TOP_PLACEMENTS,
+    tracer: CrawlTracer | None = None,
 ) -> dict:
     """Crawl tournament deck lists from Limitless TCG.
 
@@ -33,6 +41,15 @@ async def crawl_limitlesstcg(
         }
     """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    t0 = time.time()
+
+    if tracer:
+        tracer.log(
+            "crawl_start",
+            source="limitlesstcg",
+            max_tournaments=max_tournaments,
+            top_n=top_n,
+        )
 
     async with httpx.AsyncClient(
         timeout=30,
@@ -42,28 +59,64 @@ async def crawl_limitlesstcg(
         # 1. Get tournament list
         tournaments = await _crawl_tournaments(client, max_tournaments)
         logger.info(f"Found {len(tournaments)} tournaments with {MIN_PLAYERS}+ players")
-
-        # 2. For each tournament, get top-N deck lists
-        all_decks: list[dict] = []
-        for i, tournament in enumerate(tournaments):
-            logger.info(
-                f"[{i+1}/{len(tournaments)}] Crawling decks from {tournament['name']} "
-                f"({tournament['player_count']} players)..."
+        if tracer:
+            tracer.log(
+                "tournaments_discovered",
+                source="limitlesstcg",
+                count=len(tournaments),
+                names=[t["name"] for t in tournaments[:5]],
             )
-            decks = await _crawl_tournament_decks(client, tournament, top_n)
-            all_decks.extend(decks)
-            logger.info(f"  Got {len(decks)} decks")
 
-            if i < len(tournaments) - 1:
+        # 2. For each tournament, get top-N deck lists (with semaphore)
+        all_decks: list[dict] = []
+        tournament_sem = asyncio.Semaphore(2)
+
+        async def _crawl_with_sem(
+            idx: int, tournament: dict
+        ) -> tuple[int, str, list[dict]]:
+            async with tournament_sem:
+                logger.info(
+                    f"[{idx + 1}/{len(tournaments)}] Crawling decks from "
+                    f"{tournament['name']} ({tournament['player_count']} players)..."
+                )
+                tt = time.time()
+                decks = await _crawl_tournament_decks(client, tournament, top_n)
+                t_ms = round((time.time() - tt) * 1000, 1)
+                logger.info(f"  Got {len(decks)} decks from {tournament['name']}")
+                if tracer:
+                    tracer.log(
+                        "tournament_crawled",
+                        source="limitlesstcg",
+                        tournament=tournament["name"],
+                        tournament_id=tournament["id"],
+                        deck_count=len(decks),
+                        latency_ms=t_ms,
+                    )
                 await asyncio.sleep(LIMITLESSTCG_DELAY)
+                return (idx, tournament["name"], decks)
+
+        tasks = [_crawl_with_sem(i, t) for i, t in enumerate(tournaments)]
+        results = await asyncio.gather(*tasks)
+
+        for _, _, decks in sorted(results, key=lambda r: r[0]):
+            all_decks.extend(decks)
 
     # Cache final results
     (CACHE_DIR / "tournaments.json").write_text(json.dumps(tournaments, indent=2))
     (CACHE_DIR / "decks.json").write_text(json.dumps(all_decks, indent=2))
 
+    latency_ms = round((time.time() - t0) * 1000, 1)
     logger.info(
         f"Limitless crawl complete: {len(tournaments)} tournaments, {len(all_decks)} decks"
     )
+    if tracer:
+        tracer.log(
+            "crawl_finish",
+            source="limitlesstcg",
+            tournament_count=len(tournaments),
+            deck_count=len(all_decks),
+            latency_ms=latency_ms,
+        )
     return {"tournaments": tournaments, "decks": all_decks}
 
 
@@ -71,7 +124,9 @@ async def _crawl_tournaments(client: httpx.AsyncClient, max_count: int) -> list[
     """Fetch tournament list page and extract tournament metadata."""
     cache_file = CACHE_DIR / "tournaments_page.html"
 
-    html = await _fetch_cached(client, f"{LIMITLESSTCG_BASE_URL}/tournaments", cache_file)
+    html = await _fetch_cached(
+        client, f"{LIMITLESSTCG_BASE_URL}/tournaments", cache_file
+    )
     if not html:
         return []
 
@@ -103,30 +158,39 @@ async def _crawl_tournament_decks(
     # Extract deck list IDs from standings
     deck_entries = _parse_standings(html, top_n)
 
-    decks: list[dict] = []
-    for entry in deck_entries:
-        deck_id = entry["deck_id"]
-        deck_cache = CACHE_DIR / f"deck_{deck_id}.html"
+    # Fetch deck lists concurrently with semaphore
+    deck_sem = asyncio.Semaphore(3)
 
-        deck_html = await _fetch_cached(
-            client, f"{LIMITLESSTCG_BASE_URL}/decks/list/{deck_id}", deck_cache
-        )
-        if not deck_html:
-            continue
+    async def _fetch_deck(entry: dict) -> dict | None:
+        async with deck_sem:
+            deck_id = entry["deck_id"]
+            deck_cache = CACHE_DIR / f"deck_{deck_id}.html"
 
-        deck = _parse_deck_list(deck_html, deck_id)
-        if deck and deck.get("leader_id") and deck.get("cards"):
-            deck.update({
-                "tournament_id": tid,
-                "placement": entry["placement"],
-                "player_name": entry.get("player_name", ""),
-                "source": "limitlesstcg",
-            })
-            decks.append(deck)
+            deck_html = await _fetch_cached(
+                client, f"{LIMITLESSTCG_BASE_URL}/decks/list/{deck_id}", deck_cache
+            )
+            if not deck_html:
+                return None
 
-        await asyncio.sleep(LIMITLESSTCG_DELAY)
+            deck = _parse_deck_list(deck_html, deck_id)
+            if deck and deck.get("leader_id") and deck.get("cards"):
+                deck.update(
+                    {
+                        "tournament_id": tid,
+                        "placement": entry["placement"],
+                        "player_name": entry.get("player_name", ""),
+                        "source": "limitlesstcg",
+                    }
+                )
+                return deck
 
-    return decks
+            await asyncio.sleep(LIMITLESSTCG_DELAY)
+            return None
+
+    tasks = [_fetch_deck(e) for e in deck_entries]
+    results = await asyncio.gather(*tasks)
+
+    return [d for d in results if d is not None]
 
 
 async def _fetch_cached(
@@ -147,14 +211,16 @@ async def _fetch_cached(
                 cache_file.write_text(text)
                 return text
             if resp.status_code in (429, 500, 502, 503):
-                wait = (2 ** attempt) * 2
-                logger.warning(f"  HTTP {resp.status_code} for {url}, retrying in {wait}s...")
+                wait = (2**attempt) * 2
+                logger.warning(
+                    f"  HTTP {resp.status_code} for {url}, retrying in {wait}s..."
+                )
                 await asyncio.sleep(wait)
                 continue
             logger.error(f"  HTTP {resp.status_code} for {url}")
             return None
         except httpx.RequestError as e:
-            wait = (2 ** attempt) * 2
+            wait = (2**attempt) * 2
             logger.warning(f"  Request error: {e}, retrying in {wait}s...")
             await asyncio.sleep(wait)
     return None
@@ -180,7 +246,7 @@ def _parse_tournaments(html: str) -> list[dict]:
     row_pattern = re.compile(
         r'<tr\s+data-date="([^"]*)"[^>]*data-name="([^"]*)"[^>]*data-format="([^"]*)"'
         r'.*?/tournaments/(\d+)"'
-        r'.*?</tr>',
+        r".*?</tr>",
         re.DOTALL,
     )
 
@@ -191,21 +257,23 @@ def _parse_tournaments(html: str) -> list[dict]:
         # Extract player count from the row's td cells
         player_count = 0
         # Look for a standalone number in a td (the player count cell)
-        td_nums = re.findall(r'<td[^>]*>\s*(\d{1,5})\s*</td>', row_html)
+        td_nums = re.findall(r"<td[^>]*>\s*(\d{1,5})\s*</td>", row_html)
         for num_str in td_nums:
             num = int(num_str)
             if 3 <= num <= 5000:  # Reasonable player count range
                 player_count = num
                 break
 
-        tournaments.append({
-            "id": tid,
-            "name": name.strip(),
-            "date": date_str,
-            "format": fmt,
-            "player_count": player_count,
-            "source": "limitlesstcg",
-        })
+        tournaments.append(
+            {
+                "id": tid,
+                "name": name.strip(),
+                "date": date_str,
+                "format": fmt,
+                "player_count": player_count,
+                "source": "limitlesstcg",
+            }
+        )
 
     # Fallback: simpler parsing if data attributes not found
     if not tournaments:
@@ -223,21 +291,23 @@ def _parse_tournaments(html: str) -> list[dict]:
             player_count = 0
             fmt = ""
             if ctx:
-                nums = re.findall(r'>\s*(\d{2,4})\s*<', ctx.group(1))
+                nums = re.findall(r">\s*(\d{2,4})\s*<", ctx.group(1))
                 if nums:
                     player_count = int(nums[0])
-                fmt_match = re.search(r'(OP\d+(?:\.\d+)?)', ctx.group(1))
+                fmt_match = re.search(r"(OP\d+(?:\.\d+)?)", ctx.group(1))
                 if fmt_match:
                     fmt = fmt_match.group(1)
 
-            tournaments.append({
-                "id": tid,
-                "name": name.strip(),
-                "date": "",
-                "format": fmt,
-                "player_count": player_count,
-                "source": "limitlesstcg",
-            })
+            tournaments.append(
+                {
+                    "id": tid,
+                    "name": name.strip(),
+                    "date": "",
+                    "format": fmt,
+                    "player_count": player_count,
+                    "source": "limitlesstcg",
+                }
+            )
 
     return tournaments
 
@@ -282,11 +352,13 @@ def _parse_standings(html: str, top_n: int) -> list[dict]:
         if deck_id in seen or placement > top_n:
             continue
         seen.add(deck_id)
-        entries.append({
-            "deck_id": deck_id,
-            "placement": placement,
-            "player_name": player_by_deck.get(deck_id, ""),
-        })
+        entries.append(
+            {
+                "deck_id": deck_id,
+                "placement": placement,
+                "player_name": player_by_deck.get(deck_id, ""),
+            }
+        )
 
     return entries
 
@@ -314,7 +386,7 @@ def _parse_deck_list(html: str, deck_id: str) -> dict | None:
     # Extract archetype from page title or header
     archetype = ""
     # Look for deck archetype in title or heading
-    title_match = re.search(r'<title>([^<]+)</title>', html)
+    title_match = re.search(r"<title>([^<]+)</title>", html)
     if title_match:
         title = title_match.group(1).strip()
         # Clean up title: "Decklist played by X - Limitless" → archetype from context

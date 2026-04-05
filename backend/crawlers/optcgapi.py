@@ -1,13 +1,20 @@
 """Crawler for optcgapi.com — secondary source for pricing and images."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
+import time
+from typing import TYPE_CHECKING
 
 import httpx
 
 from backend.config import OPTCGAPI_BASE_URL, OPTCGAPI_DELAY, CRAWL_CACHE_DIR
 from backend.crawlers.families import parse_families
+
+if TYPE_CHECKING:
+    from backend.crawlers.tracer import CrawlTracer
 
 logger = logging.getLogger(__name__)
 
@@ -21,19 +28,33 @@ BULK_ENDPOINTS = [
 ]
 
 
-async def crawl_optcgapi() -> list[dict]:
+async def crawl_optcgapi(tracer: CrawlTracer | None = None) -> list[dict]:
     """Crawl all cards from optcgapi.com bulk endpoints. Returns normalized cards."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     all_cards: list[dict] = []
     seen_ids: set[str] = set()
+    t0 = time.time()
+
+    if tracer:
+        tracer.log("crawl_start", source="optcgapi", endpoints=BULK_ENDPOINTS)
 
     async with httpx.AsyncClient(timeout=60) as client:
         for endpoint in BULK_ENDPOINTS:
             url = f"{OPTCGAPI_BASE_URL}{endpoint}"
             logger.info(f"Crawling optcgapi {endpoint}...")
 
+            et = time.time()
             data = await _fetch_endpoint(client, url)
+            endpoint_ms = round((time.time() - et) * 1000, 1)
+
             if data is None:
+                if tracer:
+                    tracer.log(
+                        "endpoint_error",
+                        source="optcgapi",
+                        endpoint=endpoint,
+                        latency_ms=endpoint_ms,
+                    )
                 continue
 
             # Cache raw response
@@ -42,16 +63,36 @@ async def crawl_optcgapi() -> list[dict]:
             cache_file.write_text(json.dumps(data, indent=2))
 
             raw_cards = data if isinstance(data, list) else []
+            new_count = 0
             for raw in raw_cards:
                 card = _normalize(raw)
                 if card["id"] and card["id"] not in seen_ids:
                     all_cards.append(card)
                     seen_ids.add(card["id"])
+                    new_count += 1
 
             logger.info(f"  Got {len(raw_cards)} cards from {endpoint}")
+            if tracer:
+                tracer.log(
+                    "endpoint_fetched",
+                    source="optcgapi",
+                    endpoint=endpoint,
+                    raw_count=len(raw_cards),
+                    new_count=new_count,
+                    latency_ms=endpoint_ms,
+                )
             await asyncio.sleep(OPTCGAPI_DELAY)
 
+    latency_ms = round((time.time() - t0) * 1000, 1)
     logger.info(f"optcgapi crawl complete: {len(all_cards)} cards")
+    if tracer:
+        tracer.log(
+            "crawl_finish",
+            source="optcgapi",
+            total_cards=len(all_cards),
+            endpoints_count=len(BULK_ENDPOINTS),
+            latency_ms=latency_ms,
+        )
     return all_cards
 
 
@@ -65,7 +106,9 @@ async def _fetch_endpoint(
             if resp.status_code == 200:
                 return resp.json()
             wait = 5 * (attempt + 1)
-            logger.warning(f"  HTTP {resp.status_code} for {url}, retrying in {wait}s...")
+            logger.warning(
+                f"  HTTP {resp.status_code} for {url}, retrying in {wait}s..."
+            )
             await asyncio.sleep(wait)
         except httpx.RequestError as e:
             wait = 5 * (attempt + 1)

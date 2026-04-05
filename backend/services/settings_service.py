@@ -44,13 +44,18 @@ def _ensure_defaults() -> None:
 
 
 def get_active_api_key(provider: str) -> str:
-    """Get the active API key for a provider from Redis-persisted runtime keys."""
-    if provider == "claude":
-        return _runtime_keys.get("anthropic", "")
+    """Get the active API key for a provider.
+
+    Priority: Redis-persisted runtime key → .env fallback.
+    """
+    s = get_settings()
+
+    if provider in ("claude", "anthropic"):
+        return _runtime_keys.get("anthropic", "") or s.anthropic_api_key
     elif provider == "openrouter":
-        return _runtime_keys.get("openrouter", "")
+        return _runtime_keys.get("openrouter", "") or s.openrouter_api_key
     elif provider == "apitcg":
-        return _runtime_keys.get("apitcg", "")
+        return _runtime_keys.get("apitcg", "") or s.apitcg_api_key
     return ""
 
 

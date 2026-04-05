@@ -1,8 +1,17 @@
 """Build nodes and edges in Neo4j from merged card data."""
 
+from __future__ import annotations
+
 import logging
+import time
+from typing import TYPE_CHECKING
 
 from neo4j import AsyncDriver
+
+from backend.graph.batch import batch_write, RELATIONSHIP_CHUNK_SIZE
+
+if TYPE_CHECKING:
+    from backend.crawlers.tracer import CrawlTracer
 
 logger = logging.getLogger(__name__)
 
@@ -34,85 +43,139 @@ async def create_indexes(driver: AsyncDriver) -> None:
             pass  # May already exist
 
 
-async def load_cards(driver: AsyncDriver, cards: list[dict]) -> int:
-    """Load merged card data into Neo4j. Returns count of cards loaded."""
-    loaded = 0
+async def load_cards(
+    driver: AsyncDriver, cards: list[dict], tracer: CrawlTracer | None = None
+) -> int:
+    """Load merged card data into Neo4j using UNWIND batching.
 
-    async with driver.session() as session:
-        for card in cards:
-            # MERGE Card node
-            await session.run(
-                """
-                MERGE (c:Card {id: $id})
-                SET c.code = $code,
-                    c.name = $name,
-                    c.card_type = $card_type,
-                    c.cost = $cost,
-                    c.power = $power,
-                    c.counter = $counter,
-                    c.rarity = $rarity,
-                    c.attribute = $attribute,
-                    c.ability = $ability,
-                    c.trigger_effect = $trigger_effect,
-                    c.image_small = $image_small,
-                    c.image_large = $image_large,
-                    c.inventory_price = $inventory_price,
-                    c.market_price = $market_price,
-                    c.source_apitcg = $source_apitcg,
-                    c.source_optcgapi = $source_optcgapi,
-                    c.life = $life
-                """,
-                **_card_params(card),
+    Returns count of cards loaded.
+    """
+    if not cards:
+        return 0
+
+    t0 = time.time()
+    if tracer:
+        tracer.log("neo4j_start", step="load_cards", card_count=len(cards))
+
+    # --- Precompute all data in Python ---
+    card_params = [_card_params(c) for c in cards]
+
+    color_edges: list[dict] = []
+    for card in cards:
+        for color in _split_colors(card.get("color", "")):
+            color_edges.append({"card_id": card["id"], "color": color})
+
+    family_edges: list[dict] = []
+    for card in cards:
+        for family in _split_field(card.get("family", ""), sep="/"):
+            if family:
+                family_edges.append({"card_id": card["id"], "family": family})
+
+    set_edges: list[dict] = []
+    for card in cards:
+        set_id = card.get("set_id", "")
+        if set_id:
+            set_edges.append(
+                {
+                    "card_id": card["id"],
+                    "set_id": set_id,
+                    "set_name": card.get("set_name", ""),
+                }
             )
 
-            # Color edges (handle multi-color: "Red Black" → 2 edges)
-            for color in _split_colors(card.get("color", "")):
-                await session.run(
-                    """
-                    MERGE (color:Color {name: $color})
-                    WITH color
-                    MATCH (c:Card {id: $card_id})
-                    MERGE (c)-[:HAS_COLOR]->(color)
-                    """,
-                    color=color,
-                    card_id=card["id"],
-                )
+    # --- Batch write to Neo4j ---
 
-            # Family edges (handle multi-family: "Water Seven/Straw Hat Crew")
-            for family in _split_field(card.get("family", ""), sep="/"):
-                if not family:
-                    continue
-                await session.run(
-                    """
-                    MERGE (f:Family {name: $family})
-                    WITH f
-                    MATCH (c:Card {id: $card_id})
-                    MERGE (c)-[:BELONGS_TO]->(f)
-                    """,
-                    family=family,
-                    card_id=card["id"],
-                )
+    # 1. Card nodes
+    await batch_write(
+        driver,
+        """
+        UNWIND $batch AS row
+        MERGE (c:Card {id: row.id})
+        SET c.code = row.code,
+            c.name = row.name,
+            c.card_type = row.card_type,
+            c.cost = row.cost,
+            c.power = row.power,
+            c.counter = row.counter,
+            c.rarity = row.rarity,
+            c.attribute = row.attribute,
+            c.ability = row.ability,
+            c.trigger_effect = row.trigger_effect,
+            c.image_small = row.image_small,
+            c.image_large = row.image_large,
+            c.inventory_price = row.inventory_price,
+            c.market_price = row.market_price,
+            c.source_apitcg = row.source_apitcg,
+            c.source_optcgapi = row.source_optcgapi,
+            c.life = row.life
+        """,
+        card_params,
+        label="Cards",
+    )
 
-            # Set edge
-            set_id = card.get("set_id", "")
-            set_name = card.get("set_name", "")
-            if set_id:
-                await session.run(
-                    """
-                    MERGE (s:Set {id: $set_id})
-                    SET s.name = $set_name
-                    WITH s
-                    MATCH (c:Card {id: $card_id})
-                    MERGE (c)-[:FROM_SET]->(s)
-                    """,
-                    set_id=set_id,
-                    set_name=set_name,
-                    card_id=card["id"],
-                )
+    # 2. Color edges
+    await batch_write(
+        driver,
+        """
+        UNWIND $batch AS row
+        MERGE (color:Color {name: row.color})
+        WITH color, row
+        MATCH (c:Card {id: row.card_id})
+        MERGE (c)-[:HAS_COLOR]->(color)
+        """,
+        color_edges,
+        chunk_size=RELATIONSHIP_CHUNK_SIZE,
+        label="Color edges",
+    )
 
-            loaded += 1
+    # 3. Family edges
+    await batch_write(
+        driver,
+        """
+        UNWIND $batch AS row
+        MERGE (f:Family {name: row.family})
+        WITH f, row
+        MATCH (c:Card {id: row.card_id})
+        MERGE (c)-[:BELONGS_TO]->(f)
+        """,
+        family_edges,
+        chunk_size=RELATIONSHIP_CHUNK_SIZE,
+        label="Family edges",
+    )
 
-    return loaded
+    # 4. Set edges
+    await batch_write(
+        driver,
+        """
+        UNWIND $batch AS row
+        MERGE (s:Set {id: row.set_id})
+        SET s.name = row.set_name
+        WITH s, row
+        MATCH (c:Card {id: row.card_id})
+        MERGE (c)-[:FROM_SET]->(s)
+        """,
+        set_edges,
+        chunk_size=RELATIONSHIP_CHUNK_SIZE,
+        label="Set edges",
+    )
+
+    latency_ms = round((time.time() - t0) * 1000, 1)
+    logger.info(
+        f"Loaded {len(cards)} cards, {len(color_edges)} color edges, "
+        f"{len(family_edges)} family edges, {len(set_edges)} set edges "
+        f"({latency_ms}ms)"
+    )
+    if tracer:
+        tracer.log(
+            "neo4j_finish",
+            step="load_cards",
+            card_count=len(cards),
+            color_edges=len(color_edges),
+            family_edges=len(family_edges),
+            set_edges=len(set_edges),
+            latency_ms=latency_ms,
+        )
+    return len(cards)
 
 
 def _card_params(card: dict) -> dict:
@@ -207,115 +270,184 @@ async def load_tournament_data(
     driver: AsyncDriver,
     tournaments: list[dict],
     decks: list[dict],
+    tracer: CrawlTracer | None = None,
 ) -> dict:
-    """Load tournament and deck data into Neo4j.
+    """Load tournament and deck data into Neo4j using UNWIND batching.
 
     Returns: {"tournaments": int, "decks": int, "includes_edges": int}
     """
-    t_count = 0
-    d_count = 0
-    inc_count = 0
+    t0 = time.time()
+    if tracer:
+        tracer.log(
+            "neo4j_start",
+            step="load_tournament_data",
+            tournament_count=len(tournaments),
+            deck_count=len(decks),
+        )
 
-    async with driver.session() as session:
-        # Create Tournament nodes
-        for t in tournaments:
-            await session.run(
-                """
-                MERGE (t:Tournament {id: $id})
-                SET t.name = $name,
-                    t.date = $date,
-                    t.format = $format,
-                    t.player_count = $player_count,
-                    t.source = $source
-                """,
-                id=str(t["id"]),
-                name=t.get("name", ""),
-                date=t.get("date", ""),
-                format=t.get("format", ""),
-                player_count=t.get("player_count", 0),
-                source=t.get("source", "limitlesstcg"),
+    # --- Precompute all data in Python ---
+    tournament_params = [
+        {
+            "id": str(t["id"]),
+            "name": t.get("name", ""),
+            "date": t.get("date", ""),
+            "format": t.get("format", ""),
+            "player_count": t.get("player_count", 0),
+            "source": t.get("source", "limitlesstcg"),
+        }
+        for t in tournaments
+    ]
+
+    deck_params: list[dict] = []
+    leader_edges: list[dict] = []
+    placed_in_edges: list[dict] = []
+    includes_edges: list[dict] = []
+
+    for deck in decks:
+        deck_id = str(deck["id"])
+        leader_id = deck.get("leader_id", "")
+
+        deck_params.append(
+            {
+                "id": deck_id,
+                "archetype": deck.get("archetype", ""),
+                "placement": deck.get("placement"),
+                "player_name": deck.get("player_name", ""),
+                "leader_id": leader_id,
+                "source": deck.get("source", "limitlesstcg"),
+            }
+        )
+
+        if leader_id:
+            leader_edges.append({"deck_id": deck_id, "leader_id": leader_id})
+
+        tournament_id = deck.get("tournament_id")
+        if tournament_id:
+            placed_in_edges.append(
+                {
+                    "deck_id": deck_id,
+                    "tournament_id": str(tournament_id),
+                }
             )
-            t_count += 1
 
-        # Create Deck nodes + relationships
-        for deck in decks:
-            leader_id = deck.get("leader_id", "")
-            deck_id = str(deck["id"])
-
-            # Create Deck node
-            await session.run(
-                """
-                MERGE (d:Deck {id: $id})
-                SET d.archetype = $archetype,
-                    d.placement = $placement,
-                    d.player_name = $player_name,
-                    d.leader_id = $leader_id,
-                    d.source = $source
-                """,
-                id=deck_id,
-                archetype=deck.get("archetype", ""),
-                placement=deck.get("placement"),
-                player_name=deck.get("player_name", ""),
-                leader_id=leader_id,
-                source=deck.get("source", "limitlesstcg"),
+        for card_entry in deck.get("cards", []):
+            includes_edges.append(
+                {
+                    "deck_id": deck_id,
+                    "card_id": card_entry["id"],
+                    "count": card_entry.get("count", 1),
+                }
             )
 
-            # USES_LEADER edge (Deck → Card)
-            if leader_id:
-                await session.run(
-                    """
-                    MATCH (d:Deck {id: $deck_id})
-                    MATCH (c:Card {id: $leader_id})
-                    MERGE (d)-[:USES_LEADER]->(c)
-                    """,
-                    deck_id=deck_id,
-                    leader_id=leader_id,
-                )
+    # --- Batch write to Neo4j ---
 
-            # PLACED_IN edge (Deck → Tournament)
-            tournament_id = deck.get("tournament_id")
-            if tournament_id:
-                await session.run(
-                    """
-                    MATCH (d:Deck {id: $deck_id})
-                    MATCH (t:Tournament {id: $tournament_id})
-                    MERGE (d)-[:PLACED_IN]->(t)
-                    """,
-                    deck_id=deck_id,
-                    tournament_id=str(tournament_id),
-                )
-
-            # INCLUDES edges (Deck → Card) with count property
-            for card_entry in deck.get("cards", []):
-                card_id = card_entry["id"]
-                count = card_entry.get("count", 1)
-                await session.run(
-                    """
-                    MATCH (d:Deck {id: $deck_id})
-                    MATCH (c:Card {id: $card_id})
-                    MERGE (d)-[inc:INCLUDES]->(c)
-                    SET inc.count = $count
-                    """,
-                    deck_id=deck_id,
-                    card_id=card_id,
-                    count=count,
-                )
-                inc_count += 1
-
-            d_count += 1
-
-    logger.info(
-        f"Loaded {t_count} tournaments, {d_count} decks, {inc_count} INCLUDES edges"
+    # 1. Tournament nodes
+    await batch_write(
+        driver,
+        """
+        UNWIND $batch AS row
+        MERGE (t:Tournament {id: row.id})
+        SET t.name = row.name,
+            t.date = row.date,
+            t.format = row.format,
+            t.player_count = row.player_count,
+            t.source = row.source
+        """,
+        tournament_params,
+        label="Tournaments",
     )
-    return {"tournaments": t_count, "decks": d_count, "includes_edges": inc_count}
+
+    # 2. Deck nodes
+    await batch_write(
+        driver,
+        """
+        UNWIND $batch AS row
+        MERGE (d:Deck {id: row.id})
+        SET d.archetype = row.archetype,
+            d.placement = row.placement,
+            d.player_name = row.player_name,
+            d.leader_id = row.leader_id,
+            d.source = row.source
+        """,
+        deck_params,
+        label="Decks",
+    )
+
+    # 3. USES_LEADER edges
+    await batch_write(
+        driver,
+        """
+        UNWIND $batch AS row
+        MATCH (d:Deck {id: row.deck_id})
+        MATCH (c:Card {id: row.leader_id})
+        MERGE (d)-[:USES_LEADER]->(c)
+        """,
+        leader_edges,
+        chunk_size=RELATIONSHIP_CHUNK_SIZE,
+        label="USES_LEADER edges",
+    )
+
+    # 4. PLACED_IN edges
+    await batch_write(
+        driver,
+        """
+        UNWIND $batch AS row
+        MATCH (d:Deck {id: row.deck_id})
+        MATCH (t:Tournament {id: row.tournament_id})
+        MERGE (d)-[:PLACED_IN]->(t)
+        """,
+        placed_in_edges,
+        chunk_size=RELATIONSHIP_CHUNK_SIZE,
+        label="PLACED_IN edges",
+    )
+
+    # 5. INCLUDES edges
+    await batch_write(
+        driver,
+        """
+        UNWIND $batch AS row
+        MATCH (d:Deck {id: row.deck_id})
+        MATCH (c:Card {id: row.card_id})
+        MERGE (d)-[inc:INCLUDES]->(c)
+        SET inc.count = row.count
+        """,
+        includes_edges,
+        chunk_size=RELATIONSHIP_CHUNK_SIZE,
+        label="INCLUDES edges",
+    )
+
+    latency_ms = round((time.time() - t0) * 1000, 1)
+    logger.info(
+        f"Loaded {len(tournament_params)} tournaments, {len(deck_params)} decks, "
+        f"{len(includes_edges)} INCLUDES edges ({latency_ms}ms)"
+    )
+    if tracer:
+        tracer.log(
+            "neo4j_finish",
+            step="load_tournament_data",
+            tournaments=len(tournament_params),
+            decks=len(deck_params),
+            leader_edges=len(leader_edges),
+            placed_in_edges=len(placed_in_edges),
+            includes_edges=len(includes_edges),
+            latency_ms=latency_ms,
+        )
+    return {
+        "tournaments": len(tournament_params),
+        "decks": len(deck_params),
+        "includes_edges": len(includes_edges),
+    }
 
 
-async def compute_card_meta_stats(driver: AsyncDriver) -> int:
+async def compute_card_meta_stats(
+    driver: AsyncDriver, tracer: CrawlTracer | None = None
+) -> int:
     """Compute tournament popularity stats and store on Card nodes.
 
     Sets: tournament_pick_rate, avg_copies, top_cut_rate
     Returns: number of cards updated.
     """
+    t0 = time.time()
     async with driver.session() as session:
         # Overall pick rate + avg copies
         result = await session.run(
@@ -349,43 +481,67 @@ async def compute_card_meta_stats(driver: AsyncDriver) -> int:
             """
         )
 
-    logger.info(f"Computed meta stats for {pick_updated} cards")
+    latency_ms = round((time.time() - t0) * 1000, 1)
+    logger.info(f"Computed meta stats for {pick_updated} cards ({latency_ms}ms)")
+    if tracer:
+        tracer.log(
+            "neo4j_finish",
+            step="compute_meta_stats",
+            cards_updated=pick_updated,
+            latency_ms=latency_ms,
+        )
     return pick_updated
 
 
-async def apply_ban_list(driver: AsyncDriver, banned_cards: list[dict]) -> int:
-    """Apply banned card list to Neo4j. Sets banned=true on matching Card nodes.
+async def apply_ban_list(
+    driver: AsyncDriver,
+    banned_cards: list[dict],
+    tracer: CrawlTracer | None = None,
+) -> int:
+    """Apply banned card list to Neo4j using UNWIND batching.
 
     Args:
         driver: Neo4j async driver
         banned_cards: List of dicts with card_id, status, reason
+        tracer: Optional CrawlTracer for logging
 
     Returns:
-        Number of cards marked as banned.
+        Number of entries processed.
     """
+    if not banned_cards:
+        return 0
+
     async with driver.session() as session:
         # Clear all existing bans
         await session.run(
             "MATCH (c:Card) WHERE c.banned = true SET c.banned = false, c.ban_reason = ''"
         )
 
-        # Apply new bans
-        marked = 0
-        for entry in banned_cards:
-            card_id = entry.get("card_id", "")
-            reason = entry.get("reason", "Officially banned by Bandai")
-            result = await session.run(
-                """
-                MATCH (c:Card {id: $id})
-                SET c.banned = true, c.ban_reason = $reason
-                RETURN c.id AS id
-                """,
-                id=card_id,
-                reason=reason,
-            )
-            record = await result.single()
-            if record:
-                marked += 1
+    # Apply new bans in batch
+    ban_params = [
+        {
+            "id": entry.get("card_id", ""),
+            "reason": entry.get("reason", "Officially banned by Bandai"),
+        }
+        for entry in banned_cards
+    ]
 
-    logger.info(f"Marked {marked} cards as banned (out of {len(banned_cards)} in list)")
-    return marked
+    await batch_write(
+        driver,
+        """
+        UNWIND $batch AS row
+        MATCH (c:Card {id: row.id})
+        SET c.banned = true, c.ban_reason = row.reason
+        """,
+        ban_params,
+        label="Ban list",
+    )
+
+    logger.info(f"Marked {len(banned_cards)} cards as banned")
+    if tracer:
+        tracer.log(
+            "neo4j_finish",
+            step="apply_ban_list",
+            banned_count=len(banned_cards),
+        )
+    return len(banned_cards)

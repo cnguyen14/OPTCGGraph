@@ -1,7 +1,15 @@
 """Compute synergy, mechanical, and strategic edges in the knowledge graph."""
 
+from __future__ import annotations
+
 import logging
+import time
+from typing import TYPE_CHECKING
+
 from neo4j import AsyncDriver
+
+if TYPE_CHECKING:
+    from backend.crawlers.tracer import CrawlTracer
 
 logger = logging.getLogger(__name__)
 
@@ -117,12 +125,40 @@ async def build_led_by_edges(driver: AsyncDriver) -> int:
         return count
 
 
-async def build_all_edges(driver: AsyncDriver) -> dict[str, int]:
+async def build_all_edges(
+    driver: AsyncDriver, tracer: CrawlTracer | None = None
+) -> dict[str, int]:
     """Build all computed edges. Returns counts per edge type."""
+    t0 = time.time()
+    if tracer:
+        tracer.log("neo4j_start", step="build_all_edges")
+
     results = {}
-    results["SYNERGY"] = await build_synergy_edges(driver)
-    results["MECHANICAL_SYNERGY"] = await build_mechanical_synergy_edges(driver)
-    results["CURVES_INTO"] = await build_curves_into_edges(driver)
-    results["LED_BY"] = await build_led_by_edges(driver)
-    logger.info(f"All edges built: {results}")
+    for name, fn in [
+        ("SYNERGY", build_synergy_edges),
+        ("MECHANICAL_SYNERGY", build_mechanical_synergy_edges),
+        ("CURVES_INTO", build_curves_into_edges),
+        ("LED_BY", build_led_by_edges),
+    ]:
+        et = time.time()
+        results[name] = await fn(driver)
+        edge_ms = round((time.time() - et) * 1000, 1)
+        if tracer:
+            tracer.log(
+                "edge_built",
+                edge_type=name,
+                count=results[name],
+                latency_ms=edge_ms,
+            )
+
+    latency_ms = round((time.time() - t0) * 1000, 1)
+    logger.info(f"All edges built: {results} ({latency_ms}ms)")
+    if tracer:
+        tracer.log(
+            "neo4j_finish",
+            step="build_all_edges",
+            total=sum(results.values()),
+            by_type=results,
+            latency_ms=latency_ms,
+        )
     return results

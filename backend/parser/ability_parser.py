@@ -1,96 +1,180 @@
-"""LLM-based ability text parser using Claude API."""
+"""LLM-based ability text parser — provider-agnostic."""
+
+from __future__ import annotations
 
 import asyncio
 import json
 import logging
 import re
+import time
+from typing import TYPE_CHECKING
 
-import anthropic
-
-from backend.services.settings_service import get_active_api_key
+from backend.services.llm_service import (
+    LLMNotAvailableError,
+    has_any_llm_key,
+    llm_complete,
+    strip_json_fences,
+)
 from backend.parser.prompts import ABILITY_PARSER_SYSTEM, ABILITY_PARSER_USER_TEMPLATE
 from backend.parser.keywords import get_cost_tier, COST_TIERS
+from backend.graph.batch import batch_write, RELATIONSHIP_CHUNK_SIZE
+
+if TYPE_CHECKING:
+    from backend.crawlers.tracer import CrawlTracer
 
 logger = logging.getLogger(__name__)
 
-BATCH_SIZE = 15  # Cards per API call
-MODEL = "claude-sonnet-4-20250514"
+BATCH_SIZE = 40  # Cards per API call (increased from 15 for throughput)
+LLM_CONCURRENCY = 3  # Max concurrent LLM calls
 
 
-async def parse_abilities(cards: list[dict], batch_size: int = BATCH_SIZE) -> list[dict]:
-    """Parse ability text for all cards using Claude API in batches.
+async def parse_abilities(
+    cards: list[dict],
+    batch_size: int = BATCH_SIZE,
+    tracer: CrawlTracer | None = None,
+) -> list[dict]:
+    """Parse ability text for all cards using LLM in concurrent batches.
 
     Returns list of parsed results: [{card_id, timing_keywords, ability_keywords, ...}]
     """
-    api_key = get_active_api_key("claude")
-    if not api_key:
-        logger.warning("No Anthropic API key configured, using regex fallback parser")
-        return [_regex_parse(c) for c in cards]
+    t0 = time.time()
+    use_llm = has_any_llm_key()
 
-    client = anthropic.AsyncAnthropic(api_key=api_key)
+    if not use_llm:
+        logger.warning("No LLM API key configured, using regex fallback parser")
+        if tracer:
+            tracer.log("parse_start", method="regex", card_count=len(cards))
+        results = [_regex_parse(c) for c in cards]
+        if tracer:
+            tracer.log(
+                "parse_finish",
+                method="regex",
+                card_count=len(results),
+                latency_ms=round((time.time() - t0) * 1000, 1),
+            )
+        return results
+
+    if tracer:
+        tracer.log(
+            "parse_start",
+            method="llm",
+            card_count=len(cards),
+            batch_size=batch_size,
+            concurrency=LLM_CONCURRENCY,
+        )
+
     results: list[dict] = []
 
     # Filter cards that have ability text
-    cards_with_abilities = [c for c in cards if c.get("ability") and c["ability"] != "-"]
+    cards_with_abilities = [
+        c for c in cards if c.get("ability") and c["ability"] != "-"
+    ]
     cards_without = [c for c in cards if not c.get("ability") or c["ability"] == "-"]
 
     # Empty ability cards get empty results
     for c in cards_without:
-        results.append({
-            "card_id": c["id"],
-            "timing_keywords": [],
-            "ability_keywords": [],
-            "don_keywords": [],
-            "effects": [],
-            "extracted_keywords": [],
-        })
+        results.append(
+            {
+                "card_id": c["id"],
+                "timing_keywords": [],
+                "ability_keywords": [],
+                "don_keywords": [],
+                "effects": [],
+                "extracted_keywords": [],
+            }
+        )
 
-    # Process in batches
+    # Build batches
+    batches: list[list[dict]] = []
     for i in range(0, len(cards_with_abilities), batch_size):
-        batch = cards_with_abilities[i : i + batch_size]
-        batch_num = i // batch_size + 1
-        total_batches = (len(cards_with_abilities) + batch_size - 1) // batch_size
-        logger.info(f"Parsing batch {batch_num}/{total_batches} ({len(batch)} cards)...")
+        batches.append(cards_with_abilities[i : i + batch_size])
 
-        parsed = await _parse_batch(client, batch)
+    total_batches = len(batches)
+    logger.info(
+        f"Parsing {len(cards_with_abilities)} cards in {total_batches} batches "
+        f"(size={batch_size}, concurrency={LLM_CONCURRENCY})"
+    )
+
+    # Process batches concurrently with semaphore
+    sem = asyncio.Semaphore(LLM_CONCURRENCY)
+    llm_failures = 0
+
+    async def _parse_with_sem(batch_num: int, batch: list[dict]) -> list[dict]:
+        nonlocal llm_failures
+        async with sem:
+            logger.info(
+                f"Parsing batch {batch_num}/{total_batches} ({len(batch)} cards)..."
+            )
+            bt = time.time()
+            parsed = await _parse_batch(batch)
+            batch_ms = round((time.time() - bt) * 1000, 1)
+
+            # Check if fell back to regex (parsed won't have LLM-specific fields)
+            is_fallback = len(parsed) > 0 and not parsed[0].get("extracted_keywords")
+            if is_fallback:
+                llm_failures += 1
+
+            if tracer:
+                tracer.log(
+                    "parse_batch",
+                    batch_num=batch_num,
+                    total_batches=total_batches,
+                    card_count=len(batch),
+                    result_count=len(parsed),
+                    fallback=is_fallback,
+                    latency_ms=batch_ms,
+                )
+            await asyncio.sleep(0.2)  # Light rate limit
+            return parsed
+
+    tasks = [_parse_with_sem(i + 1, batch) for i, batch in enumerate(batches)]
+    batch_results = await asyncio.gather(*tasks)
+
+    for parsed in batch_results:
         results.extend(parsed)
 
-        # Rate limit: small delay between batches
-        if i + batch_size < len(cards_with_abilities):
-            await asyncio.sleep(0.5)
-
-    logger.info(f"Parsed {len(results)} card abilities")
+    latency_ms = round((time.time() - t0) * 1000, 1)
+    logger.info(f"Parsed {len(results)} card abilities ({latency_ms}ms)")
+    if tracer:
+        tracer.log(
+            "parse_finish",
+            method="llm",
+            card_count=len(results),
+            with_abilities=len(cards_with_abilities),
+            without_abilities=len(cards_without),
+            total_batches=total_batches,
+            llm_failures=llm_failures,
+            latency_ms=latency_ms,
+        )
     return results
 
 
-async def _parse_batch(client: anthropic.AsyncAnthropic, batch: list[dict]) -> list[dict]:
-    """Parse a batch of cards via Claude API."""
+async def _parse_batch(batch: list[dict]) -> list[dict]:
+    """Parse a batch of cards via the active LLM provider."""
     cards_json = json.dumps(
-        [{"card_id": c["id"], "name": c.get("name", ""), "ability": c.get("ability", "")}
-         for c in batch],
+        [
+            {
+                "card_id": c["id"],
+                "name": c.get("name", ""),
+                "ability": c.get("ability", ""),
+            }
+            for c in batch
+        ],
         indent=2,
     )
 
     user_msg = ABILITY_PARSER_USER_TEMPLATE.format(cards_json=cards_json)
 
     try:
-        response = await client.messages.create(
-            model=MODEL,
-            max_tokens=4096,
-            system=ABILITY_PARSER_SYSTEM,
-            messages=[{"role": "user", "content": user_msg}],
-        )
-
-        text = response.content[0].text.strip()
-        # Strip markdown code fences if present
-        if text.startswith("```"):
-            text = re.sub(r"^```(?:json)?\n?", "", text)
-            text = re.sub(r"\n?```$", "", text)
+        text = await llm_complete(ABILITY_PARSER_SYSTEM, user_msg, prefer="smart")
+        text = strip_json_fences(text)
 
         parsed = json.loads(text)
         if isinstance(parsed, list):
             return parsed
 
+    except LLMNotAvailableError:
+        logger.warning("No LLM provider available, falling back to regex")
     except Exception as e:
         logger.error(f"LLM parse failed: {e}, falling back to regex")
 
@@ -169,7 +253,10 @@ def _regex_parse(card: dict) -> dict:
         effects.append("Power Debuff")
     if re.search(r"\brest\b", ability, re.I) and "rested" not in ability.lower():
         effects.append("Rest")
-    if re.search(r"play.*from.*hand|play.*character", ability, re.I) and "[On Play]" not in ability:
+    if (
+        re.search(r"play.*from.*hand|play.*character", ability, re.I)
+        and "[On Play]" not in ability
+    ):
         effects.append("Play")
 
     extracted = list(set(timing + abilities + don_kw + effects))
@@ -184,79 +271,157 @@ def _regex_parse(card: dict) -> dict:
     }
 
 
-async def build_keyword_graph(driver, parsed_results: list[dict], cards: list[dict]) -> int:
-    """Create Keyword nodes, HAS_KEYWORD edges, CostTier nodes, and IN_COST_TIER edges."""
-    edges_created = 0
+async def build_keyword_graph(
+    driver,
+    parsed_results: list[dict],
+    cards: list[dict],
+    tracer: CrawlTracer | None = None,
+) -> int:
+    """Create Keyword nodes, HAS_KEYWORD edges, CostTier nodes, and IN_COST_TIER edges.
 
-    async with driver.session() as session:
-        # Create CostTier nodes
-        for tier in COST_TIERS:
-            await session.run(
-                "MERGE (t:CostTier {name: $name}) SET t.range_min = $min, t.range_max = $max",
-                name=tier["name"],
-                min=tier["range_min"],
-                max=tier["range_max"],
-            )
+    Uses UNWIND batching for high-performance Neo4j writes.
+    """
+    t0 = time.time()
+    if tracer:
+        tracer.log(
+            "neo4j_start",
+            step="build_keyword_graph",
+            card_count=len(cards),
+            parsed_count=len(parsed_results),
+        )
 
-        # Create IN_COST_TIER edges for all cards
-        for card in cards:
-            cost = card.get("cost")
-            if cost is not None:
-                try:
-                    cost_int = int(cost)
-                except (ValueError, TypeError):
-                    continue
-                tier_name = get_cost_tier(cost_int)
-                if tier_name:
-                    await session.run(
-                        """
-                        MATCH (c:Card {id: $card_id})
-                        MATCH (t:CostTier {name: $tier})
-                        MERGE (c)-[:IN_COST_TIER]->(t)
-                        """,
-                        card_id=card["id"],
-                        tier=tier_name,
-                    )
-                    edges_created += 1
+    # --- Precompute all data in Python ---
 
-        # Create Keyword nodes and HAS_KEYWORD edges from parsed results
-        for parsed in parsed_results:
-            card_id = parsed["card_id"]
-            keywords = parsed.get("extracted_keywords", [])
+    # 1. CostTier nodes (small, fixed set)
+    tier_params = [
+        {"name": t["name"], "range_min": t["range_min"], "range_max": t["range_max"]}
+        for t in COST_TIERS
+    ]
 
-            for kw in keywords:
-                if not kw:
-                    continue
-                # Determine category
-                category = "effect"
-                if kw in parsed.get("timing_keywords", []):
-                    category = "timing"
-                elif kw in parsed.get("ability_keywords", []):
-                    category = "ability"
-                elif kw in parsed.get("don_keywords", []):
-                    category = "don"
+    # 2. IN_COST_TIER edges
+    cost_tier_edges: list[dict] = []
+    for card in cards:
+        cost = card.get("cost")
+        if cost is not None:
+            try:
+                cost_int = int(cost)
+            except (ValueError, TypeError):
+                continue
+            tier_name = get_cost_tier(cost_int)
+            if tier_name:
+                cost_tier_edges.append({"card_id": card["id"], "tier": tier_name})
 
-                await session.run(
-                    """
-                    MERGE (k:Keyword {name: $name})
-                    SET k.category = $category
-                    WITH k
-                    MATCH (c:Card {id: $card_id})
-                    MERGE (c)-[:HAS_KEYWORD]->(k)
-                    """,
-                    name=kw,
-                    category=category,
-                    card_id=card_id,
-                )
-                edges_created += 1
+    # 3. Keyword nodes (unique set) and HAS_KEYWORD edges
+    keyword_nodes: dict[str, str] = {}  # name -> category
+    keyword_edges: list[dict] = []
 
-        # Store parsed ability as JSON property on Card node
-        for parsed in parsed_results:
-            card_id = parsed["card_id"]
-            await session.run(
-                "MATCH (c:Card {id: $id}) SET c.parsed_ability = $parsed",
-                id=card_id,
-                parsed=json.dumps(parsed),
-            )
+    for parsed in parsed_results:
+        card_id = parsed["card_id"]
+        keywords = parsed.get("extracted_keywords", [])
 
-    return edges_created
+        for kw in keywords:
+            if not kw:
+                continue
+            # Determine category
+            category = "effect"
+            if kw in parsed.get("timing_keywords", []):
+                category = "timing"
+            elif kw in parsed.get("ability_keywords", []):
+                category = "ability"
+            elif kw in parsed.get("don_keywords", []):
+                category = "don"
+
+            keyword_nodes[kw] = category
+            keyword_edges.append({"card_id": card_id, "keyword": kw})
+
+    kw_node_params = [
+        {"name": name, "category": cat} for name, cat in keyword_nodes.items()
+    ]
+
+    # 4. Parsed ability JSON updates
+    parsed_updates = [
+        {"id": p["card_id"], "parsed": json.dumps(p)} for p in parsed_results
+    ]
+
+    # --- Batch write to Neo4j ---
+
+    # 1. CostTier nodes
+    await batch_write(
+        driver,
+        """
+        UNWIND $batch AS row
+        MERGE (t:CostTier {name: row.name})
+        SET t.range_min = row.range_min, t.range_max = row.range_max
+        """,
+        tier_params,
+    )
+
+    # 2. IN_COST_TIER edges
+    await batch_write(
+        driver,
+        """
+        UNWIND $batch AS row
+        MATCH (c:Card {id: row.card_id})
+        MATCH (t:CostTier {name: row.tier})
+        MERGE (c)-[:IN_COST_TIER]->(t)
+        """,
+        cost_tier_edges,
+        chunk_size=RELATIONSHIP_CHUNK_SIZE,
+        label="IN_COST_TIER edges",
+    )
+
+    # 3. Keyword nodes (create all unique keywords first)
+    await batch_write(
+        driver,
+        """
+        UNWIND $batch AS row
+        MERGE (k:Keyword {name: row.name})
+        SET k.category = row.category
+        """,
+        kw_node_params,
+    )
+
+    # 4. HAS_KEYWORD edges
+    await batch_write(
+        driver,
+        """
+        UNWIND $batch AS row
+        MATCH (c:Card {id: row.card_id})
+        MATCH (k:Keyword {name: row.keyword})
+        MERGE (c)-[:HAS_KEYWORD]->(k)
+        """,
+        keyword_edges,
+        chunk_size=RELATIONSHIP_CHUNK_SIZE,
+        label="HAS_KEYWORD edges",
+    )
+
+    # 5. Store parsed ability JSON on Card nodes
+    await batch_write(
+        driver,
+        """
+        UNWIND $batch AS row
+        MATCH (c:Card {id: row.id})
+        SET c.parsed_ability = row.parsed
+        """,
+        parsed_updates,
+        label="Parsed ability updates",
+    )
+
+    total_edges = len(cost_tier_edges) + len(keyword_edges)
+    latency_ms = round((time.time() - t0) * 1000, 1)
+    logger.info(
+        f"Built keyword graph: {len(kw_node_params)} keywords, "
+        f"{total_edges} edges, {len(parsed_updates)} parsed updates ({latency_ms}ms)"
+    )
+    if tracer:
+        tracer.log(
+            "neo4j_finish",
+            step="build_keyword_graph",
+            keyword_count=len(kw_node_params),
+            cost_tier_edges=len(cost_tier_edges),
+            keyword_edges=len(keyword_edges),
+            parsed_updates=len(parsed_updates),
+            total_edges=total_edges,
+            latency_ms=latency_ms,
+        )
+    return total_edges

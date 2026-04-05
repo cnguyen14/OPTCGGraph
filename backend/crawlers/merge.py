@@ -1,22 +1,46 @@
 """Merge card data from apitcg and optcgapi sources."""
 
+from __future__ import annotations
+
 import logging
+import time
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from backend.crawlers.tracer import CrawlTracer
 
 logger = logging.getLogger(__name__)
 
 # Fields where apitcg is primary (game mechanics)
 APITCG_PRIMARY_FIELDS = {
-    "name", "card_type", "cost", "power", "counter", "rarity",
-    "attribute", "color", "family", "ability", "trigger_effect",
+    "name",
+    "card_type",
+    "cost",
+    "power",
+    "counter",
+    "rarity",
+    "attribute",
+    "color",
+    "family",
+    "ability",
+    "trigger_effect",
 }
 
 # Fields where optcgapi is primary (pricing + images)
 OPTCGAPI_PRIMARY_FIELDS = {
-    "market_price", "inventory_price", "image_small", "image_large", "life",
+    "market_price",
+    "inventory_price",
+    "image_small",
+    "image_large",
+    "life",
 }
 
 
-def merge_cards(apitcg_cards: list[dict], optcgapi_cards: list[dict]) -> list[dict]:
+def merge_cards(
+    apitcg_cards: list[dict],
+    optcgapi_cards: list[dict],
+    tracer: CrawlTracer | None = None,
+) -> list[dict]:
     """Merge cards from both sources. Returns unified card list.
 
     - Join key: card ID
@@ -24,6 +48,7 @@ def merge_cards(apitcg_cards: list[dict], optcgapi_cards: list[dict]) -> list[di
     - optcgapi is primary for pricing and images
     - Cards from only one source are included as-is
     """
+    t0 = time.time()
     apitcg_map = {c["id"]: c for c in apitcg_cards if c.get("id")}
     optcgapi_map = {c["id"]: c for c in optcgapi_cards if c.get("id")}
 
@@ -60,8 +85,18 @@ def merge_cards(apitcg_cards: list[dict], optcgapi_cards: list[dict]) -> list[di
 
         merged.append(card)
 
+    latency_ms = round((time.time() - t0) * 1000, 1)
     logger.info(
         f"Merge complete: {len(merged)} total "
         f"(both: {both}, apitcg-only: {apitcg_only}, optcgapi-only: {optcgapi_only})"
     )
+    if tracer:
+        tracer.log(
+            "merge_finish",
+            total=len(merged),
+            both=both,
+            apitcg_only=apitcg_only,
+            optcgapi_only=optcgapi_only,
+            latency_ms=latency_ms,
+        )
     return merged

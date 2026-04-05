@@ -22,12 +22,12 @@ class Settings(BaseSettings):
     # LLM Providers
     anthropic_api_key: str = ""
     openrouter_api_key: str = ""
-    default_provider: str = "claude"
+    default_provider: str = "anthropic"
     default_model: str = "claude-sonnet-4-20250514"
 
     # Data Sources
     apitcg_api_key: str = ""
-    apitcg_base_url: str = "https://apitcg.com/api/one-piece/cards"
+    apitcg_base_url: str = "https://www.apitcg.com/api/one-piece/cards"
     optcgapi_base_url: str = "https://optcgapi.com/api"
     limitlesstcg_base_url: str = "https://onepiece.limitlesstcg.com"
 
