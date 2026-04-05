@@ -509,4 +509,132 @@ export interface MatchupAnalysis {
   overperformers: Array<{ card_id: string; card_name: string; reason: string }>;
   underperformers: Array<{ card_id: string; card_name: string; reason: string }>;
   suggested_swaps: SuggestedSwap[];
+  detailed_stats?: DetailedSimStats;
+}
+
+// --- Aggregate Deck Health Analysis ---
+
+export interface CardHealthEntry {
+  card_id: string;
+  card_name: string;
+  times_played: number;
+  play_rate: number;
+  win_correlation: number;
+  category: string;
+}
+
+export interface SynergyPair {
+  card_a: string;
+  card_b: string;
+  co_occurrence_rate: number;
+  win_lift: number;
+}
+
+export interface MatchupSpread {
+  opponent: string;
+  win_rate: number;
+  num_games: number;
+}
+
+export interface DeckHealthAnalysis {
+  summary: string;
+  consistency_rating: string;
+  total_sims: number;
+  total_games: number;
+  overall_win_rate: number;
+  strengths: string[];
+  weaknesses: string[];
+  core_engine: CardHealthEntry[];
+  dead_cards: CardHealthEntry[];
+  role_gaps: string[];
+  synergy_insights: string[];
+  improvement_priorities: string[];
+  card_health: CardHealthEntry[];
+  top_synergies: SynergyPair[];
+  matchup_spread: MatchupSpread[];
+}
+
+export interface DetailedSimStats {
+  card_performance: CardPerformanceDetail[];
+  turn_momentum: Array<{ turn: number; avg_p1_eval: number; avg_p2_eval: number }>;
+  action_patterns: {
+    play_before_attack_pct: number;
+    leader_attack_pct: number;
+    losing_attack_pct: number;
+    avg_decisions_per_game: number;
+    action_distribution?: Record<string, number>;
+    don_to_leader_pct?: number;
+  };
+  game_summaries: Array<{
+    game_idx: number;
+    winner: string;
+    turns: number;
+    p1_life: number;
+    p2_life: number;
+    critical_turns: number[];
+  }>;
+}
+
+export interface CardPerformanceDetail {
+  card_name: string;
+  times_played: number;
+  play_rate: number;
+  avg_turn_played: number;
+  win_pct: number;
+  in_winning_games: number;
+  in_losing_games: number;
+}
+
+// Simulation Analytics types
+export interface SimAnalyticsStats {
+  p1_win_rate: number;
+  avg_turns: number;
+  avg_p1_damage: number;
+  avg_p2_damage: number;
+  avg_p1_life_remaining: number;
+  avg_decisions_per_game: number;
+  first_player_win_rate: number;
+  p1_mulligan_rate: number;
+  p2_mulligan_rate: number;
+  p1_wins: number;
+  p2_wins: number;
+  draws: number;
+  action_distribution: Record<string, number>;
+  leader_attack_pct: number;
+  don_to_leader_pct: number;
+  losing_attack_pct: number;
+  play_before_attack_pct: number;
+}
+
+export interface SimCardStat {
+  name: string;
+  times_played: number;
+  games_appeared: number;
+  win_pct: number;
+}
+
+export interface TurnMomentum {
+  turn: number;
+  avg_p1_eval: number;
+  avg_p2_eval: number;
+}
+
+export interface SimAnalyticsEntry {
+  sim_id: string;
+  folder: string;
+  timestamp: string;
+  model: string | null;
+  mode: string;
+  p1_leader: string;
+  p2_leader: string;
+  p1_level: string;
+  p2_level: string;
+  num_games: number;
+  stats: SimAnalyticsStats;
+  card_stats: Record<string, SimCardStat>;
+  turn_momentum: TurnMomentum[];
+}
+
+export interface SimAnalyticsResponse {
+  simulations: SimAnalyticsEntry[];
 }

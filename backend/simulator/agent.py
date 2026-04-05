@@ -9,15 +9,20 @@ Each agent supports a role ("player" or "bot") with 3 skill levels.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import random
 import re
+import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import anthropic
+import httpx
 
-from backend.config import ANTHROPIC_API_KEY
+from backend.services.settings_service import get_active_api_key
 
 from .models import (
     ActionType,
@@ -34,6 +39,10 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
+
+# Models that use Anthropic API directly (all others go through OpenRouter)
+ANTHROPIC_MODELS = {"claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-6"}
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -1114,6 +1123,62 @@ class HeuristicAgent:
 # LLMAgent — Claude-powered, for Real mode
 # ===================================================================
 
+# ---------------------------------------------------------------------------
+# LLM Trace Logger — writes decision traces to JSONL for observability
+# ---------------------------------------------------------------------------
+
+
+class LLMTracer:
+    """Logs every LLM interaction to a JSONL file for debugging/analysis."""
+
+    def __init__(self, sim_folder: Path) -> None:
+        self._path = sim_folder / "llm_trace.jsonl"
+        self._file = self._path.open("a")
+
+    def log(
+        self,
+        *,
+        game_idx: int,
+        turn: int,
+        player: str,
+        decision_type: str,
+        model: str,
+        prompt: str,
+        raw_response: str | None,
+        parsed_json: dict | None,
+        chosen_action: str = "",
+        was_fallback: bool = False,
+        latency_ms: float = 0,
+        error: str | None = None,
+        game_state: dict | None = None,
+        deck_profile: str = "",
+        strategy: str = "",
+    ) -> None:
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "game_idx": game_idx,
+            "turn": turn,
+            "player": player,
+            "decision_type": decision_type,
+            "model": model,
+            "deck_profile": deck_profile,
+            "strategy": strategy,
+            "game_state": game_state or {},
+            "prompt": prompt,
+            "raw_response": raw_response,
+            "parsed_json": parsed_json,
+            "chosen_action": chosen_action,
+            "was_fallback": was_fallback,
+            "latency_ms": round(latency_ms, 1),
+            "error": error,
+        }
+        self._file.write(json.dumps(record, default=str) + "\n")
+        self._file.flush()
+
+    def close(self) -> None:
+        self._file.close()
+
+
 LLM_PROMPTS: dict[str, str] = {
     "player_new": (
         "You are simulating a NEW OPTCG player. You know the basic rules but make "
@@ -1171,14 +1236,18 @@ LLM_PROMPTS: dict[str, str] = {
 
 LLM_BASE_RULES = """Game rules:
 - Play characters/events by paying DON!! cost
-- Attach DON!! to boost power (+1000 each) — ONLY to ACTIVE cards, BEFORE attacking
-- Attack opponent's Leader to remove Life, attack rested characters to KO them
-- NEVER attack if your power < target's power (guaranteed failure)
+- Attach DON!! to boost power (+1000 each) — ONLY to ACTIVE cards
+- Attack succeeds when your power >= target (attacker WINS ties). Only fails if power < target.
+- Attack opponent's Leader to remove Life, attack RESTED characters to KO them
 - Characters enter RESTED when played (can't attack until next turn, unless Rush)
+- DON boost on RESTED characters is WASTED — they can't attack this turn
 - Win by removing all opponent Life then hitting their Leader one more time
 
-Respond with ONLY valid JSON: {"action_index": N}
-No explanation, no extra text."""
+Optimal turn sequence:
+1) Attach DON to ACTIVE attackers first → 2) Attack with boosted characters → 3) Play new cards AFTER attacks
+Exception: Play Rush cards BEFORE attacking (they can attack immediately).
+
+Think briefly (1-2 sentences), then respond with JSON: {"action_index": N}"""
 
 
 class LLMAgent:
@@ -1198,10 +1267,23 @@ class LLMAgent:
         level: str = "amateur",
         model: str = HAIKU_MODEL,
     ) -> None:
-        self.client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
         self.model = model
         self.role = role
         self.level = level
+        self._use_openrouter = model not in ANTHROPIC_MODELS
+        if self._use_openrouter:
+            self._openrouter_key = get_active_api_key("openrouter")
+            if not self._openrouter_key:
+                raise ValueError("OpenRouter API key not configured. Set it in Settings > BYOK.")
+            self.client = None
+            self._http_client = httpx.AsyncClient(timeout=15)
+        else:
+            claude_key = get_active_api_key("claude")
+            if not claude_key:
+                raise ValueError("Anthropic API key not configured. Set it in Settings > BYOK.")
+            self._openrouter_key = ""
+            self._http_client = None
+            self.client = anthropic.AsyncAnthropic(api_key=claude_key)
         prompt_key = f"{role}_{level}"
         self._system = (
             LLM_PROMPTS.get(prompt_key, LLM_PROMPTS["bot_medium"])
@@ -1210,6 +1292,52 @@ class LLMAgent:
         )
         self._fallback = HeuristicAgent(role=role, level=level)
         self._decision_collector: list[DecisionPoint] | None = None
+        # Phase B: Game memory
+        self._decision_history: list[str] = []
+        self._game_strategy: str = ""
+        self._deck_profile: str = ""
+        # Tracing
+        self._tracer: LLMTracer | None = None
+        self._game_idx: int = 0
+
+    def set_tracer(self, tracer: LLMTracer, game_idx: int = 0) -> None:
+        """Attach a tracer for logging LLM interactions."""
+        self._tracer = tracer
+        self._game_idx = game_idx
+
+    def initialize_game(self, deck: list[GameCard], opponent_leader: GameCard) -> None:
+        """Compute deck profile at game start for strategic context."""
+        self._decision_history.clear()
+        self._game_strategy = ""
+        if not deck:
+            return
+        costs = [c.cost for c in deck]
+        avg_cost = sum(costs) / len(costs) if costs else 0
+        rush_count = sum(1 for c in deck if "Rush" in c.keywords)
+        blocker_count = sum(1 for c in deck if "Blocker" in c.keywords)
+        removal_count = sum(
+            1 for c in deck
+            if any(k.lower() in ("ko", "bounce", "rest") for k in c.keywords)
+        )
+        counter_count = sum(1 for c in deck if c.counter > 0)
+        if avg_cost <= 3.5 and rush_count >= 4:
+            archetype = "Aggro"
+        elif avg_cost >= 4.5 or removal_count >= 6:
+            archetype = "Control"
+        else:
+            archetype = "Midrange"
+        self._deck_profile = (
+            f"{archetype} (avg cost {avg_cost:.1f}, "
+            f"{rush_count} Rush, {blocker_count} Blocker, "
+            f"{removal_count} Removal, {counter_count}/{len(deck)} Counter)"
+        )
+        if archetype == "Aggro":
+            self._game_strategy = "Rush damage early, use Rush characters, go for lethal by Turn 7"
+        elif archetype == "Control":
+            self._game_strategy = "Survive early, remove threats, win with high-cost finishers"
+        else:
+            self._game_strategy = "Build board efficiently, apply steady pressure, adapt to opponent"
+        logger.info("LLM deck profile: %s | Strategy: %s", self._deck_profile, self._game_strategy)
 
     def set_decision_collector(self, collector: list[DecisionPoint]) -> None:
         """Set collector for both LLM and fallback agents."""
@@ -1250,24 +1378,143 @@ class LLMAgent:
             )
         )
 
+    def _trace(
+        self,
+        *,
+        turn: int,
+        player: str,
+        decision_type: str,
+        prompt: str,
+        raw_response: str | None,
+        parsed_json: dict | None,
+        chosen_action: str = "",
+        was_fallback: bool = False,
+        latency_ms: float = 0,
+        error: str | None = None,
+        state: GameState | None = None,
+    ) -> None:
+        if not self._tracer:
+            return
+        game_state = None
+        if state:
+            # For counter/blocker, the deciding player is the defender
+            if decision_type in ("counter", "blocker"):
+                me = state.defending_player
+                opp = state.active_player
+            else:
+                me = state.active_player
+                opp = state.defending_player
+            score = evaluate_board(state, me.player_id)
+            phase = "early" if state.turn <= 3 else ("mid" if state.turn <= 6 else "late")
+            game_state = {
+                "life": len(me.life), "opp_life": len(opp.life),
+                "don": me.don_field, "hand_size": len(me.hand),
+                "field_size": len(me.characters), "board_eval": round(score, 1),
+                "phase": phase,
+            }
+        self._tracer.log(
+            game_idx=self._game_idx, turn=turn, player=player,
+            decision_type=decision_type, model=self.model,
+            prompt=prompt, raw_response=raw_response,
+            parsed_json=parsed_json, chosen_action=chosen_action,
+            was_fallback=was_fallback, latency_ms=latency_ms,
+            error=error, game_state=game_state,
+            deck_profile=self._deck_profile, strategy=self._game_strategy,
+        )
+
     async def choose_mulligan(self, hand: list[GameCard]) -> bool:
-        """Delegate mulligan decision to heuristic fallback."""
+        """Ask LLM whether to mulligan the opening hand."""
+        prompt = self._build_mulligan_prompt(hand)
+        t0 = time.monotonic()
+        text = await self._call_llm(prompt)
+        latency = (time.monotonic() - t0) * 1000
+        if text is not None:
+            try:
+                data = json.loads(text)
+                result = bool(data.get("mulligan", False))
+                self._trace(turn=0, player=self.role, decision_type="mulligan",
+                            prompt=prompt, raw_response=text, parsed_json=data,
+                            chosen_action=f"mulligan={result}", latency_ms=latency)
+                return result
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                self._trace(turn=0, player=self.role, decision_type="mulligan",
+                            prompt=prompt, raw_response=text, parsed_json=None,
+                            was_fallback=True, latency_ms=latency, error=str(e))
+                logger.debug(f"LLM mulligan parse error: {e}")
+        else:
+            self._trace(turn=0, player=self.role, decision_type="mulligan",
+                        prompt=prompt, raw_response=None, parsed_json=None,
+                        was_fallback=True, latency_ms=latency, error="no response")
         return await self._fallback.choose_mulligan(hand)
+
+    def _build_mulligan_prompt(self, hand: list[GameCard]) -> str:
+        lines = [
+            "MULLIGAN DECISION — You may redraw your entire hand ONCE.",
+            "Your opening hand:",
+        ]
+        for card in hand:
+            kw = f" [{', '.join(card.keywords)}]" if card.keywords else ""
+            ability = ""
+            if card.ability_text:
+                txt = card.ability_text[:80]
+                ability = f" — {txt}"
+            lines.append(f"  {card.name} (Cost:{card.cost} P:{card.power}{kw}){ability}")
+        lines.append("")
+        if self._deck_profile:
+            lines.append(f"Deck: {self._deck_profile}")
+        lines.append(
+            "Consider: Do you have early plays (cost 1-3)? "
+            "Is the curve good for turns 1-5?"
+        )
+        lines.append(
+            'Respond with ONLY valid JSON: {"mulligan": true} or {"mulligan": false}'
+        )
+        return "\n".join(lines)
+
+    def _is_trivial_decision(
+        self, legal_actions: list[GameAction]
+    ) -> int | None:
+        """Return action index if the decision is trivial enough to skip LLM."""
+        if len(legal_actions) <= 1:
+            return 0
+
+        non_pass = [
+            (i, a) for i, a in enumerate(legal_actions)
+            if a.action_type != ActionType.PASS
+        ]
+        # Only pass available (all other actions filtered)
+        if not non_pass:
+            return len(legal_actions) - 1  # Pass is always last
+
+        # Only 1 real action + pass → just do it
+        if len(non_pass) == 1:
+            return non_pass[0][0]
+
+        return None
 
     async def choose_main_action(
         self, state: GameState, legal_actions: list[GameAction]
     ) -> int:
-        if len(legal_actions) <= 1:
-            self._log_decision(state, legal_actions, 0)
-            return 0
+        # Skip LLM for trivial decisions
+        trivial = self._is_trivial_decision(legal_actions)
+        if trivial is not None:
+            action = legal_actions[trivial]
+            self._decision_history.append(f"T{state.turn}: {action.description}")
+            if len(self._decision_history) > 8:
+                self._decision_history = self._decision_history[-8:]
+            self._log_decision(state, legal_actions, trivial)
+            return trivial
 
         prompt = self._build_prompt(state, legal_actions)
+        t0 = time.monotonic()
         choice = await self._ask_llm(prompt, len(legal_actions))
+        latency = (time.monotonic() - t0) * 1000
         action = legal_actions[choice]
 
         # Validate LLM choice — reject obviously bad decisions
         player = state.active_player
         opponent = state.defending_player
+        was_fallback = False
 
         if action.action_type == ActionType.ATTACK:
             attacker = _find_card(action.source_id, player)
@@ -1277,14 +1524,30 @@ class LLMAgent:
                 and target
                 and attacker.effective_power < target.effective_power
             ):
-                result = await self._fallback.choose_main_action(state, legal_actions)
-                return result
+                was_fallback = True
+                choice = await self._fallback.choose_main_action(state, legal_actions)
+                action = legal_actions[choice]
 
-        if action.action_type == ActionType.ATTACH_DON:
+        if not was_fallback and action.action_type == ActionType.ATTACH_DON:
             target = _find_card(action.target_id, player)
             if target and target.state == CardState.RESTED:
-                result = await self._fallback.choose_main_action(state, legal_actions)
-                return result
+                was_fallback = True
+                choice = await self._fallback.choose_main_action(state, legal_actions)
+                action = legal_actions[choice]
+
+        # Trace
+        self._trace(
+            turn=state.turn, player=player.player_id,
+            decision_type="main_action", prompt=prompt,
+            raw_response=None, parsed_json={"action_index": choice},
+            chosen_action=action.description, was_fallback=was_fallback,
+            latency_ms=latency, state=state,
+        )
+
+        # Log decision to history for future prompts
+        self._decision_history.append(f"T{state.turn}: {action.description}")
+        if len(self._decision_history) > 8:
+            self._decision_history = self._decision_history[-8:]
 
         self._log_decision(state, legal_actions, choice)
         return choice
@@ -1298,8 +1561,62 @@ class LLMAgent:
     ) -> GameCard | None:
         if not blockers:
             return None
-        # Delegate to heuristic for simplicity
+        prompt = self._build_blocker_prompt(state, blockers, attacker, target)
+        t0 = time.monotonic()
+        text = await self._call_llm(prompt)
+        latency = (time.monotonic() - t0) * 1000
+        if text is not None:
+            try:
+                data = json.loads(text)
+                block_val = data.get("block")
+                chosen = f"block={block_val}"
+                self._trace(turn=state.turn, player=state.defending_player.player_id,
+                            decision_type="blocker", prompt=prompt,
+                            raw_response=text, parsed_json=data,
+                            chosen_action=chosen, latency_ms=latency, state=state)
+                if block_val is None:
+                    return None
+                idx = int(block_val)
+                if 0 <= idx < len(blockers):
+                    return blockers[idx]
+            except (json.JSONDecodeError, KeyError, IndexError, ValueError) as e:
+                self._trace(turn=state.turn, player=state.defending_player.player_id,
+                            decision_type="blocker", prompt=prompt,
+                            raw_response=text, parsed_json=None,
+                            was_fallback=True, latency_ms=latency, error=str(e), state=state)
+                logger.debug(f"LLM blocker parse error: {e}")
+        else:
+            self._trace(turn=state.turn, player=state.defending_player.player_id,
+                        decision_type="blocker", prompt=prompt,
+                        raw_response=None, parsed_json=None,
+                        was_fallback=True, latency_ms=latency, error="no response", state=state)
         return await self._fallback.choose_blockers(state, blockers, attacker, target)
+
+    def _build_blocker_prompt(
+        self,
+        state: GameState,
+        blockers: list[GameCard],
+        attacker: GameCard,
+        target: GameCard,
+    ) -> str:
+        defender = state.defending_player
+        target_type = "Leader" if target.card_type == "LEADER" else target.name
+        lines = [
+            f"BLOCKER DECISION — Opponent is attacking your {target_type} "
+            f"(P:{target.effective_power}).",
+            f"Attacker: {attacker.name} P:{attacker.effective_power}",
+            f"Your life: {len(defender.life)} | Hand: {len(defender.hand)} cards",
+            "",
+            "Available blockers (blocker takes the hit instead, becomes RESTED):",
+        ]
+        for i, b in enumerate(blockers):
+            lines.append(f"  [{i}] {b.name} P:{b.effective_power}")
+        lines.append("")
+        lines.append(
+            'Respond with ONLY valid JSON: {"block": null} to not block, '
+            'or {"block": 0} to use blocker at index 0, etc.'
+        )
+        return "\n".join(lines)
 
     async def choose_counters(
         self,
@@ -1309,22 +1626,147 @@ class LLMAgent:
         target: GameCard,
         power_gap: int,
     ) -> list[GameCard]:
-        # Delegate to heuristic
+        if power_gap <= 0:
+            return []
+        counter_cards = [c for c in hand if c.counter > 0]
+        if not counter_cards:
+            return []
+        prompt = self._build_counter_prompt(
+            state, counter_cards, attacker, target, power_gap
+        )
+        t0 = time.monotonic()
+        text = await self._call_llm(prompt)
+        latency = (time.monotonic() - t0) * 1000
+        if text is not None:
+            try:
+                data = json.loads(text)
+                indices = data.get("counters", [])
+                self._trace(turn=state.turn, player=state.defending_player.player_id,
+                            decision_type="counter", prompt=prompt,
+                            raw_response=text, parsed_json=data,
+                            chosen_action=f"counters={indices}", latency_ms=latency, state=state)
+                if isinstance(indices, list):
+                    selected = [
+                        counter_cards[i]
+                        for i in indices
+                        if isinstance(i, int) and 0 <= i < len(counter_cards)
+                    ]
+                    return selected
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                self._trace(turn=state.turn, player=state.defending_player.player_id,
+                            decision_type="counter", prompt=prompt,
+                            raw_response=text, parsed_json=None,
+                            was_fallback=True, latency_ms=latency, error=str(e), state=state)
+                logger.debug(f"LLM counter parse error: {e}")
+        else:
+            self._trace(turn=state.turn, player=state.defending_player.player_id,
+                        decision_type="counter", prompt=prompt,
+                        raw_response=None, parsed_json=None,
+                        was_fallback=True, latency_ms=latency, error="no response", state=state)
         return await self._fallback.choose_counters(
             state, hand, attacker, target, power_gap
         )
+
+    def _build_counter_prompt(
+        self,
+        state: GameState,
+        counter_cards: list[GameCard],
+        attacker: GameCard,
+        target: GameCard,
+        power_gap: int,
+    ) -> str:
+        defender = state.defending_player
+        lines = [
+            f"COUNTER DECISION — Opponent attacks your "
+            f"{'Leader' if target.card_type == 'LEADER' else target.name} "
+            f"(P:{target.effective_power}).",
+            f"Attacker: {attacker.name} P:{attacker.effective_power} | "
+            f"Power gap: {power_gap} (you need +{power_gap} to survive)",
+            f"Your life: {len(defender.life)} | Hand: {len(defender.hand)} cards",
+            "",
+            "Counter cards in hand (discard to add counter value to defense):",
+        ]
+        for i, c in enumerate(counter_cards):
+            kw = f" [{', '.join(c.keywords)}]" if c.keywords else ""
+            lines.append(
+                f"  [{i}] {c.name} (Cost:{c.cost} P:{c.power} Counter:+{c.counter}{kw})"
+            )
+        # Strategic guidance based on life
+        life_count = len(defender.life)
+        lines.append("")
+        if life_count == 0:
+            lines.append(
+                "⚠ CRITICAL: Life = 0. If this attack hits your Leader, YOU LOSE. "
+                "MUST counter if total counter >= power gap!"
+            )
+        elif life_count == 1:
+            lines.append(
+                "⚠ DANGER: Life = 1. Counter if possible — next unblocked hit is lethal."
+            )
+        elif life_count <= 3:
+            lines.append(
+                "Counter only with low-value cards (low cost, no important abilities). "
+                "Preserve high-cost cards for playing."
+            )
+        else:
+            lines.append(
+                "Life is healthy (4+). DON'T counter — life is a resource. "
+                "Keep cards in hand for playing. Take the hit."
+            )
+        lines.append("")
+        lines.append(
+            "Choose which cards to use as counters. Total counter must >= "
+            f"{power_gap} to block the attack."
+        )
+        lines.append(
+            'Respond with ONLY valid JSON: {"counters": []} to take the hit, '
+            'or {"counters": [0, 2]} to use cards at those indices.'
+        )
+        return "\n".join(lines)
 
     def _build_prompt(self, state: GameState, legal_actions: list[GameAction]) -> str:
         player = state.active_player
         opponent = state.defending_player
 
+        # Game phase awareness
+        if state.turn <= 3:
+            phase_hint = "EARLY GAME — prioritize board development, play characters"
+        elif state.turn <= 6:
+            phase_hint = "MID GAME — balance board presence + pressure opponent"
+        else:
+            phase_hint = "LATE GAME — push for lethal, maximize every action"
+
+        # Board evaluation
+        score = evaluate_board(state, player.player_id)
+        if score > 30:
+            position = f"AHEAD (+{score:.0f}) — maintain pressure, don't overcommit"
+        elif score < -30:
+            position = f"BEHIND ({score:.0f}) — attack aggressively even at equal power, force opponent to spend counters"
+        else:
+            position = f"EVEN ({score:+.0f}) — play for value"
+
         lines = [
-            f"Turn {state.turn} | Your life: {len(player.life)} | Opp life: {len(opponent.life)} | DON: {player.don_field}",
-            f"Hand ({len(player.hand)}):",
+            f"Turn {state.turn} | Life: {len(player.life)} vs {len(opponent.life)} | DON: {player.don_field} | {phase_hint}",
+            f"Position: {position}",
         ]
+
+        # Strategy context
+        if self._game_strategy:
+            lines.append(f"Strategy: {self._game_strategy}")
+
+        # Decision history
+        if self._decision_history:
+            lines.append("Recent: " + " → ".join(self._decision_history[-5:]))
+
+        lines.append("")
+        lines.append(f"Hand ({len(player.hand)}):")
         for card in player.hand:
             kw = f" [{', '.join(card.keywords)}]" if card.keywords else ""
-            lines.append(f"  {card.name} (Cost:{card.cost} P:{card.power}{kw})")
+            ability = ""
+            if card.ability_text:
+                txt = card.ability_text[:80]
+                ability = f" — {txt}"
+            lines.append(f"  {card.name} (Cost:{card.cost} P:{card.power}{kw}){ability}")
 
         lines.append("Your field:")
         lines.append(
@@ -1333,41 +1775,126 @@ class LLMAgent:
         )
         for card in player.field:
             status = "ACTIVE" if card.state == CardState.ACTIVE else "RESTED"
-            lines.append(f"  {card.name} P:{card.effective_power} {status}")
+            kw = f" [{', '.join(card.keywords)}]" if card.keywords else ""
+            lines.append(f"  {card.name} P:{card.effective_power} {status}{kw}")
 
+        # Opponent threat assessment
         lines.append("Opp field:")
         lines.append(
             f"  Leader: {opponent.leader.name} P:{opponent.leader.effective_power}"
         )
+        opp_threats: list[str] = []
         for card in opponent.field:
             status = "ACTIVE" if card.state == CardState.ACTIVE else "RESTED"
-            blocker = " [Blocker]" if "Blocker" in card.keywords else ""
-            lines.append(f"  {card.name} P:{card.effective_power} {status}{blocker}")
+            tags: list[str] = []
+            if "Blocker" in card.keywords:
+                tags.append("Blocker")
+            if card.state == CardState.ACTIVE and card.effective_power >= 6000:
+                tags.append("THREAT")
+            tag_str = f" [{', '.join(tags)}]" if tags else ""
+            lines.append(f"  {card.name} P:{card.effective_power} {status}{tag_str}")
+            if card.state == CardState.ACTIVE and card.effective_power >= 5000:
+                opp_threats.append(f"{card.name}({card.effective_power})")
 
+        if opp_threats:
+            lines.append(f"  ⚠ Active threats: {', '.join(opp_threats)}")
+
+        lines.append("")
         lines.append("Legal actions:")
         for i, a in enumerate(legal_actions):
-            lines.append(f"  [{i}] {a.description}")
+            desc = a.description
+            # Annotate DON on RESTED targets as wasteful
+            if a.action_type == ActionType.ATTACH_DON and a.target_id:
+                target_card = _find_card(a.target_id, player)
+                if target_card and target_card.state == CardState.RESTED:
+                    desc += " ⚠ RESTED, can't attack this turn"
+            lines.append(f"  [{i}] {desc}")
 
         return "\n".join(lines)
 
+    async def _call_llm(self, prompt: str) -> str | None:
+        """Call LLM and return raw response text, with retry for rate limits."""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if self._use_openrouter:
+                    return await self._call_openrouter(prompt)
+                return await self._call_anthropic(prompt)
+            except anthropic.RateLimitError:
+                if attempt < max_retries - 1:
+                    wait = 2**attempt
+                    logger.warning(f"Rate limit hit, retrying in {wait}s...")
+                    await asyncio.sleep(wait)
+                    continue
+                logger.warning("Rate limit exhausted after %d retries", max_retries)
+                return None
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429 and attempt < max_retries - 1:
+                    wait = 2**attempt
+                    logger.warning(f"OpenRouter rate limit, retrying in {wait}s...")
+                    await asyncio.sleep(wait)
+                    continue
+                logger.warning(f"OpenRouter HTTP error: {e}")
+                return None
+            except Exception as e:
+                logger.warning(f"LLM call failed: {e}")
+                return None
+        return None
+
+    async def _call_anthropic(self, prompt: str) -> str | None:
+        """Direct Anthropic API call."""
+        assert self.client is not None
+        response = await self.client.messages.create(
+            model=self.model,
+            system=self._system,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=200,
+        )
+        block = response.content[0]
+        if not isinstance(block, anthropic.types.TextBlock):
+            return None
+        return self._extract_json(block.text.strip())
+
+    async def _call_openrouter(self, prompt: str) -> str | None:
+        """OpenRouter API call (OpenAI-compatible format) with reused client."""
+        resp = await self._http_client.post(
+            OPENROUTER_URL,
+            headers={"Authorization": f"Bearer {self._openrouter_key}"},
+            json={
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": self._system},
+                    {"role": "user", "content": prompt},
+                ],
+                "max_tokens": 200,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return self._extract_json(content.strip()) if content else None
+
+    @staticmethod
+    def _extract_json(text: str) -> str:
+        """Extract the last JSON object from LLM response (supports chain-of-thought)."""
+        # Find last { ... } in response
+        last_brace = text.rfind("}")
+        if last_brace == -1:
+            return text
+        first_brace = text.rfind("{", 0, last_brace)
+        if first_brace == -1:
+            return text
+        return text[first_brace:last_brace + 1]
+
     async def _ask_llm(self, prompt: str, num_options: int) -> int:
+        """Ask LLM to choose a main-phase action index."""
+        text = await self._call_llm(prompt)
+        if text is None:
+            return 0
         try:
-            response = await self.client.messages.create(
-                model=self.model,
-                system=self._system,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=50,
-            )
-            block = response.content[0]
-            if not isinstance(block, anthropic.types.TextBlock):
-                return 0
-            text = block.text.strip()
             data = json.loads(text)
             idx = int(data.get("action_index", 0))
             return max(0, min(idx, num_options - 1))
         except (json.JSONDecodeError, KeyError, IndexError, ValueError) as e:
             logger.debug(f"LLM parse error: {e}")
-            return 0
-        except Exception as e:
-            logger.warning(f"LLM call failed: {e}")
             return 0

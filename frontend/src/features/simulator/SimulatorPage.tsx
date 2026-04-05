@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSimulation } from '../../hooks/useSimulation';
-import { checkApiBalance } from '../../lib/api';
+import { checkApiBalance, fetchProviderModels } from '../../lib/api';
+import type { ModelInfo } from '../../types';
 import DeckSelector from './DeckSelector';
 import type { SelectedDeck } from './DeckSelector';
 import SimulationProgress from './SimulationProgress';
@@ -20,19 +21,42 @@ export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds 
   const [numGames, setNumGames] = useState(10);
   const [p1Level, setP1Level] = useState('amateur');
   const [p2Level, setP2Level] = useState('medium');
+  const [provider, setProvider] = useState<'claude' | 'openrouter'>('claude');
   const [llmModel, setLlmModel] = useState('claude-haiku-4-5-20251001');
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [concurrency, setConcurrency] = useState(10);
   const [hasBalance, setHasBalance] = useState<boolean | null>(null);
 
   const sim = useSimulation();
 
-  // Check API balance when switching to Real mode
+  // Check API balance when switching to Real mode (only for Claude provider)
   useEffect(() => {
-    if (mode === 'real') {
+    if (mode === 'real' && provider === 'claude') {
       checkApiBalance()
         .then((r) => setHasBalance(r.has_balance))
         .catch(() => setHasBalance(false));
+    } else if (provider === 'openrouter') {
+      setHasBalance(null); // Don't show balance warning for OpenRouter
     }
-  }, [mode]);
+  }, [mode, provider]);
+
+  // Load models when provider changes
+  useEffect(() => {
+    if (mode !== 'real') return;
+    setModelsLoading(true);
+    fetchProviderModels(provider)
+      .then((r) => {
+        if (r.status === 'ok' && r.models.length > 0) {
+          setAvailableModels(r.models);
+          setLlmModel(r.models[0].id);
+        } else {
+          setAvailableModels([]);
+        }
+      })
+      .catch(() => setAvailableModels([]))
+      .finally(() => setModelsLoading(false));
+  }, [provider, mode]);
 
   const canStart = deck1 && deck2 && deck1.cardIds.length === 50 && deck2.cardIds.length === 50
     && !(mode === 'real' && hasBalance === false);
@@ -50,6 +74,7 @@ export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds 
       p1Level,
       p2Level,
       mode === 'real' ? llmModel : undefined,
+      mode === 'real' ? concurrency : undefined,
     );
   };
 
@@ -125,17 +150,48 @@ export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds 
               <option value="hard">Hard</option>
             </Select>
             {mode === 'real' && (
-              <Select
-                value={llmModel}
-                onChange={(e) => setLlmModel(e.target.value)}
-                disabled={!isIdle}
-                label="Model"
-                className="text-xs"
-              >
-                <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
-                <option value="claude-sonnet-4-6">Sonnet 4.6</option>
-                <option value="claude-opus-4-6">Opus 4.6</option>
-              </Select>
+              <>
+                <Select
+                  value={provider}
+                  onChange={(e) => setProvider(e.target.value as 'claude' | 'openrouter')}
+                  disabled={!isIdle}
+                  label="Provider"
+                  className="text-xs"
+                >
+                  <option value="claude">Anthropic (Direct)</option>
+                  <option value="openrouter">OpenRouter</option>
+                </Select>
+                <Select
+                  value={llmModel}
+                  onChange={(e) => setLlmModel(e.target.value)}
+                  disabled={!isIdle || modelsLoading}
+                  label="Model"
+                  className="text-xs"
+                >
+                  {modelsLoading ? (
+                    <option>Loading models...</option>
+                  ) : availableModels.length > 0 ? (
+                    availableModels.map((m) => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))
+                  ) : (
+                    <option>No models available</option>
+                  )}
+                </Select>
+                <Input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={concurrency}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v) && v >= 1 && v <= 50) setConcurrency(v);
+                  }}
+                  className="w-full text-center text-xs"
+                  disabled={!isIdle}
+                  label="Parallel Games (1-50)"
+                />
+              </>
             )}
           </div>
         </div>
@@ -160,8 +216,8 @@ export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds 
                 {sim.status === 'loading'
                   ? 'Loading...'
                   : sim.progress.completed === 0
-                    ? 'Starting...'
-                    : `Game ${sim.progress.completed + 1}/${sim.progress.total}`}
+                    ? (mode === 'real' ? `Running ${Math.min(concurrency, numGames)} games...` : 'Starting...')
+                    : `${sim.progress.completed}/${sim.progress.total} done`}
               </span>
             </div>
           )}
@@ -206,6 +262,7 @@ export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds 
                 p1Leader={sim.p1Leader}
                 p2Leader={sim.p2Leader}
                 startedAt={sim.startedAt}
+                parallelGames={mode === 'real' ? Math.min(concurrency, numGames) : undefined}
               />
               <LiveGameFeed
                 gameResults={sim.gameResults}
@@ -213,6 +270,7 @@ export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds 
                 p2Leader={sim.p2Leader}
                 totalGames={sim.progress.total}
                 isRunning={sim.status === 'running'}
+                parallelGames={mode === 'real' ? Math.min(concurrency, numGames) : undefined}
               />
             </div>
           )}

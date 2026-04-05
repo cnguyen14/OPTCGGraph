@@ -7,7 +7,8 @@ from pathlib import Path
 
 import httpx
 
-from backend.config import APITCG_API_KEY, APITCG_BASE_URL, APITCG_DELAY, CRAWL_CACHE_DIR
+from backend.config import APITCG_BASE_URL, APITCG_DELAY, CRAWL_CACHE_DIR
+from backend.services.settings_service import get_active_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +16,8 @@ CACHE_DIR = CRAWL_CACHE_DIR / "apitcg"
 
 
 def _get_api_key() -> str:
-    """Get ApiTCG API key (runtime override > env var)."""
-    from backend.api.routes_settings import get_active_api_key
-    return get_active_api_key("apitcg") or APITCG_API_KEY
+    """Get ApiTCG API key from Redis-persisted runtime keys."""
+    return get_active_api_key("apitcg")
 
 
 async def crawl_apitcg() -> list[dict]:

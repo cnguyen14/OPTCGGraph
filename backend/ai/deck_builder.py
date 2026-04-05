@@ -26,7 +26,7 @@ from collections import Counter
 import anthropic
 from neo4j import AsyncDriver
 
-from backend.config import ANTHROPIC_API_KEY
+from backend.services.settings_service import get_active_api_key
 from backend.graph.queries import get_card_by_id
 from backend.ai.deck_validator import validate_deck
 
@@ -731,9 +731,10 @@ async def _qc_review(
     Returns (possibly_modified_deck, review_result).
     review_result contains verdict, reasoning, and any swaps applied.
     """
-    if not ANTHROPIC_API_KEY:
-        logger.warning("No ANTHROPIC_API_KEY — skipping QC review")
-        return deck, {"verdict": "SKIP", "reasoning": "No API key configured"}
+    api_key = get_active_api_key("claude")
+    if not api_key:
+        logger.warning("No Anthropic API key — skipping QC review")
+        return deck, {"verdict": "SKIP", "reasoning": "No API key configured. Set it in Settings > BYOK."}
 
     deck_ids = {c["id"] for c in deck}
 
@@ -759,7 +760,7 @@ async def _qc_review(
     )
 
     try:
-        client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+        client = anthropic.AsyncAnthropic(api_key=api_key)
         response = await client.messages.create(
             model="claude-sonnet-4-20250514",
             messages=[{"role": "user", "content": prompt}],

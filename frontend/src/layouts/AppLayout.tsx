@@ -13,6 +13,7 @@ const NAV_TABS = [
   { key: 'mydecks', label: 'My Decks' },
   { key: 'meta', label: 'Meta Explorer' },
   { key: 'simulator', label: 'Simulator' },
+  { key: 'analytics', label: 'Analytics' },
   { key: 'settings', label: 'Settings' },
 ];
 

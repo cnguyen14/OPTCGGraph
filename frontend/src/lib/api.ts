@@ -243,6 +243,7 @@ export async function startBattle(
   p1Level: string = 'amateur',
   p2Level: string = 'medium',
   llmModel?: string,
+  concurrency?: number,
 ): Promise<{ sim_id: string }> {
   const resp = await fetch(`${BASE_URL}/simulator/battle`, {
     method: 'POST',
@@ -257,6 +258,7 @@ export async function startBattle(
       p1_level: p1Level,
       p2_level: p2Level,
       ...(llmModel ? { llm_model: llmModel } : {}),
+      ...(concurrency ? { concurrency } : {}),
     }),
   });
   if (!resp.ok) throw new Error(await resp.text());
@@ -402,7 +404,7 @@ export async function testApiKey(provider: string, apiKey: string): Promise<Test
 
 // === Deck Analysis / Improve API ===
 
-import type { DeckAnalysis, SimHistoryEntry, DeckImprovements, SimDetail, MatchupAnalysis } from '../types';
+import type { DeckAnalysis, SimHistoryEntry, DeckImprovements, SimDetail, MatchupAnalysis, SimAnalyticsResponse, DeckHealthAnalysis } from '../types';
 
 export async function analyzeDeck(
   leaderId: string,
@@ -464,6 +466,38 @@ export async function analyzeMatchup(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ leader_id: leaderId, card_ids: cardIds, sim_id: simId }),
   });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+export async function clearSimHistory(
+  leaderId: string,
+  cardIds: string[],
+): Promise<{ status: string; message: string }> {
+  const resp = await fetch(`${BASE_URL}/deck/clear-sim-history`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ leader_id: leaderId, card_ids: cardIds }),
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+export async function aggregateDeckAnalysis(
+  leaderId: string,
+  cardIds: string[],
+): Promise<DeckHealthAnalysis> {
+  const resp = await fetch(`${BASE_URL}/deck/aggregate-analysis`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ leader_id: leaderId, card_ids: cardIds }),
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+export async function fetchSimulationAnalytics(): Promise<SimAnalyticsResponse> {
+  const resp = await fetch(`${BASE_URL}/simulator/analytics`);
   if (!resp.ok) throw new Error(await resp.text());
   return resp.json();
 }

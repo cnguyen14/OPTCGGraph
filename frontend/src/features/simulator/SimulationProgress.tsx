@@ -7,6 +7,7 @@ interface Props {
   p1Leader: string | null;
   p2Leader: string | null;
   startedAt: number | null;
+  parallelGames?: number;
 }
 
 function formatTime(ms: number): string {
@@ -16,7 +17,7 @@ function formatTime(ms: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export default function SimulationProgress({ progress, p1Leader, p2Leader, startedAt }: Props) {
+export default function SimulationProgress({ progress, p1Leader, p2Leader, startedAt, parallelGames }: Props) {
   const pct = progress.total > 0 ? (progress.completed / progress.total) * 100 : 0;
   const [now, setNow] = useState(Date.now());
 
@@ -45,6 +46,9 @@ export default function SimulationProgress({ progress, p1Leader, p2Leader, start
         </h3>
         <span className="text-xs text-text-secondary">
           {progress.completed}/{progress.total} games
+          {parallelGames && parallelGames > 1 && (
+            <span className="text-text-muted ml-1">({parallelGames}x parallel)</span>
+          )}
         </span>
       </div>
 

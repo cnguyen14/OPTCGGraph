@@ -7,7 +7,7 @@ import re
 
 import anthropic
 
-from backend.config import ANTHROPIC_API_KEY
+from backend.services.settings_service import get_active_api_key
 from backend.parser.prompts import ABILITY_PARSER_SYSTEM, ABILITY_PARSER_USER_TEMPLATE
 from backend.parser.keywords import get_cost_tier, COST_TIERS
 
@@ -22,11 +22,12 @@ async def parse_abilities(cards: list[dict], batch_size: int = BATCH_SIZE) -> li
 
     Returns list of parsed results: [{card_id, timing_keywords, ability_keywords, ...}]
     """
-    if not ANTHROPIC_API_KEY:
-        logger.warning("No ANTHROPIC_API_KEY set, using regex fallback parser")
+    api_key = get_active_api_key("claude")
+    if not api_key:
+        logger.warning("No Anthropic API key configured, using regex fallback parser")
         return [_regex_parse(c) for c in cards]
 
-    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    client = anthropic.AsyncAnthropic(api_key=api_key)
     results: list[dict] = []
 
     # Filter cards that have ability text

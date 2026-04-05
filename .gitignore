@@ -47,3 +47,4 @@ docker-data/
 data/simulations/
 .playwright-mcp/
 .claude/worktrees/
+.gitnexus

@@ -14,6 +14,7 @@ from backend.agent.tools.card_tools import CARD_TOOLS
 from backend.agent.tools.deck_tools import DECK_TOOLS
 from backend.agent.tools.meta_tools import META_TOOLS
 from backend.agent.tools.query_tools import QUERY_TOOLS
+from backend.agent.tools.simulation_tools import SIMULATION_TOOLS
 from backend.agent.tools.ui_tools import UI_TOOLS
 
 __all__ = [
@@ -32,6 +33,7 @@ _ALL_TOOL_LISTS = [
     META_TOOLS,
     QUERY_TOOLS,
     ANALYSIS_TOOLS,
+    SIMULATION_TOOLS,
     UI_TOOLS,
 ]
 

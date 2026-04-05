@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from backend.graph.connection import get_driver
 from backend.storage.redis_client import get_redis
+from backend.simulator.analytics import aggregate_all_simulations
 from backend.simulator.runner import SimulationRunner
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ class BattleRequest(BaseModel):
     p1_level: str = "amateur"
     p2_level: str = "medium"
     llm_model: str | None = None
+    concurrency: int | None = None
 
 
 class BattleResponse(BaseModel):
@@ -113,6 +115,10 @@ async def _store_sim_history(
     await r.ltrim(redis_key, 0, 99)
     await r.expire(redis_key, SIM_HISTORY_TTL)
 
+    # Invalidate aggregate analysis cache so next request recomputes
+    agg_cache_key = f"aggregate-analysis:v1:{leader_id}:{deck_hash}"
+    await r.delete(agg_cache_key)
+
 
 @router.get("/status/{sim_id}")
 async def stream_simulation(sim_id: str) -> StreamingResponse:
@@ -136,6 +142,7 @@ async def stream_simulation(sim_id: str) -> StreamingResponse:
                 p2_level=req.get("p2_level", "medium"),
                 llm_model=req.get("llm_model"),
                 base_seed=random.randint(0, 2**31),
+                concurrency=req.get("concurrency"),
             )
 
             sim_data["status"] = "running"
@@ -233,3 +240,10 @@ async def export_simulation_data(sim_id: str, file_type: str) -> FileResponse:
         filename=file_map[file_type],
         media_type=media,
     )
+
+
+@router.get("/analytics")
+async def get_analytics() -> dict[str, Any]:
+    """Return aggregated analytics for all simulations on disk."""
+    simulations = aggregate_all_simulations()
+    return {"simulations": simulations}

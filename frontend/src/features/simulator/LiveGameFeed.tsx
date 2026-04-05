@@ -8,6 +8,7 @@ interface Props {
   p2Leader: string | null;
   totalGames: number;
   isRunning: boolean;
+  parallelGames?: number;
 }
 
 interface LogEntry {
@@ -479,9 +480,11 @@ function GamePanel({
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function LiveGameFeed({ gameResults, p1Leader, p2Leader, totalGames, isRunning }: Props) {
-  const currentGame = gameResults.length + 1;
-  const hasGames = gameResults.length > 0;
+export default function LiveGameFeed({ gameResults, p1Leader, p2Leader, totalGames, isRunning, parallelGames }: Props) {
+  const completed = gameResults.length;
+  const remaining = totalGames - completed;
+  const batchSize = parallelGames && parallelGames > 1 ? Math.min(parallelGames, remaining) : 1;
+  const hasGames = completed > 0;
 
   return (
     <div className="space-y-2">
@@ -490,8 +493,10 @@ export default function LiveGameFeed({ gameResults, p1Leader, p2Leader, totalGam
         {isRunning && (
           <span className="flex items-center gap-1.5 text-xs font-normal text-text-secondary">
             <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
-            {currentGame <= totalGames
-              ? `Game ${currentGame} of ${totalGames} in progress...`
+            {remaining > 0
+              ? batchSize > 1
+                ? `${batchSize} games running in parallel (${completed}/${totalGames} done)`
+                : `Game ${completed + 1} of ${totalGames} in progress...`
               : 'Finishing up...'}
           </span>
         )}
@@ -507,12 +512,14 @@ export default function LiveGameFeed({ gameResults, p1Leader, p2Leader, totalGam
         />
       ))}
 
-      {isRunning && currentGame <= totalGames && (
+      {isRunning && remaining > 0 && (
         <GlassCard variant="subtle" className="border-dashed px-4 py-3">
           <div className="flex items-center gap-2">
             <Spinner size="sm" />
             <span className="text-xs text-text-secondary">
-              Game {currentGame} running...
+              {batchSize > 1
+                ? `${batchSize} games running in parallel...`
+                : `Game ${completed + 1} running...`}
             </span>
           </div>
         </GlassCard>
@@ -520,7 +527,9 @@ export default function LiveGameFeed({ gameResults, p1Leader, p2Leader, totalGam
 
       {!hasGames && isRunning && (
         <div className="text-xs text-text-muted text-center py-4">
-          Waiting for first game to complete...
+          {batchSize > 1
+            ? `Running ${batchSize} games in parallel — waiting for batch to complete...`
+            : 'Waiting for first game to complete...'}
         </div>
       )}
     </div>

@@ -72,6 +72,7 @@ export function useSimulation() {
       p1Level: string = 'amateur',
       p2Level: string = 'medium',
       llmModel?: string,
+      concurrency?: number,
     ) => {
       // Cleanup previous
       if (eventSourceRef.current) {
@@ -101,6 +102,7 @@ export function useSimulation() {
           p1Level,
           p2Level,
           llmModel,
+          concurrency,
         );
 
         setState(prev => ({ ...prev, simId: sim_id }));

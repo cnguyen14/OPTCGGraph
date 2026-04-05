@@ -30,6 +30,7 @@ class SimulationDataExporter:
         sim_id: str,
         results: list[GameResult],
         metadata: dict[str, Any],
+        target_dir: Path | None = None,
     ) -> Path:
         """Write entire simulation run to JSONL files.
 
@@ -42,11 +43,14 @@ class SimulationDataExporter:
 
         Returns the simulation directory path.
         """
-        # Folder name: timestamp_sim_id_short for easy management
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
-        short_id = sim_id[:8]
-        folder_name = f"{timestamp}_{short_id}"
-        sim_dir = self.output_dir / folder_name
+        if target_dir:
+            sim_dir = target_dir
+            folder_name = sim_dir.name
+        else:
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
+            short_id = sim_id[:8]
+            folder_name = f"{timestamp}_{short_id}"
+            sim_dir = self.output_dir / folder_name
         sim_dir.mkdir(parents=True, exist_ok=True)
 
         # metadata.json — add timestamp and folder info

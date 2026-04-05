@@ -7,15 +7,16 @@ import MetaExplorer from './features/meta/MetaExplorer';
 import CardDetail from './features/cards/CardDetail';
 import FloatingChat from './features/chat/FloatingChat';
 import SimulatorPage from './features/simulator/SimulatorPage';
+import AnalyticsPage from './features/analytics/AnalyticsPage';
 import MyDecksPage from './features/my-decks/MyDecksPage';
 import AppLayout from './layouts/AppLayout';
 import LandingPage from './pages/LandingPage';
 import { PageTransition } from './components/ui';
 import type { Card } from './types';
 
-type Tab = 'landing' | 'cards' | 'deck' | 'mydecks' | 'meta' | 'simulator' | 'settings';
+type Tab = 'landing' | 'cards' | 'deck' | 'mydecks' | 'meta' | 'simulator' | 'analytics' | 'settings';
 
-const APP_TABS: Tab[] = ['cards', 'deck', 'mydecks', 'meta', 'simulator', 'settings'];
+const APP_TABS: Tab[] = ['cards', 'deck', 'mydecks', 'meta', 'simulator', 'analytics', 'settings'];
 
 function getTabFromHash(): Tab {
   const hash = window.location.hash.slice(1);
@@ -152,6 +153,9 @@ function App() {
         )}
         {activeTab === 'meta' && (
           <MetaExplorer onCardSelect={setSelectedCard} deckState={deckState} />
+        )}
+        {activeTab === 'analytics' && (
+          <AnalyticsPage />
         )}
         {activeTab === 'simulator' && (
           <SimulatorPage

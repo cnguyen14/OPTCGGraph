@@ -6,7 +6,7 @@ import logging
 import anthropic
 import httpx
 
-from backend.config import ANTHROPIC_API_KEY, OPENROUTER_API_KEY
+from backend.services.settings_service import get_active_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class ClaudeProvider:
     """Direct Anthropic API — lowest latency, highest accuracy."""
 
     def __init__(self, model: str = "claude-sonnet-4-20250514", api_key: str | None = None):
-        self.client = anthropic.AsyncAnthropic(api_key=api_key or ANTHROPIC_API_KEY)
+        self.client = anthropic.AsyncAnthropic(api_key=api_key or get_active_api_key("claude"))
         self.model = model
 
     async def chat(self, system: str, messages: list[dict], tools: list[dict]) -> LLMResponse:
@@ -100,7 +100,7 @@ class OpenRouterProvider:
     TIER_2 = ["google/gemini-flash", "meta-llama/llama-3.1-70b"]
 
     def __init__(self, model: str = "openai/gpt-4o", api_key: str | None = None):
-        self.api_key = api_key or OPENROUTER_API_KEY
+        self.api_key = api_key or get_active_api_key("openrouter")
         self.model = model
         self._tier = self._detect_tier(model)
 

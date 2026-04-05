@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import random
 from typing import Any, AsyncIterator
@@ -10,11 +11,16 @@ from neo4j import AsyncDriver
 
 from backend.graph.queries import get_card_by_id
 
-from .agent import HeuristicAgent, LLMAgent
+from datetime import datetime, timezone
+from pathlib import Path
+
+from .agent import HeuristicAgent, LLMAgent, LLMTracer
 from .data_export import SimulationDataExporter
 from .engine import Agent, GameEngine
 from .models import CardStat, GameCard, GameResult, SimulationResult
 from .template_parser import parse_effects
+
+SIMULATIONS_DIR = Path("data/simulations")
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +115,7 @@ class SimulationRunner:
         p2_level: str = "medium",
         llm_model: str | None = None,
         base_seed: int = 42,
+        concurrency: int | None = None,
     ) -> None:
         self.driver = driver
         self.mode = mode
@@ -116,6 +123,7 @@ class SimulationRunner:
         self.p2_level = p2_level
         self.llm_model = llm_model
         self.base_seed = base_seed
+        self.concurrency = concurrency
         self.exporter = SimulationDataExporter()
 
     async def run(
@@ -144,8 +152,6 @@ class SimulationRunner:
         }
 
         # Create agents based on mode
-        rng = random.Random(self.base_seed)
-
         logger.info(
             "=== Simulation Start === mode=%s p1=%s(%s) p2=%s(%s) "
             "llm_model=%s num_games=%s seed=%s leader1=%s leader2=%s",
@@ -161,63 +167,116 @@ class SimulationRunner:
             p2_leader.name,
         )
 
-        if self.mode == "real":
-            model = self.llm_model or "claude-haiku-4-5-20251001"
-            logger.info("Real mode: using LLM model=%s", model)
-            p1_agent: Agent = LLMAgent(role="player", level=self.p1_level, model=model)
-            p2_agent: Agent = LLMAgent(role="bot", level=self.p2_level, model=model)
+        is_real = self.mode == "real"
+        model = self.llm_model or "claude-haiku-4-5-20251001"
+        # Parallel concurrency: user-configurable, defaults to 10 for real, all for virtual
+        if self.concurrency is not None:
+            concurrency = max(1, self.concurrency)
+        else:
+            concurrency = 10 if is_real else num_games
+
+        if is_real:
+            logger.info(
+                "Real mode: using LLM model=%s, concurrency=%d", model, concurrency
+            )
         else:
             logger.info("Virtual mode: using HeuristicAgent (no LLM)")
-            p1_rng = random.Random(rng.randint(0, 2**32))
-            p2_rng = random.Random(rng.randint(0, 2**32))
-            p1_agent = HeuristicAgent(role="player", level=self.p1_level, rng=p1_rng)
-            p2_agent = HeuristicAgent(role="bot", level=self.p2_level, rng=p2_rng)
+
+        def _make_agents(game_seed: int) -> tuple[Agent, Agent]:
+            """Create fresh agent pair per game (required for parallel execution)."""
+            if is_real:
+                p1_a: Agent = LLMAgent(role="player", level=self.p1_level, model=model)
+                p2_a: Agent = LLMAgent(role="bot", level=self.p2_level, model=model)
+            else:
+                g_rng = random.Random(game_seed)
+                p1_a = HeuristicAgent(
+                    role="player",
+                    level=self.p1_level,
+                    rng=random.Random(g_rng.randint(0, 2**32)),
+                )
+                p2_a = HeuristicAgent(
+                    role="bot",
+                    level=self.p2_level,
+                    rng=random.Random(g_rng.randint(0, 2**32)),
+                )
+            return p1_a, p2_a
+
+        # Create tracer for LLM decisions (Real mode only)
+        tracer: LLMTracer | None = None
+        if is_real and sim_id:
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
+            short_id = sim_id[:8]
+            trace_dir = SIMULATIONS_DIR / f"{timestamp}_{short_id}"
+            trace_dir.mkdir(parents=True, exist_ok=True)
+            tracer = LLMTracer(trace_dir)
+            logger.info("LLM tracer writing to %s", trace_dir / "llm_trace.jsonl")
+
+        async def _run_single_game(game_num: int) -> GameResult:
+            seed = self.base_seed + game_num
+            engine = GameEngine(seed=seed)
+            l1, d1 = _clone_cards(p1_leader, p1_deck)
+            l2, d2 = _clone_cards(p2_leader, p2_deck)
+            engine.init_game(l1, d1, l2, d2)
+            p1_a, p2_a = _make_agents(seed)
+            # Initialize LLM agents with deck context + tracer
+            if hasattr(p1_a, "initialize_game"):
+                p1_a.initialize_game(d1, l2)
+            if hasattr(p2_a, "initialize_game"):
+                p2_a.initialize_game(d2, l1)
+            if tracer and hasattr(p1_a, "set_tracer"):
+                p1_a.set_tracer(tracer, game_num - 1)
+            if tracer and hasattr(p2_a, "set_tracer"):
+                p2_a.set_tracer(tracer, game_num - 1)
+            return await engine.run_game(p1_a, p2_a)
 
         results: list[GameResult] = []
         p1_wins = 0
         p2_wins = 0
         draws = 0
+        games_done = 0
 
-        for game_num in range(1, num_games + 1):
-            seed = self.base_seed + game_num
-            engine = GameEngine(seed=seed)
+        # Run games in parallel batches
+        for batch_start in range(1, num_games + 1, concurrency):
+            batch_end = min(batch_start + concurrency, num_games + 1)
+            batch_nums = list(range(batch_start, batch_end))
 
-            l1, d1 = _clone_cards(p1_leader, p1_deck)
-            l2, d2 = _clone_cards(p2_leader, p2_deck)
+            batch_results = await asyncio.gather(
+                *(_run_single_game(gn) for gn in batch_nums)
+            )
 
-            engine.init_game(l1, d1, l2, d2)
-            result = await engine.run_game(p1_agent, p2_agent)
-            results.append(result)
+            for game_num, result in zip(batch_nums, batch_results):
+                results.append(result)
+                games_done += 1
 
-            if result.winner == "p1":
-                p1_wins += 1
-            elif result.winner == "p2":
-                p2_wins += 1
-            else:
-                draws += 1
+                if result.winner == "p1":
+                    p1_wins += 1
+                elif result.winner == "p2":
+                    p2_wins += 1
+                else:
+                    draws += 1
 
-            yield {
-                "type": "game_complete",
-                "game": game_num,
-                "total": num_games,
-                "winner": result.winner,
-                "turns": result.turns,
-                "p1_wins": p1_wins,
-                "p2_wins": p2_wins,
-                "draws": draws,
-                "p1_life": result.p1_life_remaining,
-                "p2_life": result.p2_life_remaining,
-                "first_player": result.first_player,
-                "win_condition": result.win_condition,
-                "p1_mulligan": result.p1_mulligan,
-                "p2_mulligan": result.p2_mulligan,
-                "p1_effects_fired": result.p1_effects_fired,
-                "p2_effects_fired": result.p2_effects_fired,
-                "p1_damage": result.p1_total_damage_dealt,
-                "p2_damage": result.p2_total_damage_dealt,
-                "decision_count": len(result.decision_points),
-                "game_log": result.game_log[:200],
-            }
+                yield {
+                    "type": "game_complete",
+                    "game": games_done,
+                    "total": num_games,
+                    "winner": result.winner,
+                    "turns": result.turns,
+                    "p1_wins": p1_wins,
+                    "p2_wins": p2_wins,
+                    "draws": draws,
+                    "p1_life": result.p1_life_remaining,
+                    "p2_life": result.p2_life_remaining,
+                    "first_player": result.first_player,
+                    "win_condition": result.win_condition,
+                    "p1_mulligan": result.p1_mulligan,
+                    "p2_mulligan": result.p2_mulligan,
+                    "p1_effects_fired": result.p1_effects_fired,
+                    "p2_effects_fired": result.p2_effects_fired,
+                    "p1_damage": result.p1_total_damage_dealt,
+                    "p2_damage": result.p2_total_damage_dealt,
+                    "decision_count": len(result.decision_points),
+                    "game_log": result.game_log[:200],
+                }
 
         # Aggregate stats
         card_stats = self._aggregate_card_stats(results)
@@ -236,6 +295,10 @@ class SimulationRunner:
             sample_games=results[:3],
         )
 
+        # Close tracer
+        if tracer:
+            tracer.close()
+
         # Export data to JSONL
         export_path = ""
         if sim_id:
@@ -243,6 +306,7 @@ class SimulationRunner:
                 export_dir = self.exporter.export_simulation(
                     sim_id=sim_id,
                     results=results,
+                    target_dir=trace_dir if tracer else None,
                     metadata={
                         "p1_leader": p1_leader.name,
                         "p1_leader_id": deck1_leader_id,

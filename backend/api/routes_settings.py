@@ -1,7 +1,6 @@
 """Settings API endpoints — includes BYOK (Bring Your Own Key) support."""
 
 import logging
-import os
 
 import anthropic
 import httpx
@@ -9,22 +8,21 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from backend.api.models import ModelSwitchRequest
-from backend.config import DEFAULT_PROVIDER, DEFAULT_MODEL, NEO4J_URI, REDIS_URL, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, APITCG_API_KEY
+from backend.config import NEO4J_URI, REDIS_URL
 from backend.graph.connection import verify_connection
+from backend.services.settings_service import (
+    get_active_api_key,
+    has_runtime_key,
+    list_models as list_models_service,
+    set_runtime_key_async,
+    clear_runtime_key_async,
+    switch_model_async,
+)
 from backend.storage.redis_client import verify_redis
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
-
-# In-memory settings (per-process)
-_current_settings: dict = {
-    "provider": DEFAULT_PROVIDER,
-    "model": DEFAULT_MODEL,
-}
-
-# Runtime API keys (overrides env vars when set via BYOK)
-_runtime_keys: dict[str, str] = {}
 
 AVAILABLE_MODELS = {
     "claude": [
@@ -40,30 +38,15 @@ AVAILABLE_MODELS = {
 }
 
 
-def get_active_api_key(provider: str) -> str:
-    """Get the active API key for a provider (runtime override > env var)."""
-    if provider == "claude":
-        return _runtime_keys.get("anthropic", "") or ANTHROPIC_API_KEY
-    elif provider == "openrouter":
-        return _runtime_keys.get("openrouter", "") or OPENROUTER_API_KEY
-    elif provider == "apitcg":
-        return _runtime_keys.get("apitcg", "") or APITCG_API_KEY
-    return ""
-
-
 @router.get("/models")
 async def get_models():
-    return {
-        "current": _current_settings,
-        "available": AVAILABLE_MODELS,
-    }
+    return list_models_service()
 
 
 @router.put("/model")
-async def switch_model(req: ModelSwitchRequest):
-    _current_settings["provider"] = req.provider
-    _current_settings["model"] = req.model
-    return {"status": "ok", "current": _current_settings}
+async def do_switch_model(req: ModelSwitchRequest):
+    current = await switch_model_async(req.provider, req.model)
+    return {"status": "ok", "current": current}
 
 
 # --- BYOK Endpoints ---
@@ -81,18 +64,17 @@ class TestKeyRequest(BaseModel):
 
 @router.put("/api-key")
 async def save_api_key(req: ApiKeyRequest):
-    """Save a runtime API key (overrides env var)."""
+    """Save a runtime API key (overrides env var), persisted to Redis."""
     if req.provider not in ("anthropic", "openrouter", "apitcg"):
         return {"status": "error", "message": f"Unknown provider: {req.provider}"}
-    _runtime_keys[req.provider] = req.api_key
-    logger.info(f"Runtime API key set for {req.provider}")
+    await set_runtime_key_async(req.provider, req.api_key)
     return {"status": "ok", "provider": req.provider}
 
 
 @router.delete("/api-key/{provider}")
 async def remove_api_key(provider: str):
     """Remove a runtime API key (fall back to env var)."""
-    _runtime_keys.pop(provider, None)
+    await clear_runtime_key_async(provider)
     return {"status": "ok", "provider": provider}
 
 
@@ -287,9 +269,9 @@ async def system_status():
             "apitcg": bool(get_active_api_key("apitcg")),
         },
         "runtime_keys": {
-            "anthropic": "anthropic" in _runtime_keys,
-            "openrouter": "openrouter" in _runtime_keys,
-            "apitcg": "apitcg" in _runtime_keys,
+            "anthropic": has_runtime_key("anthropic"),
+            "openrouter": has_runtime_key("openrouter"),
+            "apitcg": has_runtime_key("apitcg"),
         },
     }
 

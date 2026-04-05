@@ -115,3 +115,70 @@ Use parallel subagents (`.claude/agents/`) when tasks are independent:
 | 8 | Polish & Maintenance | Cron jobs, performance tuning, error monitoring |
 
 See PRD for detailed task lists per phase.
+
+<!-- gitnexus:start -->
+## GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **OPTCGGraph** (2360 symbols, 6571 relationships, 198 execution flows).
+Use GitNexus MCP tools to navigate code, assess impact, and refactor safely. If any tool warns the index is stale, run `npx gitnexus analyze` first.
+
+### Tools Quick Reference
+
+| Tool | When to use | Example |
+|------|-------------|---------|
+| `query` | Find code by concept | `gitnexus_query({query: "simulation runner"})` |
+| `context` | 360-degree view of a symbol | `gitnexus_context({name: "LLMAgent"})` |
+| `impact` | Blast radius before editing | `gitnexus_impact({target: "GameEngine", direction: "upstream"})` |
+| `detect_changes` | Pre-commit scope check | `gitnexus_detect_changes({scope: "staged"})` |
+| `rename` | Safe multi-file rename | `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` |
+| `cypher` | Custom graph queries | `gitnexus_cypher({query: "MATCH ..."})` |
+
+### Rules
+
+**Always:**
+- Run `gitnexus_impact` before editing any function/class/method — report blast radius to the user
+- Run `gitnexus_detect_changes()` before committing to verify scope
+- Warn the user if impact analysis returns HIGH or CRITICAL risk
+- Use `gitnexus_query` instead of grep for exploring unfamiliar code
+
+**Never:**
+- Edit a symbol without first running `gitnexus_impact`
+- Ignore HIGH or CRITICAL risk warnings
+- Rename symbols with find-and-replace — use `gitnexus_rename`
+
+### Workflows
+
+**Debugging:**
+1. `gitnexus_query({query: "<error or symptom>"})` — find related execution flows
+2. `gitnexus_context({name: "<suspect function>"})` — see callers, callees, process participation
+3. `READ gitnexus://repo/OPTCGGraph/process/{processName}` — trace full execution flow
+4. Regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})`
+
+**Refactoring:**
+- **Rename:** `gitnexus_rename` with `dry_run: true` first, then `dry_run: false`
+- **Extract/Split:** `gitnexus_context` → `gitnexus_impact` → move code → `gitnexus_detect_changes`
+
+### Impact Risk Levels
+
+| Depth | Meaning | Action |
+|-------|---------|--------|
+| d=1 | WILL BREAK — direct callers | MUST update |
+| d=2 | LIKELY AFFECTED — indirect deps | Should test |
+| d=3 | MAY NEED TESTING — transitive | Test if critical path |
+
+### Resources
+
+- `gitnexus://repo/OPTCGGraph/context` — Codebase overview, index freshness
+- `gitnexus://repo/OPTCGGraph/clusters` — All functional areas
+- `gitnexus://repo/OPTCGGraph/processes` — All execution flows
+- `gitnexus://repo/OPTCGGraph/process/{name}` — Step-by-step execution trace
+
+### Re-index
+
+```bash
+npx gitnexus analyze              # standard re-index
+npx gitnexus analyze --embeddings # preserve embeddings (check .gitnexus/meta.json stats.embeddings)
+```
+
+> PostToolUse hook handles re-indexing automatically after `git commit` and `git merge`.
+<!-- gitnexus:end -->

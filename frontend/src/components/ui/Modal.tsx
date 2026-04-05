@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import IconButton from './IconButton';
 
 interface ModalProps {
@@ -31,7 +32,7 @@ export default function Modal({ open, onClose, title, size = 'md', children }: M
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div
       ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -57,6 +58,7 @@ export default function Modal({ open, onClose, title, size = 'md', children }: M
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

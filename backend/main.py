@@ -17,6 +17,7 @@ from backend.api.routes_ai import router as ai_router
 from backend.api.routes_deck import router as deck_router
 from backend.api.routes_meta import router as meta_router
 from backend.api.routes_simulator import router as simulator_router
+from backend.services.settings_service import load_persisted_settings
 
 
 @asynccontextmanager
@@ -26,6 +27,8 @@ async def lifespan(app: FastAPI):
     await driver.verify_connectivity()
     r = await get_redis()
     await r.ping()
+    # Restore persisted settings (API keys, model config)
+    await load_persisted_settings()
     yield
     # Shutdown: close connections
     await close_redis()

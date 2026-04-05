@@ -12,11 +12,12 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from neo4j import AsyncDriver
 
-from backend.config import ANTHROPIC_API_KEY
+from backend.services.settings_service import get_active_api_key
 from backend.graph.connection import get_driver
 from backend.graph.queries import get_card_by_id
 from backend.ai.deck_validator import validate_deck
 from backend.ai.deck_suggestions import suggest_fixes
+from backend.simulator.analytics import aggregate_deck_health, compute_detailed_sim_stats
 from backend.storage.redis_client import get_redis
 from backend.api.models import (
     DeckAnalyzeRequest,
@@ -25,8 +26,13 @@ from backend.api.models import (
     DeckImproveResponse,
     Improvement,
     ImprovementCard,
+    AggregateAnalysisRequest,
+    CardHealthEntry,
+    DeckHealthAnalysisResponse,
     MatchupAnalysisRequest,
     MatchupAnalysisResponse,
+    MatchupSpread,
+    SynergyPair,
     SaveDeckRequest,
     SavedDeckResponse,
     SavedDeckListItem,
@@ -305,6 +311,49 @@ async def get_sim_history(req: SimHistoryRequest) -> SimHistoryResponse:
     except Exception as e:
         logger.exception("Failed to fetch simulation history")
         raise HTTPException(status_code=500, detail=f"Failed to fetch sim history: {e}")
+
+
+@router.post("/clear-sim-history")
+async def clear_sim_history(req: SimHistoryRequest) -> dict[str, str]:
+    """Delete all simulation history for a specific deck composition."""
+    try:
+        r = await get_redis()
+        deck_hash = _compute_deck_hash(req.card_ids)
+        redis_key = f"deck-sims:{req.leader_id}:{deck_hash}"
+
+        # Get sim_ids to delete disk data
+        raw_entries = await r.lrange(redis_key, 0, -1)
+        deleted_count = 0
+        for raw in raw_entries:
+            try:
+                data = json.loads(raw)
+                sim_id = data.get("sim_id", "")
+                sim_dir = _find_sim_dir(sim_id)
+                if sim_dir and sim_dir.exists():
+                    import shutil
+                    shutil.rmtree(sim_dir)
+                    deleted_count += 1
+            except (json.JSONDecodeError, ValueError, OSError):
+                continue
+
+        # Clear Redis keys
+        await r.delete(redis_key)
+        agg_key = f"aggregate-analysis:v1:{req.leader_id}:{deck_hash}"
+        await r.delete(agg_key)
+        # Clear per-matchup analysis caches
+        for raw in raw_entries:
+            try:
+                data = json.loads(raw)
+                sim_id = data.get("sim_id", "")
+                if sim_id:
+                    await r.delete(f"matchup-analysis:v2:{sim_id}")
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+        return {"status": "ok", "message": f"Cleared {deleted_count} simulations"}
+    except Exception as e:
+        logger.exception("Failed to clear simulation history")
+        raise HTTPException(500, f"Failed to clear sim history: {e}")
 
 
 @router.post("/improve", response_model=DeckImproveResponse)
@@ -598,9 +647,13 @@ IMPORTANT for suggested_swaps:
 - For "role_needed", specify what type of replacement the deck needs: blocker, removal, finisher, draw, rush, or counter.
 - Only suggest removing cards that appear in the card performance list above."""
 
+    api_key = get_active_api_key("claude")
+    if not api_key:
+        raise HTTPException(400, "Anthropic API key not configured. Set it in Settings > BYOK.")
+
     try:
         client = anthropic.AsyncAnthropic(
-            api_key=ANTHROPIC_API_KEY,
+            api_key=api_key,
             timeout=60.0,
         )
         response = await client.messages.create(
@@ -805,6 +858,14 @@ IMPORTANT for suggested_swaps:
                 suggested_swaps=enriched_swaps,
             )
 
+        # Enrich with detailed stats from decisions + snapshots
+        try:
+            detailed = compute_detailed_sim_stats(sim_dir.name)
+            if detailed:
+                result = result.model_copy(update={"detailed_stats": detailed})
+        except Exception:
+            logger.debug("Could not compute detailed sim stats", exc_info=True)
+
         # Cache in Redis (7 days)
         try:
             await r.set(cache_key, result.model_dump_json(), ex=7 * 86400)
@@ -817,6 +878,292 @@ IMPORTANT for suggested_swaps:
         raise HTTPException(502, f"AI analysis failed: {e}")
     except Exception as e:
         logger.exception("Matchup analysis failed")
+        raise HTTPException(500, f"Analysis failed: {e}")
+
+
+@router.post("/aggregate-analysis", response_model=DeckHealthAnalysisResponse)
+async def aggregate_analysis(
+    req: AggregateAnalysisRequest,
+    driver: AsyncDriver = Depends(_get_driver),
+) -> DeckHealthAnalysisResponse:
+    """AI-powered holistic deck health analysis across all simulations."""
+    deck_hash = _compute_deck_hash(req.card_ids)
+    cache_key = f"aggregate-analysis:v1:{req.leader_id}:{deck_hash}"
+
+    # Check Redis cache
+    try:
+        r = await get_redis()
+        cached = await r.get(cache_key)
+        if cached:
+            data = json.loads(cached if isinstance(cached, str) else cached.decode())
+            return DeckHealthAnalysisResponse(**data)
+    except Exception:
+        pass
+
+    # Find all sim_ids for this deck from Redis
+    r = await get_redis()
+    redis_key = f"deck-sims:{req.leader_id}:{deck_hash}"
+    raw_entries = await r.lrange(redis_key, 0, -1)
+
+    if len(raw_entries) < 2:
+        raise HTTPException(
+            400,
+            "Need at least 2 simulations for aggregate analysis. Run more simulations first.",
+        )
+
+    # Extract sim folders from entries
+    sim_folders: list[str] = []
+    for raw in raw_entries[:20]:  # Cap at 20 most recent
+        try:
+            data = json.loads(raw)
+            sim_id = data.get("sim_id", "")
+            sim_dir = _find_sim_dir(sim_id)
+            if sim_dir:
+                sim_folders.append(sim_dir.name)
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+    if len(sim_folders) < 2:
+        raise HTTPException(
+            400,
+            "Not enough valid simulation data found on disk.",
+        )
+
+    # Compute aggregate stats
+    health_data = aggregate_deck_health(sim_folders)
+    if not health_data:
+        raise HTTPException(500, "Failed to compute aggregate deck health")
+
+    # Batch-fetch card names from Neo4j
+    all_card_ids = set()
+    for ch in health_data.get("card_health", []):
+        all_card_ids.add(ch["card_id"])
+    for sp in health_data.get("top_synergies", []):
+        all_card_ids.add(sp["card_a"])
+        all_card_ids.add(sp["card_b"])
+
+    card_names: dict[str, str] = {}
+    if all_card_ids:
+        async with driver.session() as session:
+            result = await session.run(
+                "MATCH (c:Card) WHERE c.id IN $ids RETURN c.id AS id, c.name AS name",
+                ids=list(all_card_ids),
+            )
+            async for rec in result:
+                card_names[rec["id"]] = rec["name"] or rec["id"]
+
+    # Get leader name
+    leader = await get_card_by_id(driver, req.leader_id)
+    leader_name = leader["name"] if leader else req.leader_id
+
+    # Build card stats summary for prompt
+    card_stats_lines: list[str] = []
+    for ch in health_data.get("card_health", []):
+        name = card_names.get(ch["card_id"], ch["card_id"])
+        card_stats_lines.append(
+            f"- {ch['card_id']} ({name}): played {ch['times_played']}x, "
+            f"play_rate={ch['play_rate']:.0%}, win_corr={ch['win_correlation']:.0%}, "
+            f"in {ch['games_appeared']}/{health_data['total_games']} games"
+        )
+
+    synergy_lines: list[str] = []
+    for sp in health_data.get("top_synergies", []):
+        name_a = card_names.get(sp["card_a"], sp["card_a"])
+        name_b = card_names.get(sp["card_b"], sp["card_b"])
+        synergy_lines.append(
+            f"- {name_a} + {name_b}: co-occur {sp['co_occurrence_rate']:.0%}, "
+            f"win_lift={sp['win_lift']:.2f}x"
+        )
+
+    matchup_lines: list[str] = []
+    for ms in health_data.get("matchup_spread", []):
+        matchup_lines.append(
+            f"- vs {ms['opponent']}: {ms['win_rate']:.0%} ({ms['num_games']} games)"
+        )
+
+    action = health_data.get("action_patterns", {})
+
+    prompt = f"""You are an OPTCG (One Piece TCG) deck health analyst. Analyze this deck's OVERALL performance across ALL simulations — focus on holistic deck health, not any specific matchup.
+
+Deck: {leader_name} (Leader ID: {req.leader_id})
+Total simulations: {len(sim_folders)} | Total games: {health_data['total_games']} | Overall win rate: {health_data['overall_win_rate']:.0%}
+
+Card performance (aggregated across all matchups):
+{chr(10).join(card_stats_lines) if card_stats_lines else "No card data"}
+
+Card synergy pairs (cards that appear together in wins):
+{chr(10).join(synergy_lines) if synergy_lines else "No synergy data"}
+
+Matchup spread:
+{chr(10).join(matchup_lines) if matchup_lines else "No matchup data"}
+
+Action patterns:
+- Play before attack: {action.get('play_before_attack_pct', 0):.0%}
+- Leader attack rate: {action.get('leader_attack_pct', 0):.0%}
+- Losing attack rate: {action.get('losing_attack_pct', 0):.0%}
+- Avg decisions/game: {action.get('avg_decisions_per_game', 0):.1f}
+
+Deck card IDs in this deck: {', '.join(req.card_ids[:10])}{'...' if len(req.card_ids) > 10 else ''}
+
+Analyze the deck's OVERALL HEALTH — not matchup-specific. Provide your analysis in this exact JSON format:
+{{
+  "summary": "2-3 sentence overall deck health assessment",
+  "consistency_rating": "high|medium|low",
+  "strengths": ["strength 1", "strength 2", ...],
+  "weaknesses": ["weakness 1", "weakness 2", ...],
+  "core_engine": [{{"card_id": "...", "reason": "why this is a core card"}}],
+  "dead_cards": [{{"card_id": "...", "reason": "why this card underperforms"}}],
+  "role_gaps": ["role the deck is missing, e.g. removal, draw, finisher, blocker"],
+  "synergy_insights": ["insight about card synergies"],
+  "improvement_priorities": ["priority 1: most impactful change", "priority 2", ...]
+}}
+
+Focus on:
+1. Which cards are the deck's ENGINE (consistently played, high win correlation)?
+2. Which cards are DEAD (rarely played or low win correlation)?
+3. What ROLES is the deck missing?
+4. Are card SYNERGIES being utilized effectively?
+5. How CONSISTENT is the deck across different matchups?"""
+
+    api_key = get_active_api_key("claude")
+    if not api_key:
+        raise HTTPException(400, "Anthropic API key not configured. Set it in Settings > BYOK.")
+
+    try:
+        client = anthropic.AsyncAnthropic(
+            api_key=api_key,
+            timeout=60.0,
+        )
+        response = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2048,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        raw_text = response.content[0].text.strip()
+        json_text = raw_text
+        if "```json" in json_text:
+            json_text = json_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in json_text:
+            json_text = json_text.split("```")[1].split("```")[0].strip()
+
+        parsed = json.loads(json_text)
+
+        # Build card_health entries with names
+        card_health_entries = [
+            CardHealthEntry(
+                card_id=ch["card_id"],
+                card_name=card_names.get(ch["card_id"], ch["card_id"]),
+                times_played=ch["times_played"],
+                play_rate=ch["play_rate"],
+                win_correlation=ch["win_correlation"],
+            )
+            for ch in health_data.get("card_health", [])
+        ]
+
+        # Classify cards based on AI output
+        core_ids = {c.get("card_id", "") for c in parsed.get("core_engine", [])}
+        dead_ids = {c.get("card_id", "") for c in parsed.get("dead_cards", [])}
+        for entry in card_health_entries:
+            if entry.card_id in core_ids:
+                entry.category = "core_engine"
+            elif entry.card_id in dead_ids:
+                entry.category = "dead_card"
+            elif entry.play_rate >= 0.5:
+                entry.category = "core_engine"
+            elif entry.play_rate <= 0.1:
+                entry.category = "dead_card"
+            else:
+                entry.category = "flex"
+
+        # Build core_engine and dead_cards lists from AI
+        core_engine = [
+            CardHealthEntry(
+                card_id=c.get("card_id", ""),
+                card_name=card_names.get(c.get("card_id", ""), c.get("card_id", "")),
+                play_rate=next(
+                    (ch["play_rate"] for ch in health_data.get("card_health", []) if ch["card_id"] == c.get("card_id")),
+                    0.0,
+                ),
+                win_correlation=next(
+                    (ch["win_correlation"] for ch in health_data.get("card_health", []) if ch["card_id"] == c.get("card_id")),
+                    0.0,
+                ),
+                category="core_engine",
+            )
+            for c in parsed.get("core_engine", [])
+        ]
+        dead_cards_list = [
+            CardHealthEntry(
+                card_id=c.get("card_id", ""),
+                card_name=card_names.get(c.get("card_id", ""), c.get("card_id", "")),
+                play_rate=next(
+                    (ch["play_rate"] for ch in health_data.get("card_health", []) if ch["card_id"] == c.get("card_id")),
+                    0.0,
+                ),
+                win_correlation=next(
+                    (ch["win_correlation"] for ch in health_data.get("card_health", []) if ch["card_id"] == c.get("card_id")),
+                    0.0,
+                ),
+                category="dead_card",
+            )
+            for c in parsed.get("dead_cards", [])
+        ]
+
+        # Build synergy pairs with names
+        top_synergies = [
+            SynergyPair(
+                card_a=card_names.get(sp["card_a"], sp["card_a"]),
+                card_b=card_names.get(sp["card_b"], sp["card_b"]),
+                co_occurrence_rate=sp["co_occurrence_rate"],
+                win_lift=sp["win_lift"],
+            )
+            for sp in health_data.get("top_synergies", [])
+        ]
+
+        matchup_spread_entries = [
+            MatchupSpread(
+                opponent=ms["opponent"],
+                win_rate=ms["win_rate"],
+                num_games=ms["num_games"],
+            )
+            for ms in health_data.get("matchup_spread", [])
+        ]
+
+        result = DeckHealthAnalysisResponse(
+            summary=parsed.get("summary", ""),
+            consistency_rating=parsed.get("consistency_rating", "medium"),
+            total_sims=len(sim_folders),
+            total_games=health_data["total_games"],
+            overall_win_rate=health_data["overall_win_rate"],
+            strengths=parsed.get("strengths", []),
+            weaknesses=parsed.get("weaknesses", []),
+            core_engine=core_engine,
+            dead_cards=dead_cards_list,
+            role_gaps=parsed.get("role_gaps", []),
+            synergy_insights=parsed.get("synergy_insights", []),
+            improvement_priorities=parsed.get("improvement_priorities", []),
+            card_health=card_health_entries,
+            top_synergies=top_synergies,
+            matchup_spread=matchup_spread_entries,
+        )
+
+        # Cache (1 hour)
+        try:
+            await r.set(cache_key, result.model_dump_json(), ex=3600)
+        except Exception:
+            pass
+
+        return result
+
+    except anthropic.APIError as e:
+        logger.exception("Claude API error during aggregate analysis")
+        raise HTTPException(502, f"AI analysis failed: {e}")
+    except json.JSONDecodeError:
+        logger.exception("Failed to parse AI response")
+        raise HTTPException(502, "AI returned invalid JSON")
+    except Exception as e:
+        logger.exception("Aggregate analysis failed")
         raise HTTPException(500, f"Analysis failed: {e}")
 
 

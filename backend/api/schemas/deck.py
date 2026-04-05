@@ -141,3 +141,55 @@ class MatchupAnalysisResponse(BaseModel):
     overperformers: list[dict] = Field(default_factory=list)
     underperformers: list[dict] = Field(default_factory=list)
     suggested_swaps: list[dict] = Field(default_factory=list)
+    detailed_stats: dict | None = Field(
+        default=None,
+        description="Detailed simulation stats: card_performance, turn_momentum, action_patterns, game_summaries",
+    )
+
+
+# --- Aggregate Deck Health Analysis ---
+
+
+class AggregateAnalysisRequest(BaseModel):
+    leader_id: str
+    card_ids: list[str] = Field(..., min_length=1, max_length=60)
+
+
+class CardHealthEntry(BaseModel):
+    card_id: str
+    card_name: str = ""
+    times_played: int = 0
+    play_rate: float = 0.0
+    win_correlation: float = 0.0
+    category: str = ""
+
+
+class SynergyPair(BaseModel):
+    card_a: str
+    card_b: str
+    co_occurrence_rate: float = 0.0
+    win_lift: float = 0.0
+
+
+class MatchupSpread(BaseModel):
+    opponent: str
+    win_rate: float
+    num_games: int
+
+
+class DeckHealthAnalysisResponse(BaseModel):
+    summary: str
+    consistency_rating: str = ""
+    total_sims: int = 0
+    total_games: int = 0
+    overall_win_rate: float = 0.0
+    strengths: list[str] = Field(default_factory=list)
+    weaknesses: list[str] = Field(default_factory=list)
+    core_engine: list[CardHealthEntry] = Field(default_factory=list)
+    dead_cards: list[CardHealthEntry] = Field(default_factory=list)
+    role_gaps: list[str] = Field(default_factory=list)
+    synergy_insights: list[str] = Field(default_factory=list)
+    improvement_priorities: list[str] = Field(default_factory=list)
+    card_health: list[CardHealthEntry] = Field(default_factory=list)
+    top_synergies: list[SynergyPair] = Field(default_factory=list)
+    matchup_spread: list[MatchupSpread] = Field(default_factory=list)
