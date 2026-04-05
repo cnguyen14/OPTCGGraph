@@ -22,6 +22,7 @@ import asyncio
 import copy
 import json
 import logging
+import re
 from collections import Counter
 
 from neo4j import AsyncDriver
@@ -175,6 +176,21 @@ async def build_deck(
                     original * 2,  # Cap at 2x to prevent extreme stacking
                 )
 
+    # Adjust STAGE targets based on tournament data for this leader
+    stage_usage = await _analyze_leader_stage_usage(driver, leader_id)
+    if stage_usage["avg_stage_count"] > 0:
+        # Tournament decks use stages with this leader — expand stage targets
+        target_stages = max(2, round(stage_usage["avg_stage_count"]))
+        current_min, current_max = template["type_targets"].get("STAGE", (0, 2))
+        template["type_targets"]["STAGE"] = (
+            min(target_stages, current_max),
+            max(target_stages + 2, current_max),
+        )
+        logger.info(
+            f"Stage adjustment for {leader_id}: tournament avg {stage_usage['avg_stage_count']:.1f} "
+            f"→ target {template['type_targets']['STAGE']}"
+        )
+
     # 2. Get candidates via parallel queries (synergy + curve scores + counter pool)
     candidates = await _get_candidates_parallel(driver, leader_id, leader_colors)
     if not candidates:
@@ -256,6 +272,94 @@ async def build_deck(
         "validation": report.to_dict(),
         "qc_review": qc_review_result,
         "existing_card_swaps": existing_swaps,
+    }
+
+
+async def _analyze_leader_stage_usage(
+    driver: AsyncDriver, leader_id: str
+) -> dict:
+    """Query tournament decks to determine how many stage cards this leader typically uses.
+
+    Returns dict with avg_stage_count and top_stages (list of {id, name, avg_copies}).
+    This lets the builder dynamically adjust STAGE targets based on real data
+    instead of hardcoded templates.
+    """
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (d:Deck)-[:USES_LEADER]->(:Card {id: $leader_id})
+            MATCH (d)-[inc:INCLUDES]->(c:Card {card_type: 'STAGE'})
+            WITH d, sum(inc.count) AS stage_count
+            WITH avg(stage_count) AS avg_stages, collect(stage_count) AS counts
+            RETURN avg_stages, size(counts) AS decks_with_stages
+            """,
+            leader_id=leader_id,
+        )
+        rec = await result.single()
+        avg_stages = rec["avg_stages"] if rec and rec["avg_stages"] else 0
+        decks_with = rec["decks_with_stages"] if rec else 0
+
+        # Also get specific popular stages for this leader
+        result2 = await session.run(
+            """
+            MATCH (d:Deck)-[:USES_LEADER]->(:Card {id: $leader_id})
+            MATCH (d)-[inc:INCLUDES]->(c:Card {card_type: 'STAGE'})
+            WITH c, count(DISTINCT d) AS deck_count, avg(inc.count) AS avg_copies
+            ORDER BY deck_count DESC
+            LIMIT 5
+            RETURN c.id AS id, c.name AS name,
+                   deck_count, round(avg_copies * 100) / 100 AS avg_copies
+            """,
+            leader_id=leader_id,
+        )
+        top_stages = [
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "deck_count": r["deck_count"],
+                "avg_copies": r["avg_copies"],
+            }
+            async for r in result2
+        ]
+
+        # If no tournament data, fallback: find stages connected via LED_BY graph edge
+        if not top_stages:
+            result3 = await session.run(
+                """
+                MATCH (s:Card {card_type: 'STAGE'})-[:LED_BY]->(:Card {id: $leader_id})
+                OPTIONAL MATCH (s)-[:HAS_KEYWORD]->(k:Keyword)
+                WITH s, collect(DISTINCT k.name) AS keywords
+                WHERE size(keywords) > 0
+                RETURN s.id AS id, s.name AS name, size(keywords) AS kw_count
+                ORDER BY kw_count DESC
+                LIMIT 5
+                """,
+                leader_id=leader_id,
+            )
+            # Deduplicate parallel arts (e.g. OP08-056 and OP08-056_p1 are same card)
+            seen_bases: set[str] = set()
+            graph_stages = []
+            async for r in result3:
+                base = _base_card_id(r["id"])
+                if base not in seen_bases:
+                    seen_bases.add(base)
+                    graph_stages.append(
+                        {"id": r["id"], "name": r["name"], "deck_count": 0, "avg_copies": 2.0}
+                    )
+            if graph_stages:
+                top_stages = graph_stages
+                # Conservative estimate: graph suggests stages exist but no tournament proof
+                # Use 1 copy per stage (not 2) to avoid over-allocating
+                avg_stages = len(graph_stages) * 1.0
+                logger.info(
+                    f"No tournament stage data for {leader_id}, "
+                    f"graph fallback found {len(graph_stages)} stages via LED_BY"
+                )
+
+    return {
+        "avg_stage_count": float(avg_stages),
+        "decks_with_stages": decks_with,
+        "top_stages": top_stages,
     }
 
 
@@ -464,6 +568,18 @@ def _categorize(candidates: list[dict]) -> dict[str, list[dict]]:
     return buckets
 
 
+_PARALLEL_ART_RE = re.compile(r"(_p\d+|_r\d+)$")
+
+
+def _base_card_id(card_id: str) -> str:
+    """Get base card number by stripping parallel art suffixes (_p1, _p2, _r1, etc.).
+
+    In OPTCG, parallel art cards (e.g. OP03-018_p1) are the same card as the base
+    (OP03-018) and share the 4-copy tournament limit.
+    """
+    return _PARALLEL_ART_RE.sub("", card_id)
+
+
 def _score_card(card: dict) -> float:
     """Score a card for selection: relevance + counter bonus + role coverage + ability value + meta stats."""
     score = card.get("relevance", 0) * 2.0
@@ -477,11 +593,15 @@ def _score_card(card: dict) -> float:
     score += roles_covered * 0.5
     # Event/Stage cards with abilities are valuable even without power/counter
     ability = card.get("ability") or ""
-    if card.get("card_type") in ("EVENT", "STAGE") and ability:
+    card_type = card.get("card_type", "")
+    if card_type in ("EVENT", "STAGE") and ability:
         score += 1.0
         # Events with Trigger effects get bonus (free value when life is hit)
         if "Trigger" in keywords:
             score += 1.5
+    # Stages are persistent (stay on field every turn) — extra value over one-shot events
+    if card_type == "STAGE" and ability:
+        score += 2.0
     # Tournament meta stats bonus
     pick_rate = card.get("tournament_pick_rate") or 0
     top_cut_rate = card.get("top_cut_rate") or 0
@@ -542,12 +662,16 @@ def _fill_deck(
 ) -> list[dict]:
     """Fill a 50-card deck with type diversity, 4x core consistency, balanced curve, and counter density."""
     deck: list[dict] = []
-    deck_ids: Counter = Counter()
+    deck_ids: Counter = Counter()       # Count by exact card ID
+    base_ids: Counter = Counter()       # Count by base card number (parallel art aware)
     total_price = 0.0
     type_targets = template.get("type_targets", {})
 
     def can_add(card: dict) -> bool:
         if deck_ids[card["id"]] >= 4:
+            return False
+        # Parallel art check: OP03-018 + OP03-018_p1 share the 4-copy limit
+        if base_ids[_base_card_id(card["id"])] >= 4:
             return False
         if card.get("card_type") == "LEADER":
             return False
@@ -565,6 +689,7 @@ def _fill_deck(
                 break
             deck.append(card)
             deck_ids[card["id"]] += 1
+            base_ids[_base_card_id(card["id"])] += 1
             total_price += card.get("market_price") or 0
             added += 1
         return added
@@ -647,6 +772,7 @@ def _fill_deck(
                 events_needed -= added
 
     # === Phase 2: Fill STAGE quota ===
+    # Stages are persistent (stay on field) — use tournament avg_copies for copy count
     stage_min, stage_max = type_targets.get("STAGE", (0, 2))
     stage_target = max(stage_min, (stage_min + stage_max) // 2)
     stages_needed = max(0, stage_target - type_count("STAGE"))
@@ -659,7 +785,10 @@ def _fill_deck(
             if stages_needed <= 0 or len(deck) >= 50:
                 break
             if deck_ids[card["id"]] == 0 and can_add(card):
-                added = add_card(card, copies=min(2, stages_needed))
+                avg = card.get("avg_copies") or 0
+                # High tournament usage → use avg_copies, otherwise 2
+                copies = max(2, min(4, round(avg))) if avg >= 2 else 2
+                added = add_card(card, copies=min(copies, stages_needed))
                 stages_needed -= added
 
     # === Phase 3: Fill ROLE gaps ===
@@ -754,13 +883,16 @@ def _fix_violations(
     # Fix: remove wrong-color cards
     fixed = [c for c in fixed if set(c.get("colors", [])) & leader_colors]
 
-    # Fix: enforce max 4 copies
+    # Fix: enforce max 4 copies (parallel art aware)
     final = []
     copy_count: Counter = Counter()
+    base_count: Counter = Counter()
     for card in fixed:
-        if copy_count[card["id"]] < 4:
+        base = _base_card_id(card["id"])
+        if copy_count[card["id"]] < 4 and base_count[base] < 4:
             final.append(card)
             copy_count[card["id"]] += 1
+            base_count[base] += 1
     fixed = final
 
     # Pad back to 50 from candidates

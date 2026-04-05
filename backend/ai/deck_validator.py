@@ -106,11 +106,16 @@ def validate_deck(leader: dict, cards: list[dict]) -> ValidationReport:
         report.add(CheckResult("DECK_SIZE", "FAIL", f"Deck has {len(cards)} cards (must be exactly 50)"))
         report.is_legal = False
 
-    # 2. COPY_LIMIT
+    # 2. COPY_LIMIT (parallel art aware: OP03-018 + OP03-018_p1 = same card)
+    from backend.ai.deck_builder import _base_card_id
+
     id_counts = Counter(c.get("id", "") for c in cards)
-    over_limit = {cid: cnt for cid, cnt in id_counts.items() if cnt > 4}
+    base_counts = Counter(_base_card_id(c.get("id", "")) for c in cards)
+    over_limit_id = {cid: cnt for cid, cnt in id_counts.items() if cnt > 4}
+    over_limit_base = {base: cnt for base, cnt in base_counts.items() if cnt > 4}
+    over_limit = {**over_limit_id, **over_limit_base}
     if not over_limit:
-        report.add(CheckResult("COPY_LIMIT", "PASS", "No card exceeds 4 copies"))
+        report.add(CheckResult("COPY_LIMIT", "PASS", "No card exceeds 4 copies (parallel art aware)"))
     else:
         names = [f"{cid} x{cnt}" for cid, cnt in over_limit.items()]
         report.add(CheckResult("COPY_LIMIT", "FAIL", f"Cards exceeding 4-copy limit: {', '.join(names)}", {"violations": over_limit}))
