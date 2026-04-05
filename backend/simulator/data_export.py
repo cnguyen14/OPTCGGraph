@@ -115,6 +115,7 @@ class SimulationDataExporter:
             p1_cards = metadata.get("p1_deck_cards", [])
             p2_cards = metadata.get("p2_deck_cards", [])
             if p1_cards or p2_cards:
+                logger.info("Computing draw probability: p1=%d cards, p2=%d cards", len(p1_cards), len(p2_cards))
                 draw_prob_data: dict = {}
                 if p1_cards:
                     draw_prob_data["p1"] = analyze_deck_draw_probability(p1_cards)
@@ -122,6 +123,9 @@ class SimulationDataExporter:
                     draw_prob_data["p2"] = analyze_deck_draw_probability(p2_cards)
                 draw_prob_path = sim_dir / "draw_probability.json"
                 draw_prob_path.write_text(json.dumps(draw_prob_data, indent=2, default=str))
+                logger.info("Exported draw_probability.json → %s", draw_prob_path)
+            else:
+                logger.debug("No deck cards in metadata — skipping draw_probability.json export")
         except Exception as e:
             logger.warning("Failed to export draw probability: %s", e)
 

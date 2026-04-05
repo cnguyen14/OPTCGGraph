@@ -320,6 +320,11 @@ class GameEngine:
             if not self._win_condition:
                 self._win_condition = "timeout"
 
+        logger.debug(
+            "Game complete: winner=%s turns=%d p1_drawn=%d unique p2_drawn=%d unique",
+            self.state.winner, self.state.turn,
+            len(self._cards_drawn_p1), len(self._cards_drawn_p2),
+        )
         return GameResult(
             winner=self.state.winner,
             turns=self.state.turn,

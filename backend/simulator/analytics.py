@@ -33,7 +33,9 @@ def _parse_jsonl(path: Path) -> list[dict[str, Any]]:
 
 def _compute_game_stats(games: list[dict[str, Any]]) -> dict[str, Any]:
     """Compute aggregate stats from games.jsonl records."""
+    logger.debug("Computing game stats from %d games", len(games))
     if not games:
+        logger.warning("No games data for game stats computation")
         return {}
 
     n = len(games)
@@ -78,6 +80,7 @@ def _compute_mulligan_analysis(games: list[dict[str, Any]]) -> dict[str, Any]:
     Returns mulligan frequency, win rate when mulliganing vs keeping,
     and recommendation on whether deck has mulligan issues.
     """
+    logger.debug("Computing mulligan analysis from %d games", len(games))
     if not games:
         return {}
 
@@ -367,7 +370,9 @@ def _compute_draw_accuracy(
     Helps identify dead draws (high P but low play) and lucky draws (low P but high play).
     """
     if not draw_prob_data or not games:
+        logger.debug("Skipping draw accuracy: draw_prob=%s, games=%d", bool(draw_prob_data), len(games))
         return []
+    logger.info("Computing draw accuracy: %d games, draw_prob keys=%s", len(games), list(draw_prob_data.keys())[:5])
 
     # Use p1 draw probability data (primary deck under analysis)
     per_card = draw_prob_data.get("p1", draw_prob_data).get("per_card", [])
@@ -482,6 +487,7 @@ def compute_detailed_sim_stats(sim_folder: str) -> dict[str, Any] | None:
     Reads all 3 data files (games, decisions, snapshots) and returns
     card performance, turn momentum, action patterns, and game summaries.
     """
+    logger.info("Computing detailed stats for simulation: %s", sim_folder)
     sim_dir = SIMULATIONS_DIR / sim_folder
     if not sim_dir.exists():
         # Try to find by partial match
@@ -575,6 +581,7 @@ def aggregate_deck_health(sim_folders: list[str]) -> dict[str, Any]:
     Returns per-card stats, co-occurrence synergy pairs, matchup spread,
     and aggregated action patterns.
     """
+    logger.info("Aggregating deck health from %d simulation folders", len(sim_folders))
     all_games: list[dict[str, Any]] = []
     all_decisions: list[dict[str, Any]] = []
     matchup_results: dict[str, dict[str, int]] = defaultdict(
@@ -713,12 +720,23 @@ def aggregate_deck_health(sim_folders: list[str]) -> dict[str, Any]:
             dp_path = Path(sim_folders[0]) / "draw_probability.json"
             if dp_path.exists():
                 draw_probability = json.loads(dp_path.read_text())
-        except Exception:
-            pass
+                logger.info("Loaded draw_probability.json from %s", dp_path)
+            else:
+                logger.debug("No draw_probability.json found at %s", dp_path)
+        except Exception as e:
+            logger.warning("Failed to load draw_probability.json: %s", e)
 
     # Draw accuracy: compare predicted vs actual draw rates
     draw_accuracy = _compute_draw_accuracy(draw_probability, all_games)
     mulligan_analysis = _compute_mulligan_analysis(all_games)
+
+    logger.info(
+        "Deck health aggregated: %d games, %d wins (%.0f%%), %d card stats, "
+        "%d synergy pairs, %d matchups, draw_accuracy=%d cards, mulligan=%s",
+        total_games, total_wins, overall_win_rate * 100,
+        len(card_health), len(synergy_pairs), len(matchup_spread),
+        len(draw_accuracy), bool(mulligan_analysis),
+    )
 
     result = {
         "total_games": total_games,

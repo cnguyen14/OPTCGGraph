@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 from typing import Any
 
@@ -13,6 +14,8 @@ from backend.simulator.analytics import (
     compute_detailed_sim_stats,
 )
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Handlers
 # ---------------------------------------------------------------------------
@@ -22,9 +25,11 @@ async def _handle_analyze_simulations(
     args: dict[str, Any], ctx: ToolExecutionContext
 ) -> str:
     """Analyze all simulation data and return structured insights."""
+    logger.info("analyze_simulations called, question=%s", args.get("question", "")[:80])
     simulations = aggregate_all_simulations()
 
     if not simulations:
+        logger.warning("No simulation data found")
         return json.dumps({"error": "No simulation data found in data/simulations/."})
 
     question = args.get("question", "")
@@ -207,6 +212,7 @@ async def _handle_analyze_deck_simulation(
     """Analyze a specific deck's performance from a single simulation."""
     sim_id = args.get("sim_id", "")
     player = args.get("player", "p1")
+    logger.info("analyze_deck_simulation called: sim_id=%s, player=%s", sim_id, player)
 
     if not sim_id:
         return json.dumps({"error": "sim_id is required"})
@@ -303,6 +309,11 @@ async def _handle_analyze_deck_simulation(
 
     if not recommendations:
         recommendations.append("Not enough data for strong recommendations.")
+
+    logger.info(
+        "Deck simulation analysis: %s %s — %d games, %d card perfs, %d recommendations",
+        sim_id[:8], player, num_games, len(card_perf), len(recommendations),
+    )
 
     result = {
         "sim_id": sim_id,
