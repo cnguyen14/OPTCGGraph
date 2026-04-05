@@ -234,7 +234,7 @@ export default function CardPool({ leader, getQuantity, onAddCard, onCardSelect 
               </select>
               <select value={setName} onChange={(e) => { setSetName(e.target.value); setPage(0); }} className={inputClass}>
                 <option value="">Set</option>
-                {facets.sets.map((s) => <option key={s.id} value={s.name}>{s.id}</option>)}
+                {facets.sets.map((s) => <option key={s.id} value={s.id}>{s.id}</option>)}
               </select>
               <div className="flex items-center gap-1 shrink-0">
                 <input type="number" placeholder="Min" value={costMin} onChange={(e) => { setCostMin(e.target.value); setPage(0); }} className={`${inputClass} w-12`} min={0} />

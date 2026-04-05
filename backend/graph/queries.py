@@ -177,7 +177,10 @@ async def search_cards(
         conditions.append("(c)-[:BELONGS_TO]->(:Family {name: $family})")
         params["family"] = family
     if set_name:
-        conditions.append("(c)-[:FROM_SET]->(:Set {name: $set_name})")
+        # Support both set ID (e.g. "OP15") and set name
+        conditions.append(
+            "EXISTS { MATCH (c)-[:FROM_SET]->(s:Set) WHERE s.id = $set_name OR s.name = $set_name }"
+        )
         params["set_name"] = set_name
     if rarity:
         conditions.append("c.rarity = $rarity")
