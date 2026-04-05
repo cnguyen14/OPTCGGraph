@@ -6,6 +6,7 @@ allowed_tools:
   - get_leader_meta
   - recommend_meta_cards
   - get_banned_cards
+  - search_cards
   - query_neo4j
   - update_ui_state
 triggers:

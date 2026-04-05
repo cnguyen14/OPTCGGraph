@@ -23,10 +23,14 @@ import json
 import logging
 from collections import Counter
 
-import anthropic
 from neo4j import AsyncDriver
 
-from backend.services.settings_service import get_active_api_key
+from backend.services.llm_service import (
+    LLMNotAvailableError,
+    has_any_llm_key,
+    llm_complete,
+    strip_json_fences,
+)
 from backend.graph.queries import get_card_by_id
 from backend.ai.deck_validator import validate_deck
 
@@ -130,6 +134,7 @@ async def build_deck(
     playstyle_hints: str = "",
     signature_cards: list[str] | None = None,
     budget_max: float | None = None,
+    existing_card_ids: list[str] | None = None,
 ) -> dict:
     """Build a legal, competitive deck for any leader.
 
@@ -164,7 +169,7 @@ async def build_deck(
     categorized = _categorize(candidates)
 
     # 4. Build deck using strategy template
-    deck = _fill_deck(candidates, categorized, template, budget_max, signature_cards)
+    deck = _fill_deck(candidates, categorized, template, budget_max, signature_cards, existing_card_ids)
 
     # 5. Validate and self-correct
     report = validate_deck(leader, deck)
@@ -186,6 +191,11 @@ async def build_deck(
     except Exception as e:
         logger.warning(f"QC review failed (non-fatal): {e}")
         qc_review_result = {"verdict": "SKIP", "reasoning": f"Error: {e}"}
+
+    # 6b. Evaluate existing cards for potential swaps
+    existing_swaps: list[dict] = []
+    if existing_card_ids:
+        existing_swaps = _evaluate_existing_cards(existing_card_ids, deck, candidates)
 
     # 7. Build summary
     curve = Counter(c.get("cost", 0) for c in deck if c.get("cost") is not None)
@@ -224,6 +234,7 @@ async def build_deck(
         "four_copy_cards": [cid for cid, cnt in id_counts.items() if cnt == 4],
         "validation": report.to_dict(),
         "qc_review": qc_review_result,
+        "existing_card_swaps": existing_swaps,
     }
 
 
@@ -353,12 +364,55 @@ def _score_card(card: dict) -> float:
     return score
 
 
+def _evaluate_existing_cards(
+    existing_ids: list[str],
+    deck: list[dict],
+    candidates: list[dict],
+) -> list[dict]:
+    """Evaluate existing cards and suggest swaps for weak ones."""
+    candidate_map = {c["id"]: c for c in candidates}
+    deck_ids = {c["id"] for c in deck}
+    swaps = []
+
+    for card_id in set(existing_ids):
+        card = candidate_map.get(card_id)
+        if not card:
+            continue
+        card_score = _score_card(card)
+        cost = card.get("cost") or 0
+
+        # Find better alternatives at similar cost (±1), same card type
+        alternatives = [
+            c for c in candidates
+            if c["id"] not in deck_ids
+            and c["id"] != card_id
+            and abs((c.get("cost") or 0) - cost) <= 1
+            and c.get("card_type") == card.get("card_type")
+        ]
+        alternatives.sort(key=lambda c: -_score_card(c))
+
+        if alternatives and _score_card(alternatives[0]) > card_score * 1.3:
+            best = alternatives[0]
+            swaps.append({
+                "remove_id": card_id,
+                "remove_name": card.get("name", ""),
+                "add_id": best["id"],
+                "add_name": best.get("name", ""),
+                "reason": "Better synergy and tournament performance at similar cost",
+                "remove_score": round(card_score, 1),
+                "add_score": round(_score_card(best), 1),
+            })
+
+    return swaps[:5]
+
+
 def _fill_deck(
     candidates: list[dict],
     categorized: dict[str, list[dict]],
     template: dict,
     budget_max: float | None,
     signature_cards: list[str] | None = None,
+    existing_card_ids: list[str] | None = None,
 ) -> list[dict]:
     """Fill a 50-card deck with type diversity, 4x core consistency, balanced curve, and counter density."""
     deck: list[dict] = []
@@ -393,10 +447,18 @@ def _fill_deck(
         return sum(1 for c in deck if c.get("card_type") == card_type)
 
     cost_targets = template["cost_targets"]
+    candidate_map = {c["id"]: c for c in candidates}
+
+    # === Phase -2: Lock in existing cards from user's deck ===
+    if existing_card_ids:
+        existing_counts: Counter = Counter(existing_card_ids)
+        for card_id, qty in existing_counts.items():
+            card = candidate_map.get(card_id)
+            if card and card.get("card_type") != "LEADER":
+                add_card(card, copies=min(qty, 4))
 
     # === Phase -1: Lock in signature cards at 4 copies ===
     if signature_cards:
-        candidate_map = {c["id"]: c for c in candidates}
         for card_id in signature_cards:
             card = candidate_map.get(card_id)
             if card and can_add(card):
@@ -730,10 +792,12 @@ async def _qc_review(
     Returns (possibly_modified_deck, review_result).
     review_result contains verdict, reasoning, and any swaps applied.
     """
-    api_key = get_active_api_key("claude")
-    if not api_key:
-        logger.warning("No Anthropic API key — skipping QC review")
-        return deck, {"verdict": "SKIP", "reasoning": "No API key configured. Set it in Settings > BYOK."}
+    if not has_any_llm_key():
+        logger.warning("No LLM API key — skipping QC review")
+        return deck, {
+            "verdict": "SKIP",
+            "reasoning": "No LLM API key configured. Set one in Settings > BYOK.",
+        }
 
     deck_ids = {c["id"] for c in deck}
 
@@ -759,28 +823,21 @@ async def _qc_review(
     )
 
     try:
-        client = anthropic.AsyncAnthropic(api_key=api_key)
-        response = await client.messages.create(
-            model="claude-sonnet-4-20250514",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=2048,
-            timeout=90,
-        )
-
-        raw_text = response.content[0].text.strip()
-        # Parse JSON from response (handle potential markdown wrapping)
-        if raw_text.startswith("```"):
-            raw_text = raw_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        raw_text = await llm_complete("", prompt, prefer="smart", max_tokens=2048)
+        raw_text = strip_json_fences(raw_text)
 
         review = json.loads(raw_text)
 
+    except LLMNotAvailableError as e:
+        logger.warning(f"QC review skipped — no LLM available: {e}")
+        return deck, {"verdict": "SKIP", "reasoning": str(e)}
     except (json.JSONDecodeError, IndexError, KeyError) as e:
         logger.warning(f"QC review parse error: {e}")
         return deck, {
             "verdict": "SKIP",
             "reasoning": f"Failed to parse QC response: {e}",
         }
-    except anthropic.APIError as e:
+    except Exception as e:
         logger.warning(f"QC review API error: {e}")
         return deck, {"verdict": "SKIP", "reasoning": f"API error: {e}"}
 

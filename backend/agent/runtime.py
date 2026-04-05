@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -14,6 +15,8 @@ from backend.agent.prompts import render_system_prompt
 from backend.agent.providers import LLMResponse, get_provider
 from backend.agent.router import resolve_skill
 from backend.agent.skills import load_all_skills
+from backend.agent.guardrails import build_default_guards
+from backend.agent.tracer import AgentTracer
 from backend.agent.tools import (
     AgentTool,
     ToolExecutionContext,
@@ -67,6 +70,7 @@ class OPTCGAgent:
         selected_leader: str | None = None,
         active_skill: str | None = None,
         event_queue: asyncio.Queue | None = None,
+        session_id: str | None = None,
     ) -> AgentRunResult:
         """Run the agent loop.
 
@@ -83,8 +87,12 @@ class OPTCGAgent:
         Returns:
             AgentRunResult with text, messages, tool calls, UI updates, and active skill.
         """
+        tracer = AgentTracer(session_id or "anonymous")
+
         # 1. Route to skill
         skill = resolve_skill(message, active_skill, self.skills)
+        tracer.log("skill_resolved", skill=skill.name, message=message[:200],
+                    tools=list(skill.allowed_tools))
 
         # 2. Filter tools for this skill (or all tools if tier allows)
         provider = get_provider(
@@ -114,6 +122,7 @@ class OPTCGAgent:
         all_tool_calls: list[JSONDict] = []
         ui_updates: list[JSONDict] = []
         ctx = ToolExecutionContext(driver=driver)
+        guards = build_default_guards()
         text = ""
 
         try:
@@ -123,8 +132,18 @@ class OPTCGAgent:
                     iteration + 1, skill.name, provider.model_name,
                 )
 
+                t0 = time.time()
                 response: LLMResponse = await provider.chat(system, messages, tools_for_llm)
+                llm_ms = round((time.time() - t0) * 1000, 1)
                 messages.append({"role": "assistant", "content": response.content})
+
+                tracer.log("llm_response",
+                           iteration=iteration + 1,
+                           model=provider.model_name,
+                           latency_ms=llm_ms,
+                           stop_reason=response.stop_reason,
+                           tool_calls=[tc.get("name", "") for tc in response.tool_calls],
+                           text_preview=response.text[:200] if response.text else "")
 
                 if response.stop_reason != "tool_use" or not response.tool_calls:
                     text = response.text
@@ -139,16 +158,25 @@ class OPTCGAgent:
                     # Emit STEP_STARTED
                     await self._emit(event_queue, {"type": "STEP_STARTED", "tool": tool_name})
 
+                    tracer.log("tool_start", tool=tool_name, input=tool_input)
+
                     logger.info("  Executing tool: %s", tool_name)
+                    t1 = time.time()
                     result = await execute_tool(
-                        self.tool_registry, tool_name, tool_input, ctx
+                        self.tool_registry, tool_name, tool_input, ctx,
+                        guards=guards,
                     )
+                    tool_ms = round((time.time() - t1) * 1000, 1)
 
                     # Parse result content for downstream processing
                     try:
                         result_data = json.loads(result.content) if result.ok else {"error": result.content}
                     except (json.JSONDecodeError, TypeError):
                         result_data = {"raw": result.content}
+
+                    tracer.log("tool_finish", tool=tool_name, ok=result.ok,
+                               latency_ms=tool_ms,
+                               preview=result.content[:300])
 
                     # Emit STEP_FINISHED
                     await self._emit(event_queue, {
@@ -193,12 +221,45 @@ class OPTCGAgent:
                         ui_updates.append(ui_update)
                         await self._emit(event_queue, {"type": "STATE_SNAPSHOT", **ui_update})
 
-                    # Use the original dict/string representation for tool results
-                    # (matching the old format for Anthropic API compatibility)
+                    # Auto-emit swap suggestions for existing cards
+                    if (
+                        tool_name == "build_deck_shell"
+                        and isinstance(result_data, dict)
+                        and result_data.get("existing_card_swaps")
+                    ):
+                        ui_update = {
+                            "action": "show_swap_suggestions",
+                            "payload": {
+                                "swaps": result_data["existing_card_swaps"],
+                            },
+                            "status": "emitted",
+                        }
+                        ui_updates.append(ui_update)
+                        await self._emit(event_queue, {"type": "STATE_SNAPSHOT", **ui_update})
+
+                    # Auto-emit card list on search results
+                    if (
+                        tool_name == "search_cards"
+                        and isinstance(result_data, dict)
+                        and result_data.get("cards")
+                    ):
+                        card_ids = [c["id"] for c in result_data["cards"] if c.get("id")]
+                        if card_ids:
+                            ui_update = {
+                                "action": "show_card_list",
+                                "payload": {
+                                    "card_ids": card_ids,
+                                    "title": f"Search Results ({len(card_ids)} cards)",
+                                },
+                                "status": "emitted",
+                            }
+                            ui_updates.append(ui_update)
+                            await self._emit(event_queue, {"type": "STATE_SNAPSHOT", **ui_update})
+
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": tool_id,
-                        "content": str(result_data),
+                        "content": json.dumps(result_data, default=str),
                     })
 
                 messages.append({"role": "user", "content": tool_results})
@@ -227,11 +288,16 @@ class OPTCGAgent:
                     })
 
         except Exception as e:
-            logger.error("Agent error: %s", e)
-            text = f"Error: {e}"
+            logger.error("Agent error: %s", e, exc_info=True)
+            tracer.log("error", **AgentTracer.format_error(e))
+            text = f"Error: {type(e).__name__}: {e}" if str(e) else f"Error: {type(e).__name__}"
             if event_queue is not None:
                 await event_queue.put({"type": "TextMessageContent", "delta": text})
         finally:
+            tracer.log("agent_complete",
+                       tool_calls=len(all_tool_calls),
+                       skill=skill.name,
+                       text_length=len(text))
             if event_queue is not None:
                 await event_queue.put(None)  # Sentinel: streaming done
 

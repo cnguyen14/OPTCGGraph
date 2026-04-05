@@ -156,7 +156,7 @@ async def _test_apitcg_key(api_key: str) -> dict:
     """Test an ApiTCG API key by fetching a single page."""
     try:
         from backend.config import APITCG_BASE_URL
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
             resp = await client.get(
                 APITCG_BASE_URL,
                 headers={"Authorization": f"Bearer {api_key}"},

@@ -7,7 +7,7 @@ from typing import Any
 
 from backend.agent.types import GuardrailResult, JSONDict, ToolExecutionResult
 
-MAX_OUTPUT_CHARS = 15_000
+MAX_OUTPUT_CHARS = 30_000
 MAX_CYPHER_RECORDS = 200
 MAX_CARD_LIST = 100
 

@@ -22,6 +22,7 @@ async def _handle_build_deck_shell(args: dict, ctx: ToolExecutionContext) -> str
         playstyle_hints=args.get("playstyle_hints", ""),
         signature_cards=args.get("signature_cards"),
         budget_max=args.get("budget_max"),
+        existing_card_ids=args.get("existing_card_ids"),
     )
     return json.dumps(result, default=str)
 
@@ -109,7 +110,7 @@ async def _handle_suggest_card_swap(args: dict, ctx: ToolExecutionContext) -> st
 
 BUILD_DECK_SHELL = AgentTool(
     name="build_deck_shell",
-    description="Build a legal, competitive 50-card deck for a Leader. Enforces all OPTCG rules (50 cards, max 4 copies, color match, no LEADERs in deck). Returns validated deck with cost curve, role coverage, and quality report. ALWAYS use this tool when asked to build a deck.",
+    description="Build a legal, competitive 50-card deck for a Leader. Enforces all OPTCG rules (50 cards, max 4 copies, color match, no LEADERs in deck). If user already has cards in deck, pass them as existing_card_ids to keep them and fill the remaining slots.",
     parameters={
         "type": "object",
         "properties": {
@@ -118,6 +119,7 @@ BUILD_DECK_SHELL = AgentTool(
             "strategy": {"type": "string", "enum": ["aggro", "midrange", "control"]},
             "playstyle_hints": {"type": "string", "description": "Comma-separated playstyle preferences from user (e.g. 'rush,low_curve,card_advantage'). Get these from analyze_leader_playstyles results."},
             "signature_cards": {"type": "array", "items": {"type": "string"}, "description": "Card IDs that MUST be included (signature cards from playstyle analysis)"},
+            "existing_card_ids": {"type": "array", "items": {"type": "string"}, "description": "Card IDs already in the user's deck. These will be kept and the remaining slots filled. Pass this when user asks to 'finish' or 'complete' an existing deck."},
         },
         "required": ["leader_id"],
     },

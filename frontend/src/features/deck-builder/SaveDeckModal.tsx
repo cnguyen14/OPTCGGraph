@@ -3,6 +3,28 @@ import type { Card, DeckEntry, SavedDeck } from '../../types';
 import { saveDeck, updateDeck } from '../../lib/api';
 import { Modal, Input, Button, Spinner } from '../../components/ui';
 
+function parseApiError(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw);
+    const details = parsed?.detail;
+    if (Array.isArray(details)) {
+      return details.map((d: { loc?: string[]; msg?: string }) => {
+        const field = d.loc?.filter((l) => l !== 'body').join(' > ') || '';
+        const msg = d.msg || 'Invalid value';
+        if (field.includes('quantity')) return `Card quantity exceeds maximum of 4 copies`;
+        if (field.includes('entries')) return `Deck has an issue: ${msg}`;
+        return field ? `${field}: ${msg}` : msg;
+      }).join('. ');
+    }
+    if (typeof parsed?.detail === 'string') return parsed.detail;
+  } catch { /* not JSON */ }
+
+  if (raw.includes('less_than_equal') && raw.includes('quantity')) {
+    return 'Some cards exceed the maximum of 4 copies per card';
+  }
+  return raw;
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -38,6 +60,17 @@ export default function SaveDeckModal({
       setError('Please enter a deck name');
       return;
     }
+    if (totalCards > 50) {
+      setError(`Deck has ${totalCards} cards — maximum is 50. Please remove ${totalCards - 50} card(s).`);
+      return;
+    }
+    // Check max 4 copies
+    for (const [, entry] of entries) {
+      if (entry.quantity > 4) {
+        setError(`"${entry.card.name}" has ${entry.quantity} copies — maximum is 4.`);
+        return;
+      }
+    }
 
     setSaving(true);
     setError(null);
@@ -61,7 +94,8 @@ export default function SaveDeckModal({
       onSaved(saved);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save deck');
+      const raw = err instanceof Error ? err.message : 'Failed to save deck';
+      setError(parseApiError(raw));
     } finally {
       setSaving(false);
     }

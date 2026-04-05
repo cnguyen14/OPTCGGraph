@@ -66,6 +66,8 @@ def resolve_skill(
         return skills[active_skill]
 
     # 4. Fallback
+    if not skills:
+        raise RuntimeError("No skills loaded — check backend/agent/skills/ directory")
     fallback = DEFAULT_SKILL if DEFAULT_SKILL in skills else next(iter(skills))
     logger.info("Skill resolved via fallback: %s", fallback)
     return skills[fallback]

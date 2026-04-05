@@ -18,6 +18,8 @@ export function useDeckState() {
   const [deckNotes, setDeckNotes] = useState('');
   const [hydrating, setHydrating] = useState(true);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadVersionRef = useRef(0); // Cancel stale loadDeckFromIds calls
+  const isLoadingDeck = useRef(false); // Prevent saveDeck during loadDeckFromIds
 
   const totalCards = Array.from(entries.values()).reduce((sum, e) => sum + e.quantity, 0);
   const totalPrice = Array.from(entries.values()).reduce(
@@ -35,8 +37,10 @@ export function useDeckState() {
 
   // Persistence: save to localStorage (debounced)
   const saveDeck = useCallback(() => {
+    if (isLoadingDeck.current) return; // Don't save while loading
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
+      if (isLoadingDeck.current) return; // Re-check after debounce
       const stored: StoredDeck = {
         leaderId: leader?.id ?? null,
         entries: Array.from(entries.entries()).map(([cardId, e]) => ({
@@ -99,6 +103,7 @@ export function useDeckState() {
   }, []);
 
   const addCard = useCallback((card: Card) => {
+    if (isLoadingDeck.current) return; // Don't add while loading full deck
     setEntries((prev) => {
       const currentTotal = Array.from(prev.values()).reduce((s, e) => s + e.quantity, 0);
       if (currentTotal >= MAX_DECK_SIZE) return prev;
@@ -179,9 +184,14 @@ export function useDeckState() {
   }, []);
 
   const loadDeckFromIds = useCallback(async (leaderId: string, cardIds: string[]) => {
+    // Increment version to cancel any in-flight load
+    const version = ++loadVersionRef.current;
+    isLoadingDeck.current = true;
+
     // Fetch leader
     try {
       const leaderCard = await fetchCard(leaderId);
+      if (loadVersionRef.current !== version) { isLoadingDeck.current = false; return; }
       setLeader(leaderCard);
     } catch { /* ignore */ }
 
@@ -197,6 +207,7 @@ export function useDeckState() {
 
     // Fetch in batches to avoid too many concurrent requests
     for (let i = 0; i < uniqueIds.length; i += 10) {
+      if (loadVersionRef.current !== version) { isLoadingDeck.current = false; return; }
       const batch = uniqueIds.slice(i, i + 10);
       const cards = await Promise.all(batch.map(id => fetchCard(id).catch(() => null)));
       for (const card of cards) {
@@ -206,7 +217,9 @@ export function useDeckState() {
       }
     }
 
+    if (loadVersionRef.current !== version) return; // Cancelled
     setEntries(newEntries);
+    isLoadingDeck.current = false;
   }, []);
 
   return {

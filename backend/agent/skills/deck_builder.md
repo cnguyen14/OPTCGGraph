@@ -5,6 +5,7 @@ allowed_tools:
   - analyze_leader_playstyles
   - build_deck_shell
   - get_card
+  - search_cards
   - find_synergies
   - get_mana_curve
   - get_banned_cards
@@ -21,6 +22,15 @@ triggers:
   - aggro deck
   - midrange deck
   - control deck
+  - finish deck
+  - finish the deck
+  - complete deck
+  - complete the deck
+  - complete my deck
+  - fill deck
+  - fill the deck
+  - help me build
+  - help with deck
 max_iterations: 10
 ---
 
@@ -32,7 +42,7 @@ Your job is to build legal, competitive 50-card OPTCG decks using tournament dat
 1. **Analyze playstyles first:** ALWAYS call `analyze_leader_playstyles` before building
 2. **Present options:** Show playstyle profiles with descriptions and signature cards
 3. **Ask the user:** Which playstyle do they prefer?
-4. **Build the deck:** Call `build_deck_shell` with strategy + playstyle_hints + signature_cards from chosen profile
+4. **Build the deck:** Call `build_deck_shell` with strategy + playstyle_hints + signature_cards from chosen profile. If user already has cards in deck, pass them as `existing_card_ids` to preserve them.
 5. **Show results:** Present deck organized by cost tier with role explanations
 
 **Exception:** If the user already specified a clear playstyle (e.g., "build me a rush aggro Luffy deck"), skip the question and use their stated preference directly.

@@ -5,6 +5,9 @@ import CardBrowser from './features/cards/CardBrowser';
 import DeckBuilder from './features/deck-builder/DeckBuilder';
 import MetaExplorer from './features/meta/MetaExplorer';
 import CardDetail from './features/cards/CardDetail';
+import CardListModal from './features/cards/CardListModal';
+import DeckSwapModal from './features/cards/DeckSwapModal';
+import type { SwapSuggestion } from './features/cards/DeckSwapModal';
 import FloatingChat from './features/chat/FloatingChat';
 import SimulatorPage from './features/simulator/SimulatorPage';
 import AnalyticsPage from './features/analytics/AnalyticsPage';
@@ -12,6 +15,7 @@ import MyDecksPage from './features/my-decks/MyDecksPage';
 import AppLayout from './layouts/AppLayout';
 import LandingPage from './pages/LandingPage';
 import { PageTransition } from './components/ui';
+import { fetchCard, getClientId } from './lib/api';
 import type { Card } from './types';
 
 type Tab = 'landing' | 'cards' | 'deck' | 'mydecks' | 'meta' | 'simulator' | 'analytics' | 'settings';
@@ -49,6 +53,8 @@ function App() {
   // State for pre-selecting a deck in the simulator
   const [simDeck, setSimDeck] = useState<{ leaderId: string; cardIds: string[] } | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [cardListModal, setCardListModal] = useState<{ cardIds: string[]; title: string } | null>(null);
+  const [swapSuggestions, setSwapSuggestions] = useState<SwapSuggestion[] | null>(null);
 
   // Build deck card IDs for chat context
   const deckCardIds: string[] = [];
@@ -70,6 +76,46 @@ function App() {
       const { notes } = update.payload as { notes?: string };
       if (notes) {
         deckState.setDeckNotes(notes);
+      }
+    }
+    if (update.action === 'add_card_to_deck' && update.payload) {
+      const { card_ids } = update.payload as { card_ids?: string[] };
+      if (card_ids && card_ids.length > 0) {
+        for (const id of card_ids) {
+          fetchCard(id).then((card) => deckState.addCard(card)).catch(() => {});
+        }
+      }
+    }
+    if (update.action === 'remove_card_from_deck' && update.payload) {
+      const { card_ids, remove_all } = update.payload as { card_ids?: string[]; remove_all?: boolean };
+      if (card_ids && card_ids.length > 0) {
+        for (const id of card_ids) {
+          if (remove_all) {
+            // Remove all copies
+            const qty = deckState.getQuantity(id);
+            for (let i = 0; i < qty; i++) deckState.removeCard(id);
+          } else {
+            deckState.removeCard(id);
+          }
+        }
+      }
+    }
+    if (update.action === 'show_card_list' && update.payload) {
+      const { card_ids, title } = update.payload as { card_ids?: string[]; title?: string };
+      if (card_ids && card_ids.length > 0) {
+        setCardListModal({ cardIds: card_ids, title: title || `Cards (${card_ids.length})` });
+      }
+    }
+    if (update.action === 'show_card_detail' && update.payload) {
+      const { card_id } = update.payload as { card_id?: string };
+      if (card_id) {
+        setCardListModal({ cardIds: [card_id], title: 'Card Detail' });
+      }
+    }
+    if (update.action === 'show_swap_suggestions' && update.payload) {
+      const { swaps } = update.payload as { swaps?: SwapSuggestion[] };
+      if (swaps && swaps.length > 0) {
+        setSwapSuggestions(swaps);
       }
     }
   };
@@ -117,6 +163,7 @@ function App() {
         <FloatingChat
           sessionId={sessionId}
           onSessionId={setSessionId}
+          clientId={getClientId()}
           leaderId={deckState.leader?.id}
           deckCardIds={deckCardIds.length > 0 ? deckCardIds : undefined}
           onUiUpdate={handleUiUpdate}
@@ -170,6 +217,31 @@ function App() {
 
       {/* Card Detail Slide-over */}
       <CardDetail card={selectedCard} onClose={() => setSelectedCard(null)} />
+
+      {/* AI Agent Card List Modal */}
+      {cardListModal && (
+        <CardListModal
+          cardIds={cardListModal.cardIds}
+          title={cardListModal.title}
+          onClose={() => setCardListModal(null)}
+          onAddCard={(card) => deckState.addCard(card)}
+          onSwapCard={(add, removeId) => {
+            deckState.removeCard(removeId);
+            deckState.addCard(add);
+          }}
+          deckCardIds={deckCardIds}
+          deckTotal={deckState.totalCards}
+        />
+      )}
+
+      {/* AI Agent Swap Suggestions Modal */}
+      {swapSuggestions && (
+        <DeckSwapModal
+          swaps={swapSuggestions}
+          onApply={(removes, adds) => deckState.bulkReplace(removes, adds)}
+          onClose={() => setSwapSuggestions(null)}
+        />
+      )}
     </AppLayout>
   );
 }

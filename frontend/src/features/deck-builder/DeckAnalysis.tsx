@@ -15,6 +15,52 @@ interface ParsedCard {
   desc: string;
 }
 
+/** Render a single line of markdown-like text as React elements. */
+function renderMarkdownLine(line: string): React.ReactNode {
+  const trimmed = line.trim();
+
+  // Skip empty lines and horizontal rules
+  if (!trimmed || /^---+$/.test(trimmed)) return null;
+
+  // Headers (#### / ### / ##)
+  const headerMatch = trimmed.match(/^(#{2,4})\s+(.+)$/);
+  if (headerMatch) {
+    const level = headerMatch[1].length;
+    const text = headerMatch[2].replace(/\*\*/g, '');
+    if (level <= 2) return <h4 className="text-xs font-bold text-text-primary mt-2 mb-1">{text}</h4>;
+    if (level === 3) return <h5 className="text-[11px] font-semibold text-text-primary mt-1.5 mb-0.5">{text}</h5>;
+    return <h6 className="text-[11px] font-medium text-purple-400 mt-1.5 mb-0.5">{text}</h6>;
+  }
+
+  // List items (- or *)
+  const listMatch = trimmed.match(/^[-*]\s+(.+)$/);
+  const content = listMatch ? listMatch[1] : trimmed;
+  const isListItem = !!listMatch;
+
+  // Inline formatting: **bold**, *italic*, `code`
+  const parts = content.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
+  const rendered = parts.map((part, i) => {
+    const boldMatch = part.match(/^\*\*(.+)\*\*$/);
+    if (boldMatch) return <strong key={i} className="text-text-primary font-semibold">{boldMatch[1]}</strong>;
+    const italicMatch = part.match(/^\*(.+)\*$/);
+    if (italicMatch) return <em key={i} className="text-gray-400 italic">{italicMatch[1]}</em>;
+    const codeMatch = part.match(/^`(.+)`$/);
+    if (codeMatch) return <code key={i} className="text-purple-400 bg-purple-950/30 px-1 rounded text-[10px]">{codeMatch[1]}</code>;
+    return <span key={i}>{part}</span>;
+  });
+
+  if (isListItem) {
+    return (
+      <div className="flex gap-1.5 my-0.5">
+        <span className="text-gray-600 shrink-0">{'·'}</span>
+        <span className="text-[11px] text-gray-300 leading-relaxed">{rendered}</span>
+      </div>
+    );
+  }
+
+  return <p className="text-[11px] text-gray-300 leading-relaxed my-0.5">{rendered}</p>;
+}
+
 function parseNotes(raw: string): { summary: string; sections: ParsedSection[] } {
   const lines = raw.split('\n');
   let summary = '';
@@ -55,7 +101,7 @@ function parseNotes(raw: string): { summary: string; sections: ParsedSection[] }
       const lower = headerText.toLowerCase();
       if (lower.includes('strategy') || lower.includes('how your leader')) {
         currentSection = { type: 'strategy', title: headerText, content: '', icon: '\u{1F3AF}', accent: 'blue' };
-      } else if (lower.includes('decklist') || lower.includes('cost')) {
+      } else if (lower.includes('decklist') || lower.includes('deck list') || lower.includes('cost tier') || lower.includes('card breakdown') || lower.includes('card list')) {
         currentSection = { type: 'decklist', title: headerText, content: '', icon: '\u{1F4CB}', accent: 'purple' };
       } else if (lower.includes('validation') || lower.includes('legal')) {
         currentSection = { type: 'validation', title: headerText, content: '', icon: '\u2705', accent: 'green' };
@@ -91,46 +137,56 @@ function parseNotes(raw: string): { summary: string; sections: ParsedSection[] }
   return { summary, sections };
 }
 
-function parseCardLines(content: string): { cards: ParsedCard[]; other: string[] } {
+interface CardGroup {
+  header: string | null;
+  cards: ParsedCard[];
+  other: string[];
+}
+
+function parseCardLines(content: string): { cards: ParsedCard[]; other: string[]; groups: CardGroup[] } {
   const cards: ParsedCard[] = [];
   const other: string[] = [];
+  const groups: CardGroup[] = [];
+  let currentGroup: CardGroup = { header: null, cards: [], other: [] };
 
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
-    // Match formats:
-    //   "- 4x **Nami** (OP01-016) — searcher"
-    //   "4x Nami (OP01-016) — searcher"
-    //   "- 4x Nami (OP01-016)"
-    //   "**Nami** (OP01-016) x4 — searcher"
+    if (!trimmed || /^---+$/.test(trimmed)) continue;
+
+    // Sub-headers (#### or bold headers like **0-2 Cost**)
+    const subHeader = trimmed.match(/^#{3,4}\s+(.+)$/) ?? trimmed.match(/^\*\*([^*]+)\*\*$/);
+    if (subHeader) {
+      // Flush current group
+      if (currentGroup.cards.length > 0 || currentGroup.other.length > 0) {
+        groups.push(currentGroup);
+      }
+      currentGroup = { header: subHeader[1].replace(/\*\*/g, '').trim(), cards: [], other: [] };
+      continue;
+    }
+
+    // Match card formats
     const match = trimmed.match(
       /^[-•*]*\s*(\d+)x\s+\*{0,2}(.+?)\*{0,2}\s+\(([A-Z0-9]+-[A-Z0-9]+)\)\s*(?:[—\-–:]+\s*\*?(.*?)\*?\s*)?$/
     ) ?? trimmed.match(
       /^[-•*]*\s*\*{0,2}(.+?)\*{0,2}\s+\(([A-Z0-9]+-[A-Z0-9]+)\)\s*(?:x(\d+))?\s*(?:[—\-–:]+\s*\*?(.*?)\*?\s*)?$/
     );
     if (match) {
-      // First regex: group 1=qty, 2=name, 3=id, 4=desc
-      // Second regex: group 1=name, 2=id, 3=qty (optional), 4=desc
       const isFirstFormat = /^\d+$/.test(match[1]) && match[3]?.match(/^[A-Z0-9]+-/);
-      if (isFirstFormat) {
-        cards.push({
-          qty: match[1],
-          name: match[2].replace(/\*\*/g, '').trim(),
-          id: match[3].trim(),
-          desc: (match[4] || '').replace(/\*/g, '').trim(),
-        });
-      } else {
-        cards.push({
-          qty: match[3] || '1',
-          name: match[1].replace(/\*\*/g, '').trim(),
-          id: match[2].trim(),
-          desc: (match[4] || '').replace(/\*/g, '').trim(),
-        });
-      }
-    } else if (trimmed && !trimmed.match(/^---+$/)) {
+      const card = isFirstFormat
+        ? { qty: match[1], name: match[2].replace(/\*\*/g, '').trim(), id: match[3].trim(), desc: (match[4] || '').replace(/\*/g, '').trim() }
+        : { qty: match[3] || '1', name: match[1].replace(/\*\*/g, '').trim(), id: match[2].trim(), desc: (match[4] || '').replace(/\*/g, '').trim() };
+      cards.push(card);
+      currentGroup.cards.push(card);
+    } else {
       other.push(trimmed);
+      currentGroup.other.push(trimmed);
     }
   }
-  return { cards, other };
+  // Flush last group
+  if (currentGroup.cards.length > 0 || currentGroup.other.length > 0) {
+    groups.push(currentGroup);
+  }
+  return { cards, other, groups };
 }
 
 const ACCENT_COLORS: Record<string, { border: string; bg: string; text: string; badge: string; headerHover: string }> = {
@@ -194,9 +250,9 @@ export default function DeckAnalysis({ notes, onHighlightCards }: Props) {
           const isCollapsed = collapsed.has(idx);
           const isActive = activeSection === idx;
 
-          // Decklist sections
+          // Decklist sections — group cards by cost tier sub-headers
           if (section.type === 'decklist') {
-            const { cards, other } = parseCardLines(section.content);
+            const { cards, groups } = parseCardLines(section.content);
             return (
               <div key={idx} className={`rounded-lg border ${isActive ? 'border-purple-500/60 shadow-[0_0_12px_rgba(168,85,247,0.15)]' : colors.border} ${colors.bg} overflow-hidden transition-all`}>
                 <div className={`flex items-center gap-2 px-3 py-2 transition-all ${isActive ? 'bg-purple-900/20' : ''}`}>
@@ -204,7 +260,6 @@ export default function DeckAnalysis({ notes, onHighlightCards }: Props) {
                     onClick={() => {
                       if (cards.length > 0) {
                         handleSectionHighlight(idx, cards);
-                        // Auto-expand so user sees which cards are highlighted
                         if (collapsed.has(idx)) toggleSection(idx);
                       } else {
                         toggleSection(idx);
@@ -233,24 +288,31 @@ export default function DeckAnalysis({ notes, onHighlightCards }: Props) {
                   </button>
                 </div>
                 {!isCollapsed && (
-                  <div className="px-3 pb-2 space-y-0.5">
-                    {other.map((line, i) => (
-                      <p key={i} className="text-[11px] text-gray-400 font-medium">{line.replace(/\*\*/g, '')}</p>
-                    ))}
-                    {cards.map((card, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center gap-2 py-1 px-1.5 -mx-1.5 rounded cursor-pointer hover:bg-purple-900/30 transition-colors"
-                        onClick={() => onHighlightCards?.([card.id])}
-                      >
-                        <span className="text-[10px] font-bold text-white bg-purple-800/60 rounded w-5 h-5 flex items-center justify-center shrink-0">
-                          {card.qty}
-                        </span>
-                        <span className="text-[11px] text-gray-200 truncate">{card.name}</span>
-                        <span className="text-[9px] text-gray-600 shrink-0">{card.id}</span>
-                        {card.desc && (
-                          <span className="text-[9px] text-purple-400/70 truncate ml-auto">{card.desc}</span>
+                  <div className="px-3 pb-2">
+                    {groups.map((group, gi) => (
+                      <div key={gi} className={gi > 0 ? 'mt-2' : ''}>
+                        {group.header && (
+                          <h6 className="text-[11px] font-medium text-purple-400 mt-1 mb-1">{group.header}</h6>
                         )}
+                        {group.other.map((line, oi) => (
+                          <div key={`o${oi}`}>{renderMarkdownLine(line)}</div>
+                        ))}
+                        {group.cards.map((card, ci) => (
+                          <div
+                            key={`c${ci}`}
+                            className="flex items-center gap-2 py-1 px-1.5 -mx-1.5 rounded cursor-pointer hover:bg-purple-900/30 transition-colors"
+                            onClick={() => onHighlightCards?.([card.id])}
+                          >
+                            <span className="text-[10px] font-bold text-white bg-purple-800/60 rounded w-5 h-5 flex items-center justify-center shrink-0">
+                              {card.qty}
+                            </span>
+                            <span className="text-[11px] text-gray-200 truncate">{card.name}</span>
+                            <span className="text-[9px] text-gray-600 shrink-0">{card.id}</span>
+                            {card.desc && (
+                              <span className="text-[9px] text-purple-400/70 truncate ml-auto">{card.desc}</span>
+                            )}
+                          </div>
+                        ))}
                       </div>
                     ))}
                   </div>
@@ -321,10 +383,8 @@ export default function DeckAnalysis({ notes, onHighlightCards }: Props) {
               </button>
               {!isCollapsed && (
                 <div className="px-3 pb-2.5">
-                  {section.content.split('\n').filter(l => l.trim()).map((line, i) => (
-                    <p key={i} className="text-[11px] text-gray-300 leading-relaxed my-0.5">
-                      {line.replace(/\*\*/g, '').replace(/\*([^*]+)\*/g, '$1').replace(/^---+$/, '')}
-                    </p>
+                  {section.content.split('\n').map((line, i) => (
+                    <div key={i}>{renderMarkdownLine(line)}</div>
                   ))}
                 </div>
               )}
