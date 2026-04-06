@@ -1,5 +1,6 @@
 """Data management API endpoints."""
 
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends
@@ -9,6 +10,8 @@ from backend.graph.connection import get_driver
 from backend.graph.queries import get_db_stats, get_banned_cards
 from backend.storage.redis_client import get_redis
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/data", tags=["data"])
 
 
@@ -16,119 +19,131 @@ async def _get_driver() -> AsyncDriver:
     return await get_driver()
 
 
-@router.post("/crawl")
-async def trigger_crawl(background_tasks: BackgroundTasks):
-    """Trigger a full crawl pipeline in the background."""
-    from backend.crawlers.apitcg import crawl_apitcg
-    from backend.crawlers.optcgapi import crawl_optcgapi
-    from backend.crawlers.merge import merge_cards
-    from backend.graph.builder import create_indexes, load_cards
-    from backend.graph.connection import get_driver as gd
+@router.post("/rebuild")
+async def rebuild(background_tasks: BackgroundTasks):
+    """Full rebuild pipeline: clean Neo4j → Bandai crawl → price merge → index.
 
-    async def _run_crawl():
-        import asyncio
-        apitcg_cards, optcgapi_cards = await asyncio.gather(
-            crawl_apitcg(), crawl_optcgapi()
-        )
-        merged = merge_cards(apitcg_cards, optcgapi_cards)
-        driver = await gd()
-        await create_indexes(driver)
-        count = await load_cards(driver, merged)
-
-        # Track crawl metadata in Redis
-        r = await get_redis()
-        now = datetime.now(timezone.utc).isoformat()
-        await r.set("crawl:apitcg:last_run", now)
-        await r.set("crawl:apitcg:count", str(len(apitcg_cards)))
-        await r.set("crawl:optcgapi:last_run", now)
-        await r.set("crawl:optcgapi:count", str(len(optcgapi_cards)))
-        await r.set("crawl:cards:total", str(count))
-
-    background_tasks.add_task(_run_crawl)
-    return {"status": "crawl_started"}
-
-
-@router.post("/update-prices")
-async def update_prices(background_tasks: BackgroundTasks):
-    """Update pricing data from optcgapi (no full re-crawl)."""
-    from backend.crawlers.optcgapi import crawl_optcgapi
-    from backend.graph.connection import get_driver as gd
-
-    async def _update():
-        cards = await crawl_optcgapi()
-        driver = await gd()
-        count = 0
-        async with driver.session() as session:
-            for card in cards:
-                if card.get("market_price") is not None:
-                    await session.run(
-                        """
-                        MATCH (c:Card {id: $id})
-                        SET c.market_price = $market_price,
-                            c.inventory_price = $inventory_price
-                        """,
-                        id=card["id"],
-                        market_price=card.get("market_price"),
-                        inventory_price=card.get("inventory_price"),
-                    )
-                    count += 1
-
-        # Track in Redis
-        r = await get_redis()
-        now = datetime.now(timezone.utc).isoformat()
-        await r.set("crawl:optcgapi:last_run", now)
-        await r.set("crawl:optcgapi:count", str(count))
-
-    background_tasks.add_task(_update)
-    return {"status": "price_update_started"}
-
-
-@router.post("/crawl-banned")
-async def crawl_banned(background_tasks: BackgroundTasks):
-    """Crawl official banned card list and apply to Neo4j."""
-    from backend.crawlers.banned_cards import crawl_banned_cards
-    from backend.graph.builder import apply_ban_list
-    from backend.graph.connection import get_driver as gd
-
-    async def _run():
-        banned = await crawl_banned_cards()
-        driver = await gd()
-        count = await apply_ban_list(driver, banned)
-
-        # Track in Redis
-        r = await get_redis()
-        now = datetime.now(timezone.utc).isoformat()
-        await r.set("crawl:banned:last_run", now)
-        await r.set("crawl:banned:count", str(count))
-
-    background_tasks.add_task(_run)
-    return {"status": "ban_crawl_started"}
-
-
-@router.post("/crawl-bandai")
-async def crawl_bandai_endpoint(background_tasks: BackgroundTasks):
-    """Crawl card data directly from Bandai official site."""
+    Single consolidated endpoint that:
+    1. Clears all Card/Color/Family/Set/Keyword nodes from Neo4j
+    2. Crawls all card data from Bandai official site (51 series)
+    3. Downloads card images locally
+    4. Merges pricing data from optcgapi
+    5. Loads cards into Neo4j
+    6. Builds keyword graph + synergy edges
+    7. Crawls tournament data (limitlesstcg)
+    8. Computes meta stats
+    9. Applies ban list
+    """
     from backend.crawlers.bandai import crawl_bandai
-    from backend.graph.builder import create_indexes, load_cards
+    from backend.crawlers.optcgapi import crawl_optcgapi
+    from backend.crawlers.banned_cards import crawl_banned_cards
+    from backend.crawlers.limitlesstcg import crawl_limitlesstcg
+    from backend.graph.builder import (
+        create_indexes, load_cards, load_tournament_data,
+        compute_card_meta_stats, apply_ban_list,
+    )
     from backend.graph.connection import get_driver as gd
     from backend.parser.ability_parser import build_keyword_graph
     from backend.graph.edges import build_all_edges
 
     async def _run():
-        cards = await crawl_bandai(download_images=True)
         driver = await gd()
+        redis = await get_redis()
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Step 1: Clean Neo4j
+        logger.info("[Rebuild 1/8] Cleaning Neo4j...")
+        async with driver.session() as session:
+            await session.run("MATCH (n) WHERE n:Card OR n:Color OR n:Family OR n:Set OR n:Keyword DETACH DELETE n")
+        await redis.set("rebuild:status", "cleaning_done")
+
+        # Step 2: Crawl Bandai (cards + images)
+        logger.info("[Rebuild 2/8] Crawling Bandai (51 series)...")
+        await redis.set("rebuild:status", "crawling_bandai")
+        bandai_cards = await crawl_bandai(download_images=True)
+        await redis.set("crawl:bandai:last_run", now)
+        await redis.set("crawl:bandai:count", str(len(bandai_cards)))
+        logger.info("[Rebuild 2/8] Bandai: %d cards", len(bandai_cards))
+
+        # Step 3: Crawl prices from optcgapi
+        logger.info("[Rebuild 3/8] Crawling prices from optcgapi...")
+        await redis.set("rebuild:status", "crawling_prices")
+        try:
+            price_cards = await crawl_optcgapi()
+            # Merge prices into Bandai cards
+            price_map = {c["id"]: c for c in price_cards}
+            enriched = 0
+            for card in bandai_cards:
+                price_data = price_map.get(card["id"])
+                if price_data:
+                    card["market_price"] = price_data.get("market_price")
+                    card["inventory_price"] = price_data.get("inventory_price")
+                    enriched += 1
+            await redis.set("crawl:optcgapi:last_run", now)
+            await redis.set("crawl:optcgapi:count", str(len(price_cards)))
+            logger.info("[Rebuild 3/8] Prices: %d cards enriched", enriched)
+        except Exception as e:
+            logger.warning("[Rebuild 3/8] Price crawl failed (non-fatal): %s", e)
+
+        # Step 4: Load into Neo4j
+        logger.info("[Rebuild 4/8] Loading %d cards into Neo4j...", len(bandai_cards))
+        await redis.set("rebuild:status", "loading_cards")
         await create_indexes(driver)
-        await load_cards(driver, cards)
+        await load_cards(driver, bandai_cards)
+
+        # Step 5: Build keyword graph
+        logger.info("[Rebuild 5/8] Building keyword graph...")
+        await redis.set("rebuild:status", "building_keywords")
         await build_keyword_graph(driver)
+
+        # Step 6: Build synergy edges
+        logger.info("[Rebuild 6/8] Building synergy edges...")
+        await redis.set("rebuild:status", "building_edges")
         await build_all_edges(driver)
 
-        r = await get_redis()
-        now = datetime.now(timezone.utc).isoformat()
-        await r.set("crawl:bandai:last_run", now)
-        await r.set("crawl:bandai:count", str(len(cards)))
+        # Step 7: Crawl tournament data
+        logger.info("[Rebuild 7/8] Crawling tournament data...")
+        await redis.set("rebuild:status", "crawling_tournaments")
+        try:
+            tournament_data = await crawl_limitlesstcg()
+            await load_tournament_data(driver, tournament_data)
+            await compute_card_meta_stats(driver)
+            await redis.set("crawl:limitlesstcg:last_run", now)
+            await redis.set("crawl:limitlesstcg:count", str(len(tournament_data.get("decks", []))))
+            logger.info("[Rebuild 7/8] Tournaments loaded")
+        except Exception as e:
+            logger.warning("[Rebuild 7/8] Tournament crawl failed (non-fatal): %s", e)
+
+        # Step 8: Apply ban list
+        logger.info("[Rebuild 8/8] Applying ban list...")
+        await redis.set("rebuild:status", "applying_bans")
+        try:
+            banned = await crawl_banned_cards()
+            ban_count = await apply_ban_list(driver, banned)
+            await redis.set("crawl:banned:last_run", now)
+            await redis.set("crawl:banned:count", str(ban_count))
+            logger.info("[Rebuild 8/8] %d cards banned", ban_count)
+        except Exception as e:
+            logger.warning("[Rebuild 8/8] Ban list failed (non-fatal): %s", e)
+
+        await redis.set("rebuild:status", "complete")
+        await redis.set("rebuild:last_run", now)
+        logger.info("[Rebuild] Complete! %d cards loaded", len(bandai_cards))
 
     background_tasks.add_task(_run)
-    return {"status": "bandai_crawl_started"}
+    return {"status": "rebuild_started"}
+
+
+@router.get("/rebuild-status")
+async def rebuild_status():
+    """Get current rebuild progress."""
+    redis = await get_redis()
+    status = await redis.get("rebuild:status")
+    last_run = await redis.get("rebuild:last_run")
+    return {
+        "status": status or "idle",
+        "last_run": last_run,
+    }
 
 
 @router.get("/crawl-status")
@@ -145,11 +160,10 @@ async def crawl_status():
         }
 
     return {
-        "apitcg": await _source_status("apitcg"),
+        "bandai": await _source_status("bandai"),
         "optcgapi": await _source_status("optcgapi"),
         "limitlesstcg": await _source_status("limitlesstcg"),
         "banned": await _source_status("banned"),
-        "bandai": await _source_status("bandai"),
     }
 
 

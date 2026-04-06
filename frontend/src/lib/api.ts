@@ -394,23 +394,13 @@ export async function fetchCrawlStatus(): Promise<CrawlStatus> {
   return resp.json();
 }
 
-export async function triggerCrawl(): Promise<{ status: string }> {
-  const resp = await fetch(`${BASE_URL}/data/crawl`, { method: 'POST' });
+export async function triggerRebuild(): Promise<{ status: string }> {
+  const resp = await fetch(`${BASE_URL}/data/rebuild`, { method: 'POST' });
   return resp.json();
 }
 
-export async function triggerPriceUpdate(): Promise<{ status: string }> {
-  const resp = await fetch(`${BASE_URL}/data/update-prices`, { method: 'POST' });
-  return resp.json();
-}
-
-export async function triggerBanCrawl(): Promise<{ status: string }> {
-  const resp = await fetch(`${BASE_URL}/data/crawl-banned`, { method: 'POST' });
-  return resp.json();
-}
-
-export async function triggerBandaiCrawl(): Promise<{ status: string }> {
-  const resp = await fetch(`${BASE_URL}/data/crawl-bandai`, { method: 'POST' });
+export async function fetchRebuildStatus(): Promise<{ status: string; last_run: string | null }> {
+  const resp = await fetch(`${BASE_URL}/data/rebuild-status`);
   return resp.json();
 }
 

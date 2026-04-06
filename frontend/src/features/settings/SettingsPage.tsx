@@ -6,9 +6,6 @@ import {
   fetchStats,
   fetchCrawlStatus,
   fetchBannedCards,
-  triggerCrawl,
-  triggerPriceUpdate,
-  triggerBanCrawl,
   saveApiKey,
   removeApiKey,
   testApiKey,
@@ -574,33 +571,16 @@ export default function SettingsPage() {
     setSysStatus(sys);
   };
 
-  const handleCrawl = async () => {
-    await triggerCrawl();
-    showAction('Card crawl started...');
+  const handleRebuild = async () => {
+    const { triggerRebuild } = await import('../../lib/api');
+    await triggerRebuild();
+    showAction('Full rebuild started: clean → Bandai crawl → prices → index...');
     setPolling(true);
-  };
-
-  const handlePriceUpdate = async () => {
-    await triggerPriceUpdate();
-    showAction('Price update started...');
-    setPolling(true);
-  };
-
-  const handleBandaiCrawl = async () => {
-    const { triggerBandaiCrawl } = await import('../../lib/api');
-    await triggerBandaiCrawl();
-    showAction('Bandai crawl started (cards + images)...');
-    setPolling(true);
-  };
-
-  const handleBanCrawl = async () => {
-    await triggerBanCrawl();
-    showAction('Ban list update started...');
-    setPolling(true);
+    // Refresh banned cards after rebuild completes
     setTimeout(async () => {
       const banned = await fetchBannedCards();
       setBannedCards(banned);
-    }, 5000);
+    }, 120000); // 2 min estimate
   };
 
   const handleModelSwitch = async (provider: string, model: string) => {
@@ -678,17 +658,8 @@ export default function SettingsPage() {
           <Button onClick={loadAll} variant="secondary" size="sm" className="w-full">
             Refresh All
           </Button>
-          <Button onClick={handleCrawl} variant="secondary" size="sm" className="w-full">
-            Re-crawl Cards
-          </Button>
-          <Button onClick={handlePriceUpdate} variant="secondary" size="sm" className="w-full">
-            Update Prices
-          </Button>
-          <Button onClick={handleBandaiCrawl} variant="secondary" size="sm" className="w-full">
-            Crawl Bandai (Official)
-          </Button>
-          <Button onClick={handleBanCrawl} variant="danger" size="sm" className="w-full">
-            Update Ban List
+          <Button onClick={handleRebuild} variant="danger" size="sm" className="w-full">
+            Full Rebuild (Clean + Crawl + Index)
           </Button>
           {actionMsg && (
             <p className="text-[10px] text-op-ocean mt-1">{actionMsg}</p>
@@ -771,19 +742,10 @@ export default function SettingsPage() {
                   </h4>
                   <div className="space-y-2">
                     {[
-                      { key: 'apitcg' as const, label: 'ApiTCG (Cards)', src: crawlStatus.apitcg },
-                      {
-                        key: 'optcgapi' as const,
-                        label: 'OptcgAPI (Prices)',
-                        src: crawlStatus.optcgapi,
-                      },
-                      {
-                        key: 'limitlesstcg' as const,
-                        label: 'LimitlessTCG (Meta)',
-                        src: crawlStatus.limitlesstcg,
-                      },
-                      { key: 'banned' as const, label: 'Bandai (Ban List)', src: crawlStatus.banned },
                       { key: 'bandai' as const, label: 'Bandai Official (Cards + Images)', src: crawlStatus.bandai ?? { last_run: null, count: 0 } },
+                      { key: 'optcgapi' as const, label: 'OptcgAPI (Prices)', src: crawlStatus.optcgapi },
+                      { key: 'limitlesstcg' as const, label: 'LimitlessTCG (Tournaments)', src: crawlStatus.limitlesstcg },
+                      { key: 'banned' as const, label: 'Ban List', src: crawlStatus.banned },
                     ].map(({ key, label, src }) => (
                       <div
                         key={key}
@@ -843,8 +805,8 @@ export default function SettingsPage() {
                   <div className="text-center">
                     <p className="text-sm">No banned cards found</p>
                     <p className="text-xs mt-1 mb-3">Fetch the ban list from Bandai</p>
-                    <Button onClick={handleBanCrawl} variant="danger" size="sm">
-                      Fetch Ban List
+                    <Button onClick={handleRebuild} variant="danger" size="sm">
+                      Full Rebuild
                     </Button>
                   </div>
                 </div>
