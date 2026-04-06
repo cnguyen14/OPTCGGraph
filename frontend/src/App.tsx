@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useDeckState } from './hooks/useDeckState';
+import { useSimulation } from './hooks/useSimulation';
 import SettingsPage from './features/settings/SettingsPage';
 import CardBrowser from './features/cards/CardBrowser';
 import DeckBuilder from './features/deck-builder/DeckBuilder';
@@ -50,6 +51,10 @@ function App() {
   // Deck state lifted to App so FloatingChat can access it
   const deckState = useDeckState();
 
+  // Simulation state lifted to App so it survives page navigation
+  const sim = useSimulation();
+  const lastDeckLoadRef = useRef(0); // Prevent rapid-fire update_deck_list
+
   // Reset chat session when leader changes (new leader = new conversation)
   useEffect(() => {
     if (!deckState.leader) {
@@ -62,6 +67,7 @@ function App() {
   const [chatOpen, setChatOpen] = useState(false);
   const [cardListModal, setCardListModal] = useState<{ cardIds: string[]; title: string } | null>(null);
   const [swapSuggestions, setSwapSuggestions] = useState<SwapSuggestion[] | null>(null);
+  const [noSynergyCardIds, setNoSynergyCardIds] = useState<string[]>([]);
 
   // Build deck card IDs for chat context
   const deckCardIds: string[] = [];
@@ -75,8 +81,13 @@ function App() {
     if (update.action === 'update_deck_list' && update.payload) {
       const { leader_id, cards } = update.payload as { leader_id?: string; cards?: string[] };
       if (leader_id && cards && cards.length > 0) {
+        // Debounce: ignore duplicate update_deck_list within 5s (runtime auto-emits + agent may also emit)
+        const now = Date.now();
+        if (now - lastDeckLoadRef.current < 5000) return;
+        lastDeckLoadRef.current = now;
+
         // Only load if deck is empty or leader changed — prevent duplicate loads
-        const currentCount = deckState.entries.reduce((sum, e) => sum + e.quantity, 0);
+        const currentCount = deckState.totalCards;
         const sameLeader = deckState.leader?.id === leader_id;
         if (currentCount === 0 || !sameLeader) {
           deckState.loadDeckFromIds(leader_id, cards);
@@ -178,6 +189,7 @@ function App() {
           clientId={getClientId()}
           leaderId={deckState.leader?.id}
           deckCardIds={deckCardIds.length > 0 ? deckCardIds : undefined}
+          noSynergyCardIds={noSynergyCardIds.length > 0 ? noSynergyCardIds : undefined}
           onUiUpdate={handleUiUpdate}
           onOpenChange={setChatOpen}
         />
@@ -192,7 +204,7 @@ function App() {
           <CardBrowser onCardSelect={setSelectedCard} />
         )}
         {activeTab === 'deck' && (
-          <DeckBuilder onCardSelect={setSelectedCard} deckState={deckState} chatOpen={chatOpen} />
+          <DeckBuilder onCardSelect={setSelectedCard} deckState={deckState} chatOpen={chatOpen} onNoSynergyCards={setNoSynergyCardIds} />
         )}
         {activeTab === 'mydecks' && (
           <MyDecksPage
@@ -223,6 +235,7 @@ function App() {
               simDeck?.cardIds ??
               (deckCardIds.length === 50 ? deckCardIds : undefined)
             }
+            sim={sim}
           />
         )}
       </PageTransition>

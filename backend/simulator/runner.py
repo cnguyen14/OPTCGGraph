@@ -294,7 +294,7 @@ class SimulationRunner:
             p1_leader=p1_leader.name,
             p2_leader=p2_leader.name,
             card_stats={k: v.__dict__ for k, v in card_stats.items()},  # type: ignore[assignment,misc]
-            sample_games=results[:3],
+            sample_games=results,
         )
 
         # Close tracer
@@ -379,24 +379,58 @@ class SimulationRunner:
         """Aggregate card performance across all games."""
         stats: dict[str, CardStat] = {}
 
+        def _ensure(card_id: str) -> CardStat:
+            if card_id not in stats:
+                stats[card_id] = CardStat(card_id=card_id, card_name=card_id)
+            return stats[card_id]
+
         for result in results:
+            # Cards played
             for card_id, times in result.p1_cards_played.items():
-                if card_id not in stats:
-                    stats[card_id] = CardStat(card_id=card_id, card_name=card_id)
-                s = stats[card_id]
+                s = _ensure(card_id)
                 s.times_played += times
                 s.total_games += 1
                 if result.winner == "p1":
                     s.times_in_winning_game += 1
 
             for card_id, times in result.p2_cards_played.items():
-                if card_id not in stats:
-                    stats[card_id] = CardStat(card_id=card_id, card_name=card_id)
-                s = stats[card_id]
+                s = _ensure(card_id)
                 s.times_played += times
                 s.total_games += 1
                 if result.winner == "p2":
                     s.times_in_winning_game += 1
+
+            # Cards drawn
+            for card_id, times in result.p1_cards_drawn.items():
+                _ensure(card_id).times_drawn += times
+            for card_id, times in result.p2_cards_drawn.items():
+                _ensure(card_id).times_drawn += times
+
+            # Cards KO'd
+            for card_id, times in result.cards_koed.items():
+                _ensure(card_id).times_koed += times
+
+            # Cards used as counter
+            for card_id, times in result.cards_countered.items():
+                _ensure(card_id).times_countered_with += times
+
+            # Cards used as blocker
+            for card_id, times in result.cards_blocked.items():
+                _ensure(card_id).times_blocked_with += times
+
+            # Per-card damage dealt to leader
+            for card_id, times in result.cards_damage.items():
+                _ensure(card_id).damage_contributed += times
+
+            # Per-card effects triggered
+            for card_id, times in result.cards_effects.items():
+                _ensure(card_id).effects_triggered += times
+
+            # Turn played tracking (for avg_turn_played)
+            for card_id, turns in result.card_play_turns.items():
+                s = _ensure(card_id)
+                for turn in turns:
+                    s.record_play_turn(turn)
 
         return stats
 

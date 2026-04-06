@@ -1,20 +1,21 @@
 import { useState, useEffect } from 'react';
-import { useSimulation } from '../../hooks/useSimulation';
 import { checkApiBalance, fetchProviderModels } from '../../lib/api';
+import type { SimulationHandle } from '../../hooks/useSimulation';
 import type { ModelInfo } from '../../types';
 import DeckSelector from './DeckSelector';
 import type { SelectedDeck } from './DeckSelector';
 import SimulationProgress from './SimulationProgress';
 import LiveGameFeed from './LiveGameFeed';
 import SimulatorDashboard from './SimulatorDashboard';
-import { Button, Select, Input, Spinner } from '../../components/ui';
+import { Button, Select, Input } from '../../components/ui';
 
 interface Props {
   currentDeckLeaderId?: string;
   currentDeckCardIds?: string[];
+  sim: SimulationHandle;
 }
 
-export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds }: Props) {
+export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds, sim }: Props) {
   const [deck1, setDeck1] = useState<SelectedDeck | null>(null);
   const [deck2, setDeck2] = useState<SelectedDeck | null>(null);
   const [mode, setMode] = useState<'virtual' | 'real'>('virtual');
@@ -27,8 +28,6 @@ export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds 
   const [modelsLoading, setModelsLoading] = useState(false);
   const [concurrency, setConcurrency] = useState(10);
   const [hasBalance, setHasBalance] = useState<boolean | null>(null);
-
-  const sim = useSimulation();
 
   // Check API balance when switching to Real mode (only for Claude provider)
   useEffect(() => {
@@ -211,7 +210,19 @@ export default function SimulatorPage({ currentDeckLeaderId, currentDeckCardIds 
             </Button>
           ) : (
             <div className="flex items-center gap-2 text-xs text-op-ocean">
-              <Spinner size="sm" />
+              <svg viewBox="0 0 24 24" className="w-4 h-4 animate-[wheel-spin_3s_linear_infinite] shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="12" cy="12" r="9" />
+                <circle cx="12" cy="12" r="2" />
+                {[0, 45, 90, 135, 180, 225, 270, 315].map((angle) => (
+                  <line
+                    key={angle}
+                    x1={12 + 2.5 * Math.cos((angle * Math.PI) / 180)}
+                    y1={12 + 2.5 * Math.sin((angle * Math.PI) / 180)}
+                    x2={12 + 8.5 * Math.cos((angle * Math.PI) / 180)}
+                    y2={12 + 8.5 * Math.sin((angle * Math.PI) / 180)}
+                  />
+                ))}
+              </svg>
               <span className="truncate">
                 {sim.status === 'loading'
                   ? 'Loading...'

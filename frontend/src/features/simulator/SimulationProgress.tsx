@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { SimulationProgress as ProgressData } from '../../types';
 import { GlassCard } from '../../components/ui';
+import BattleAnimation, { CrossedSwords } from './BattleAnimation';
 
 interface Props {
   progress: ProgressData;
@@ -39,17 +40,19 @@ export default function SimulationProgress({ progress, p1Leader, p2Leader, start
 
   return (
     <GlassCard variant="subtle" className="p-6">
-      <div className="flex items-center justify-between mb-4">
+      {/* Pirate battle animation */}
+      <BattleAnimation
+        progress={pct}
+        completed={progress.completed}
+        total={progress.total}
+        parallelGames={parallelGames}
+      />
+
+      <div className="flex items-center justify-between mb-4 mt-4">
         <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
-          <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+          <CrossedSwords />
           Battle Progress
         </h3>
-        <span className="text-xs text-text-secondary">
-          {progress.completed}/{progress.total} games
-          {parallelGames && parallelGames > 1 && (
-            <span className="text-text-muted ml-1">({parallelGames}x parallel)</span>
-          )}
-        </span>
       </div>
 
       {/* Progress bar */}

@@ -46,6 +46,8 @@ const INITIAL_PROGRESS: SimulationProgress = {
   draws: 0,
 };
 
+export type SimulationHandle = ReturnType<typeof useSimulation>;
+
 export function useSimulation() {
   const [state, setState] = useState<SimulationState>({
     status: 'idle',

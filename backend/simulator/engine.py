@@ -87,6 +87,8 @@ class GameEngine:
         self._cards_countered: dict[str, int] = {}  # card_id -> times used as counter
         self._cards_blocked: dict[str, int] = {}  # card_id -> times used as blocker
         self._card_play_turns: dict[str, list[int]] = {}  # card_id -> [turn played]
+        self._cards_damage: dict[str, int] = {}  # card_id -> life damage dealt
+        self._cards_effects: dict[str, int] = {}  # card_id -> effects triggered
 
     def init_game(
         self,
@@ -154,6 +156,8 @@ class GameEngine:
         self._cards_countered = {}
         self._cards_blocked = {}
         self._card_play_turns = {}
+        self._cards_damage = {}
+        self._cards_effects = {}
 
         return self.state
 
@@ -348,6 +352,12 @@ class GameEngine:
             p2_effects_fired=self._effects_p2,
             p1_cards_drawn=dict(self._cards_drawn_p1),
             p2_cards_drawn=dict(self._cards_drawn_p2),
+            cards_koed=dict(self._cards_koed),
+            cards_countered=dict(self._cards_countered),
+            cards_blocked=dict(self._cards_blocked),
+            card_play_turns={k: list(v) for k, v in self._card_play_turns.items()},
+            cards_damage=dict(self._cards_damage),
+            cards_effects=dict(self._cards_effects),
         )
 
     # --- Phase implementations ---
@@ -809,11 +819,14 @@ class GameEngine:
         if attacker.effective_power >= defense_power:
             # Attack succeeds
             if target == defender_player.leader:
-                # Track damage dealt
+                # Track damage dealt (total + per-card)
                 if attacker_player.player_id == "p1":
                     self._damage_p1 += 1
                 else:
                     self._damage_p2 += 1
+                self._cards_damage[attacker.card_id] = (
+                    self._cards_damage.get(attacker.card_id, 0) + 1
+                )
                 self._deal_life_damage(attacker, defender_player, attacker_player)
                 # Double Attack
                 if self.effects.has_double_attack(attacker) and defender_player.life:
@@ -821,6 +834,9 @@ class GameEngine:
                         self._damage_p1 += 1
                     else:
                         self._damage_p2 += 1
+                    self._cards_damage[attacker.card_id] = (
+                        self._cards_damage.get(attacker.card_id, 0) + 1
+                    )
                     self._deal_life_damage(attacker, defender_player, attacker_player)
             else:
                 # KO the character
@@ -913,12 +929,16 @@ class GameEngine:
         score -= len(opponent.characters) * 12.0
         return round(score, 1)
 
-    def track_effect_fired(self, player_id: str) -> None:
+    def track_effect_fired(self, player_id: str, card_id: str = "") -> None:
         """Increment effect counter for a player (called by EffectHandler)."""
         if player_id == "p1":
             self._effects_p1 += 1
         else:
             self._effects_p2 += 1
+        if card_id:
+            self._cards_effects[card_id] = (
+                self._cards_effects.get(card_id, 0) + 1
+            )
 
     # --- Utility ---
 

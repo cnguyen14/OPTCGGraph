@@ -539,6 +539,25 @@ export interface MatchupSpread {
   num_games: number;
 }
 
+export interface SwapCandidate {
+  card_id: string;
+  name: string;
+  image: string;
+  power: number;
+  cost: number;
+  counter: number;
+  synergy_count: number;
+}
+
+export interface ReplacementSuggestion {
+  remove_id: string;
+  remove_name: string;
+  remove_image: string;
+  role_needed: string;
+  reason: string;
+  candidates: SwapCandidate[];
+}
+
 export interface DeckHealthAnalysis {
   summary: string;
   consistency_rating: string;
@@ -555,6 +574,7 @@ export interface DeckHealthAnalysis {
   card_health: CardHealthEntry[];
   top_synergies: SynergyPair[];
   matchup_spread: MatchupSpread[];
+  suggested_swaps: ReplacementSuggestion[];
 }
 
 export interface DetailedSimStats {

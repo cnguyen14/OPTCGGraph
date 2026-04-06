@@ -422,6 +422,132 @@ function CardAnalysisTab({ result }: { result: SimulationResult }) {
 // Tab 3: Game Timeline
 // ---------------------------------------------------------------------------
 
+function TimelineLineChart({
+  title,
+  snapshots,
+  getP1,
+  getP2,
+  maxVal,
+  p1Color,
+  p2Color,
+}: {
+  title: string;
+  snapshots: TurnSnapshot[];
+  getP1: (s: TurnSnapshot) => number;
+  getP2: (s: TurnSnapshot) => number;
+  maxVal: number;
+  p1Color: string;
+  p2Color: string;
+}) {
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+
+  const W = 300;
+  const H = 140;
+  const padL = 28;
+  const padR = 8;
+  const padT = 8;
+  const padB = 22;
+  const chartW = W - padL - padR;
+  const chartH = H - padT - padB;
+
+  const safeMax = Math.max(maxVal, 1);
+  const n = snapshots.length;
+
+  const toX = (i: number) => padL + (n > 1 ? (i / (n - 1)) * chartW : chartW / 2);
+  const toY = (v: number) => padT + chartH - (v / safeMax) * chartH;
+
+  const buildPoints = (getter: (s: TurnSnapshot) => number) =>
+    snapshots.map((s, i) => `${toX(i)},${toY(getter(s))}`).join(' ');
+
+  const buildAreaPoints = (getter: (s: TurnSnapshot) => number) => {
+    const line = snapshots.map((s, i) => `${toX(i)},${toY(getter(s))}`);
+    return [...line, `${toX(n - 1)},${padT + chartH}`, `${toX(0)},${padT + chartH}`].join(' ');
+  };
+
+  // Y-axis grid lines (3 levels)
+  const yTicks = [0, Math.round(safeMax / 2), safeMax];
+
+  return (
+    <div className="glass-subtle p-4">
+      <h4 className="text-xs font-semibold text-white mb-2">{title}</h4>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="xMidYMid meet">
+        {/* Grid lines */}
+        {yTicks.map((v) => (
+          <g key={v}>
+            <line
+              x1={padL} y1={toY(v)} x2={W - padR} y2={toY(v)}
+              stroke="rgba(255,255,255,0.08)" strokeWidth="0.5"
+            />
+            <text x={padL - 3} y={toY(v) + 3} textAnchor="end" fontSize="7" fill="rgba(255,255,255,0.3)">
+              {v}
+            </text>
+          </g>
+        ))}
+
+        {/* Area fills */}
+        <polygon points={buildAreaPoints(getP1)} fill={p1Color} opacity="0.12" />
+        <polygon points={buildAreaPoints(getP2)} fill={p2Color} opacity="0.12" />
+
+        {/* Lines */}
+        <polyline points={buildPoints(getP1)} fill="none" stroke={p1Color} strokeWidth="2" strokeLinejoin="round" />
+        <polyline points={buildPoints(getP2)} fill="none" stroke={p2Color} strokeWidth="2" strokeLinejoin="round" />
+
+        {/* Data points */}
+        {snapshots.map((s, i) => (
+          <g key={i}>
+            <circle cx={toX(i)} cy={toY(getP1(s))} r="2.5" fill={p1Color} stroke="rgba(0,0,0,0.3)" strokeWidth="0.5" />
+            <circle cx={toX(i)} cy={toY(getP2(s))} r="2.5" fill={p2Color} stroke="rgba(0,0,0,0.3)" strokeWidth="0.5" />
+          </g>
+        ))}
+
+        {/* X-axis turn labels */}
+        {snapshots.map((s, i) => {
+          // Show every label if <=10 turns, every other if <=20, every 3rd otherwise
+          const step = n <= 10 ? 1 : n <= 20 ? 2 : 3;
+          if (i % step !== 0 && i !== n - 1) return null;
+          return (
+            <text key={i} x={toX(i)} y={H - 4} textAnchor="middle" fontSize="7" fill="rgba(255,255,255,0.35)">
+              {s.turn}
+            </text>
+          );
+        })}
+
+        {/* Hover zones */}
+        {snapshots.map((_, i) => (
+          <rect
+            key={i}
+            x={toX(i) - chartW / n / 2}
+            y={padT}
+            width={chartW / n}
+            height={chartH}
+            fill="transparent"
+            onMouseEnter={() => setHoverIdx(i)}
+            onMouseLeave={() => setHoverIdx(null)}
+          />
+        ))}
+
+        {/* Hover tooltip */}
+        {hoverIdx !== null && (() => {
+          const s = snapshots[hoverIdx];
+          const x = Math.min(Math.max(toX(hoverIdx), padL + 30), W - padR - 30);
+          return (
+            <g>
+              <line x1={toX(hoverIdx)} y1={padT} x2={toX(hoverIdx)} y2={padT + chartH} stroke="rgba(255,255,255,0.2)" strokeWidth="0.5" strokeDasharray="2" />
+              <rect x={x - 30} y={padT - 2} width="60" height="24" rx="3" fill="rgba(0,0,0,0.8)" stroke="rgba(255,255,255,0.15)" strokeWidth="0.5" />
+              <text x={x} y={padT + 8} textAnchor="middle" fontSize="7" fill={p1Color}>P1: {getP1(s)}</text>
+              <text x={x} y={padT + 17} textAnchor="middle" fontSize="7" fill={p2Color}>P2: {getP2(s)}</text>
+            </g>
+          );
+        })()}
+      </svg>
+      <div className="flex justify-center gap-4 mt-1 text-[9px]">
+        <span style={{ color: p1Color }}>P1</span>
+        <span style={{ color: p2Color }}>P2</span>
+      </div>
+    </div>
+  );
+}
+
 function GameTimelineTab({ result }: { result: SimulationResult }) {
   const sampleGames = result.sample_games ?? [];
   const [selectedGame, setSelectedGame] = useState(0);
@@ -473,105 +599,33 @@ function GameTimelineTab({ result }: { result: SimulationResult }) {
       {/* Charts */}
       {snapshots.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Life Points Chart */}
-          <div className="glass-subtle p-4">
-            <h4 className="text-xs font-semibold text-white mb-3">Life Points</h4>
-            <div className="flex items-end gap-px h-32">
-              {snapshots.map((s, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-0.5 group relative">
-                  <div className="w-full flex gap-px" style={{ height: '100%' }}>
-                    <div className="flex-1 flex flex-col justify-end">
-                      <div
-                        className="bg-blue-500/60 rounded-t-sm transition-all"
-                        style={{ height: `${(s.p1.life / maxLife) * 100}%` }}
-                      />
-                    </div>
-                    <div className="flex-1 flex flex-col justify-end">
-                      <div
-                        className="bg-red-500/60 rounded-t-sm transition-all"
-                        style={{ height: `${(s.p2.life / maxLife) * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                  <span className="text-[8px] text-gray-600">{s.turn}</span>
-                  {/* Tooltip */}
-                  <div className="absolute bottom-full mb-1 hidden group-hover:block bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[9px] text-gray-300 whitespace-nowrap z-10">
-                    T{s.turn}: P1={s.p1.life} P2={s.p2.life}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="flex justify-center gap-4 mt-2 text-[9px]">
-              <span className="text-blue-400">P1</span>
-              <span className="text-red-400">P2</span>
-            </div>
-          </div>
-
-          {/* Board Power Chart */}
-          <div className="glass-subtle p-4">
-            <h4 className="text-xs font-semibold text-white mb-3">Board Power</h4>
-            <div className="flex items-end gap-px h-32">
-              {snapshots.map((s, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-0.5 group relative">
-                  <div className="w-full flex gap-px" style={{ height: '100%' }}>
-                    <div className="flex-1 flex flex-col justify-end">
-                      <div
-                        className="bg-blue-400/50 rounded-t-sm transition-all"
-                        style={{ height: `${maxPower > 0 ? (s.p1.power / maxPower) * 100 : 0}%` }}
-                      />
-                    </div>
-                    <div className="flex-1 flex flex-col justify-end">
-                      <div
-                        className="bg-red-400/50 rounded-t-sm transition-all"
-                        style={{ height: `${maxPower > 0 ? (s.p2.power / maxPower) * 100 : 0}%` }}
-                      />
-                    </div>
-                  </div>
-                  <span className="text-[8px] text-gray-600">{s.turn}</span>
-                  <div className="absolute bottom-full mb-1 hidden group-hover:block bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[9px] text-gray-300 whitespace-nowrap z-10">
-                    T{s.turn}: P1={s.p1.power} P2={s.p2.power}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="flex justify-center gap-4 mt-2 text-[9px]">
-              <span className="text-blue-400">P1</span>
-              <span className="text-red-400">P2</span>
-            </div>
-          </div>
-
-          {/* DON Chart */}
-          <div className="glass-subtle p-4">
-            <h4 className="text-xs font-semibold text-white mb-3">DON Available</h4>
-            <div className="flex items-end gap-px h-32">
-              {snapshots.map((s, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-0.5 group relative">
-                  <div className="w-full flex gap-px" style={{ height: '100%' }}>
-                    <div className="flex-1 flex flex-col justify-end">
-                      <div
-                        className="bg-amber-500/50 rounded-t-sm transition-all"
-                        style={{ height: `${maxDon > 0 ? (s.p1.don / maxDon) * 100 : 0}%` }}
-                      />
-                    </div>
-                    <div className="flex-1 flex flex-col justify-end">
-                      <div
-                        className="bg-amber-700/50 rounded-t-sm transition-all"
-                        style={{ height: `${maxDon > 0 ? (s.p2.don / maxDon) * 100 : 0}%` }}
-                      />
-                    </div>
-                  </div>
-                  <span className="text-[8px] text-gray-600">{s.turn}</span>
-                  <div className="absolute bottom-full mb-1 hidden group-hover:block bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[9px] text-gray-300 whitespace-nowrap z-10">
-                    T{s.turn}: P1={s.p1.don} P2={s.p2.don}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="flex justify-center gap-4 mt-2 text-[9px]">
-              <span className="text-amber-400">P1</span>
-              <span className="text-amber-600">P2</span>
-            </div>
-          </div>
+          <TimelineLineChart
+            title="Life Points"
+            snapshots={snapshots}
+            getP1={(s) => s.p1.life}
+            getP2={(s) => s.p2.life}
+            maxVal={maxLife}
+            p1Color="#3b82f6"
+            p2Color="#ef4444"
+          />
+          <TimelineLineChart
+            title="Board Power"
+            snapshots={snapshots}
+            getP1={(s) => s.p1.power}
+            getP2={(s) => s.p2.power}
+            maxVal={maxPower}
+            p1Color="#60a5fa"
+            p2Color="#f87171"
+          />
+          <TimelineLineChart
+            title="DON Available"
+            snapshots={snapshots}
+            getP1={(s) => s.p1.don}
+            getP2={(s) => s.p2.don}
+            maxVal={maxDon}
+            p1Color="#f59e0b"
+            p2Color="#b45309"
+          />
         </div>
       )}
 

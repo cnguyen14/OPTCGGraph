@@ -486,18 +486,19 @@ export default function LiveGameFeed({ gameResults, p1Leader, p2Leader, totalGam
   const batchSize = parallelGames && parallelGames > 1 ? Math.min(parallelGames, remaining) : 1;
   const hasGames = completed > 0;
 
+  // Don't render anything until at least one game is completed
+  if (!hasGames) return null;
+
   return (
     <div className="space-y-2">
       <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
         Game Log
-        {isRunning && (
+        {isRunning && remaining > 0 && (
           <span className="flex items-center gap-1.5 text-xs font-normal text-text-secondary">
             <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
-            {remaining > 0
-              ? batchSize > 1
-                ? `${batchSize} games running in parallel (${completed}/${totalGames} done)`
-                : `Game ${completed + 1} of ${totalGames} in progress...`
-              : 'Finishing up...'}
+            {batchSize > 1
+              ? `${completed}/${totalGames} done`
+              : `Game ${completed + 1} of ${totalGames}`}
           </span>
         )}
       </h3>
@@ -523,14 +524,6 @@ export default function LiveGameFeed({ gameResults, p1Leader, p2Leader, totalGam
             </span>
           </div>
         </GlassCard>
-      )}
-
-      {!hasGames && isRunning && (
-        <div className="text-xs text-text-muted text-center py-4">
-          {batchSize > 1
-            ? `Running ${batchSize} games in parallel — waiting for batch to complete...`
-            : 'Waiting for first game to complete...'}
-        </div>
       )}
     </div>
   );

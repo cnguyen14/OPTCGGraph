@@ -188,3 +188,57 @@
 .landing-enter {
   animation: landing-enter 0.5s var(--ease-glass) both;
 }
+
+/* ===========================
+   Battle Simulator Animations
+   =========================== */
+
+/* Ocean wave — translates SVG left to create infinite scroll */
+@keyframes ocean-wave {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* Ship rocking on waves */
+@keyframes ship-rock {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(4deg); }
+  75% { transform: rotate(-4deg); }
+}
+
+/* Ship vertical bobbing */
+@keyframes ship-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+/* Sail flutter */
+@keyframes sail-flutter {
+  0%, 100% { transform: scaleX(1); }
+  50% { transform: scaleX(0.92); }
+}
+
+/* Flag wave */
+@keyframes flag-wave {
+  0%, 100% { transform: scaleX(1) skewY(0deg); }
+  25% { transform: scaleX(0.9) skewY(2deg); }
+  75% { transform: scaleX(1.05) skewY(-1deg); }
+}
+
+/* Crossed swords glow */
+@keyframes sword-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 2px rgba(148, 163, 184, 0.3));
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 6px rgba(148, 163, 184, 0.6));
+    transform: scale(1.08);
+  }
+}
+
+/* Ship wheel spin for sidebar */
+@keyframes wheel-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}

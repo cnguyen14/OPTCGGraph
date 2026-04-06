@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { analyzeDeck, getDeckSimHistory, improveDeck, fetchSimDetail, analyzeMatchup, aggregateDeckAnalysis, clearSimHistory, fetchCard } from '../../lib/api';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { analyzeDeck, getDeckSimHistory, improveDeck, fetchSimDetail, analyzeMatchup, aggregateDeckAnalysis, clearSimHistory, fetchCard, updateDeck } from '../../lib/api';
 import type { SimHistoryEntry, DeckImprovement, MatchupAnalysis, DeckHealthAnalysis, Card, DeckEntry } from '../../types';
 import DeckMap from '../deck-builder/DeckMap';
 import { GlassCard, Button } from '../../components/ui';
@@ -1054,6 +1054,14 @@ function DeckHealthPanel({ health }: { health: DeckHealthAnalysis }) {
   );
 }
 
+interface MatchupGroup {
+  opponent: string;
+  totalGames: number;
+  aggregateWinRate: number;
+  avgTurns: number;
+  sims: SimHistoryEntry[];
+}
+
 function SimHistoryTab({
   leaderId,
   cardIds,
@@ -1070,6 +1078,7 @@ function SimHistoryTab({
     [leaderId, cardIds],
   );
 
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [expandedSimId, setExpandedSimId] = useState<string | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [healthError, setHealthError] = useState<string | null>(null);
@@ -1097,10 +1106,48 @@ function SimHistoryTab({
       .finally(() => setClearing(false));
   }, [leaderId, cardIds, retry, onHealthReportChange]);
 
+  const entries: SimHistoryEntry[] = data ?? [];
+
+  // --- Summary stats ---
+  const summary = useMemo(() => {
+    if (entries.length === 0) return null;
+    const totalGames = entries.reduce((s, e) => s + e.num_games, 0);
+    const weightedWinRate = totalGames > 0
+      ? entries.reduce((s, e) => s + e.win_rate * e.num_games, 0) / totalGames
+      : 0;
+    const weightedAvgTurns = totalGames > 0
+      ? entries.reduce((s, e) => s + e.avg_turns * e.num_games, 0) / totalGames
+      : 0;
+    return { totalSims: entries.length, totalGames, weightedWinRate, weightedAvgTurns };
+  }, [entries]);
+
+  // --- Group by opponent ---
+  const matchupGroups = useMemo<MatchupGroup[]>(() => {
+    const map = new Map<string, SimHistoryEntry[]>();
+    for (const entry of entries) {
+      const key = entry.opponent_leader;
+      const arr = map.get(key);
+      if (arr) arr.push(entry);
+      else map.set(key, [entry]);
+    }
+    const groups: MatchupGroup[] = [];
+    for (const [opponent, sims] of map) {
+      const totalGames = sims.reduce((s, e) => s + e.num_games, 0);
+      const aggregateWinRate = totalGames > 0
+        ? sims.reduce((s, e) => s + e.win_rate * e.num_games, 0) / totalGames
+        : 0;
+      const avgTurns = totalGames > 0
+        ? sims.reduce((s, e) => s + e.avg_turns * e.num_games, 0) / totalGames
+        : 0;
+      groups.push({ opponent, totalGames, aggregateWinRate, avgTurns, sims });
+    }
+    // Sort by total games descending
+    groups.sort((a, b) => b.totalGames - a.totalGames);
+    return groups;
+  }, [entries]);
+
   if (loading) return <Spinner text="Loading simulation history..." />;
   if (error) return <ErrorBox message={error} onRetry={retry} />;
-
-  const entries: SimHistoryEntry[] = data ?? [];
 
   if (entries.length === 0) {
     return (
@@ -1112,40 +1159,53 @@ function SimHistoryTab({
     );
   }
 
+  const winRateColor = (rate: number) =>
+    rate > 60 ? 'text-green-400' : rate >= 40 ? 'text-yellow-400' : 'text-red-400';
+
+  const winRateBarColor = (rate: number) =>
+    rate > 60 ? 'bg-green-500' : rate >= 40 ? 'bg-yellow-500' : 'bg-red-500';
+
   return (
-    <div className="space-y-2">
-      {/* Deck Health Report */}
-      {entries.length >= 2 && !healthReport && (
-        <div className="flex items-center justify-between bg-gray-800/40 border border-gray-700/40 rounded-lg px-4 py-3 mb-2">
-          <div>
-            <span className="text-xs font-medium text-gray-300">Deck Health Report</span>
-            <span className="text-[10px] text-gray-500 ml-2">Aggregate analysis across {entries.length} simulations</span>
-          </div>
-          <button
-            onClick={handleHealthReport}
-            disabled={healthLoading}
-            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs px-4 py-1.5 rounded transition-colors"
-          >
-            {healthLoading ? 'Analyzing...' : 'Generate Report'}
-          </button>
+    <div className="space-y-3">
+      {/* Summary stat cards */}
+      {summary && (
+        <div className="grid grid-cols-4 gap-2">
+          <GlassCard className="p-3 text-center">
+            <p className="text-lg font-bold text-gray-200">{summary.totalSims}</p>
+            <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Total Sims</p>
+          </GlassCard>
+          <GlassCard className="p-3 text-center">
+            <p className="text-lg font-bold text-gray-200">{summary.totalGames}</p>
+            <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Total Games</p>
+          </GlassCard>
+          <GlassCard className="p-3 text-center">
+            <p className={`text-lg font-bold ${winRateColor(summary.weightedWinRate)}`}>
+              {summary.weightedWinRate.toFixed(1)}%
+            </p>
+            <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Win Rate</p>
+          </GlassCard>
+          <GlassCard className="p-3 text-center">
+            <p className="text-lg font-bold text-gray-200">{summary.weightedAvgTurns.toFixed(1)}</p>
+            <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Avg Turns</p>
+          </GlassCard>
         </div>
       )}
+
+      {/* Health report (if exists) */}
       {healthError && (
-        <div className="bg-red-900/20 border border-red-900/40 rounded-lg px-4 py-2 text-xs text-red-400 mb-2">
+        <div className="bg-red-900/20 border border-red-900/40 rounded-lg px-4 py-2 text-xs text-red-400">
           {healthError}
         </div>
       )}
       {healthReport && <DeckHealthPanel health={healthReport} />}
 
-      {/* Header row + Clear button */}
+      {/* Matchup groups header + Clear button */}
       <div className="flex items-center justify-between px-3 py-1">
-        <div className="grid grid-cols-6 gap-2 flex-1 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+        <div className="grid grid-cols-4 gap-2 flex-1 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
           <span>Opponent</span>
-          <span className="text-center">Win Rate</span>
+          <span>Win Rate</span>
           <span className="text-center">Games</span>
           <span className="text-center">Avg Turns</span>
-          <span className="text-center">Mode</span>
-          <span className="text-right">Date</span>
         </div>
         <button
           onClick={handleClearHistory}
@@ -1156,59 +1216,135 @@ function SimHistoryTab({
         </button>
       </div>
 
-      {entries.map((entry) => {
-        const winColor =
-          entry.win_rate > 60
-            ? 'text-green-400'
-            : entry.win_rate >= 40
-              ? 'text-yellow-400'
-              : 'text-red-400';
-        const isExpanded = expandedSimId === entry.sim_id;
+      {/* Grouped matchup rows */}
+      {matchupGroups.map((group) => {
+        const isGroupExpanded = expandedGroup === group.opponent;
 
         return (
-          <div key={entry.sim_id}>
+          <div key={group.opponent}>
+            {/* Group row */}
             <div
-              onClick={() => setExpandedSimId(isExpanded ? null : entry.sim_id)}
-              className={`grid grid-cols-6 gap-2 items-center rounded-lg px-3 py-2.5 text-xs cursor-pointer transition-colors ${
-                isExpanded
+              onClick={() => setExpandedGroup(isGroupExpanded ? null : group.opponent)}
+              className={`grid grid-cols-4 gap-2 items-center rounded-lg px-3 py-2.5 text-xs cursor-pointer transition-colors ${
+                isGroupExpanded
                   ? 'bg-gray-700/60 border border-blue-500/40'
                   : 'bg-gray-800/50 border border-gray-700/40 hover:bg-gray-700/30'
               }`}
             >
-              <span className="text-gray-300 truncate" title={entry.opponent_leader}>
-                {entry.opponent_leader}
-              </span>
-              <span className={`text-center font-semibold ${winColor}`}>
-                {entry.win_rate.toFixed(1)}%
-              </span>
-              <span className="text-center text-gray-400">{entry.num_games}</span>
-              <span className="text-center text-gray-400">{entry.avg_turns.toFixed(1)}</span>
-              <span className="text-center text-gray-400 capitalize">{entry.mode}</span>
-              <span className="text-right text-gray-500 flex items-center justify-end gap-1.5">
-                {new Date(entry.timestamp).toLocaleDateString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                })}
+              {/* Opponent name + chevron */}
+              <span className="text-gray-300 truncate flex items-center gap-1.5" title={group.opponent}>
                 <svg
-                  className={`w-3 h-3 text-gray-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                  className={`w-3 h-3 text-gray-500 transition-transform shrink-0 ${isGroupExpanded ? 'rotate-90' : ''}`}
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
                   strokeWidth={2}
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                 </svg>
+                {group.opponent}
               </span>
+
+              {/* Win rate with colored bar */}
+              <span className="flex items-center gap-2">
+                <span className={`font-semibold shrink-0 w-11 ${winRateColor(group.aggregateWinRate)}`}>
+                  {group.aggregateWinRate.toFixed(1)}%
+                </span>
+                <div className="flex-1 bg-gray-800 rounded-full h-2 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${winRateBarColor(group.aggregateWinRate)}`}
+                    style={{ width: `${Math.min(group.aggregateWinRate, 100)}%` }}
+                  />
+                </div>
+              </span>
+
+              {/* Total games */}
+              <span className="text-center text-gray-400">{group.totalGames}</span>
+
+              {/* Avg turns */}
+              <span className="text-center text-gray-400">{group.avgTurns.toFixed(1)}</span>
             </div>
 
-            {isExpanded && (
-              <div className="mt-1.5 ml-2">
-                <SimDetailPanel simId={entry.sim_id} />
+            {/* Expanded: individual sims */}
+            {isGroupExpanded && (
+              <div className="ml-5 mt-1 space-y-1">
+                {group.sims.map((entry) => {
+                  const isSimExpanded = expandedSimId === entry.sim_id;
+                  return (
+                    <div key={entry.sim_id}>
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setExpandedSimId(isSimExpanded ? null : entry.sim_id);
+                        }}
+                        className={`grid grid-cols-5 gap-2 items-center rounded-lg px-3 py-2 text-xs cursor-pointer transition-colors ${
+                          isSimExpanded
+                            ? 'bg-gray-700/40 border border-blue-500/30'
+                            : 'bg-gray-800/30 border border-gray-700/30 hover:bg-gray-700/20'
+                        }`}
+                      >
+                        <span className="text-gray-500">
+                          {new Date(entry.timestamp).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}
+                        </span>
+                        <span className="text-center text-gray-400">{entry.num_games} games</span>
+                        <span className={`text-center font-semibold ${winRateColor(entry.win_rate)}`}>
+                          {entry.win_rate.toFixed(1)}%
+                        </span>
+                        <span className="text-center text-gray-400 capitalize">{entry.mode}</span>
+                        <span className="text-right text-gray-500 flex items-center justify-end gap-1.5">
+                          {entry.model && (
+                            <span className="text-[10px] text-gray-600 truncate max-w-[80px]" title={entry.model}>
+                              {entry.model}
+                            </span>
+                          )}
+                          <svg
+                            className={`w-3 h-3 text-gray-500 transition-transform shrink-0 ${isSimExpanded ? 'rotate-180' : ''}`}
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </span>
+                      </div>
+
+                      {isSimExpanded && (
+                        <div className="mt-1 ml-2">
+                          <SimDetailPanel simId={entry.sim_id} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
         );
       })}
+
+      {/* Generate / Regenerate Health Report — always visible */}
+      {entries.length >= 2 && (
+        <div className="flex items-center justify-between bg-gray-800/40 border border-gray-700/40 rounded-lg px-4 py-3 mt-2">
+          <div>
+            <span className="text-xs font-medium text-gray-300">Deck Health Report</span>
+            <span className="text-[10px] text-gray-500 ml-2">
+              Aggregate analysis across {entries.length} simulations
+            </span>
+          </div>
+          <button
+            onClick={handleHealthReport}
+            disabled={healthLoading}
+            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs px-4 py-1.5 rounded transition-colors"
+          >
+            {healthLoading ? 'Analyzing...' : healthReport ? 'Regenerate Report' : 'Generate Report'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1217,11 +1353,14 @@ function SimHistoryTab({
 // Tab 3: Improve
 // ---------------------------------------------------------------------------
 
-function ImproveTab({ leaderId, cardIds, healthData, onHealthReportChange }: {
+function ImproveTab({ deckId, deckName, leaderId, cardIds, healthData, onHealthReportChange, onDeckChanged }: {
+  deckId: string;
+  deckName: string;
   leaderId: string;
   cardIds: string[];
   healthData?: DeckHealthAnalysis | null;
   onHealthReportChange?: (report: DeckHealthAnalysis | null) => void;
+  onDeckChanged?: () => void;
 }) {
   const { data, loading, error, retry } = useFetch(
     () => improveDeck(leaderId, cardIds),
@@ -1230,6 +1369,43 @@ function ImproveTab({ leaderId, cardIds, healthData, onHealthReportChange }: {
 
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [swapping, setSwapping] = useState<string | null>(null);
+  const [appliedSwaps, setAppliedSwaps] = useState<Set<string>>(new Set()); // remove_id of applied swaps
+  const [swapError, setSwapError] = useState<string | null>(null);
+  // Track local cardIds so swaps don't reset parent state immediately
+  const [localCardIds, setLocalCardIds] = useState(cardIds);
+  useEffect(() => { setLocalCardIds(cardIds); }, [cardIds]);
+
+  const handleSwapCard = useCallback(async (removeId: string, addId: string, removeName: string, addName: string) => {
+    setSwapping(addId);
+    setSwapError(null);
+    try {
+      const newCardIds = [...localCardIds];
+      const idx = newCardIds.indexOf(removeId);
+      if (idx !== -1) newCardIds[idx] = addId;
+
+      const counts = new Map<string, number>();
+      for (const id of newCardIds) counts.set(id, (counts.get(id) ?? 0) + 1);
+      const entries = Array.from(counts.entries()).map(([card_id, quantity]) => ({ card_id, quantity }));
+
+      await updateDeck(deckId, {
+        name: deckName,
+        leader_id: leaderId,
+        entries,
+      });
+
+      // Optimistic UI: mark swap as applied, update local card list
+      setLocalCardIds(newCardIds);
+      setAppliedSwaps(prev => new Set(prev).add(removeId));
+
+      // Don't call onDeckChanged — avoid resetting health report + tab jump
+      // Parent will pick up changes when user switches tabs
+    } catch (err) {
+      setSwapError(`Failed to swap ${removeName} → ${addName}`);
+    } finally {
+      setSwapping(null);
+    }
+  }, [deckId, deckName, leaderId, localCardIds]);
 
   const handleGenerateReport = useCallback(() => {
     setReportLoading(true);
@@ -1442,8 +1618,95 @@ function ImproveTab({ leaderId, cardIds, healthData, onHealthReportChange }: {
         </div>
       )}
 
-      {/* Rule-based summary when no swaps — only show if we have health data (meaning sims were run) */}
-      {data.improvements.length === 0 && data.summary && healthData && (
+      {/* AI-powered swap suggestions from health report */}
+      {healthData?.suggested_swaps && healthData.suggested_swaps.length > 0 && (
+        <div className="rounded-xl border border-cyan-500/15 bg-gray-900/40 p-4">
+          <h4 className="text-xs font-semibold text-cyan-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+            </svg>
+            Suggested Replacements
+          </h4>
+          <div className="space-y-3">
+            {healthData.suggested_swaps.map((swap, i) => {
+              const isApplied = appliedSwaps.has(swap.remove_id);
+              return (
+              <div key={i} className={`rounded-lg p-3 transition-colors ${isApplied ? 'bg-emerald-950/20 border border-emerald-500/20' : 'bg-gray-800/30 border border-gray-700/30'}`}>
+                {/* Applied badge */}
+                {isApplied && (
+                  <div className="flex items-center gap-1.5 mb-2 text-emerald-400">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                    <span className="text-[10px] font-semibold">Swapped</span>
+                  </div>
+                )}
+                {/* Swap header */}
+                <div className={`flex items-center gap-2 mb-2 ${isApplied ? 'opacity-50' : ''}`}>
+                  {swap.role_needed && (
+                    <span className="text-[9px] font-semibold uppercase px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-400 max-w-[200px] truncate">
+                      {swap.role_needed}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-gray-500">{swap.reason}</span>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  {/* Remove card */}
+                  {swap.remove_id && (
+                    <>
+                      <div className="shrink-0 w-20 text-center">
+                        {swap.remove_image && (
+                          <img src={swap.remove_image} alt={swap.remove_name} className="w-16 h-auto rounded mx-auto mb-1 opacity-60" />
+                        )}
+                        <p className="text-[9px] text-red-400 font-medium">{swap.remove_name}</p>
+                        <p className="text-[8px] text-red-500/50 uppercase mt-0.5">Remove</p>
+                      </div>
+                      <svg className="w-4 h-4 text-gray-600 shrink-0 mt-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                      </svg>
+                    </>
+                  )}
+
+                  {/* Candidate cards */}
+                  <div className="flex-1 flex gap-2 overflow-x-auto pb-1">
+                    {swap.candidates.map((c) => (
+                      <button
+                        key={c.card_id}
+                        onClick={() => swap.remove_id && handleSwapCard(swap.remove_id, c.card_id, swap.remove_name, c.name)}
+                        disabled={!swap.remove_id || !!swapping || appliedSwaps.has(swap.remove_id)}
+                        className="shrink-0 w-20 text-center rounded-lg bg-emerald-950/15 border border-emerald-900/20 p-1.5 hover:bg-emerald-950/30 hover:border-emerald-500/40 transition-colors group disabled:opacity-50 disabled:cursor-default"
+                      >
+                        {c.image && (
+                          <img src={c.image} alt={c.name} className="w-14 h-auto rounded mx-auto mb-1" />
+                        )}
+                        <p className="text-[9px] text-emerald-300 font-medium truncate">{c.name}</p>
+                        <div className="flex justify-center gap-1.5 mt-0.5">
+                          {c.cost > 0 && <span className="text-[8px] text-gray-500">{c.cost}c</span>}
+                          {c.power > 0 && <span className="text-[8px] text-gray-500">{c.power}P</span>}
+                          {c.synergy_count > 0 && <span className="text-[8px] text-amber-500">{c.synergy_count} syn</span>}
+                        </div>
+                        {swap.remove_id && !appliedSwaps.has(swap.remove_id) && (
+                          <span className="text-[8px] text-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity mt-1 block font-semibold">
+                            {swapping === c.card_id ? '...' : 'Swap'}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              );
+            })}
+          </div>
+
+          {/* Swap error message */}
+          {swapError && (
+            <p className="text-[10px] text-red-400 mt-2">{swapError}</p>
+          )}
+        </div>
+      )}
+
+      {/* Rule-based summary when no swaps — only show when NO health issues exist */}
+      {data.improvements.length === 0 && data.summary && !hasHealthInsights && (
         <div className="rounded-xl border border-green-500/15 bg-gray-900/40 p-4">
           <div className="flex items-center gap-2">
             <svg className="w-4 h-4 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1614,7 +1877,7 @@ export default function DeckDetailPanel({
           )}
         </div>
         <div className={`h-full overflow-y-auto ${activeTab === 'improve' ? '' : 'hidden'}`}>
-          {mountedTabs.has('improve') && <ImproveTab leaderId={leaderId} cardIds={cardIds} healthData={healthReport} onHealthReportChange={setHealthReport} />}
+          {mountedTabs.has('improve') && <ImproveTab deckId={_deckId} deckName={deckName} leaderId={leaderId} cardIds={cardIds} healthData={healthReport} onHealthReportChange={setHealthReport} onDeckChanged={_onDeckChanged} />}
         </div>
       </div>
 

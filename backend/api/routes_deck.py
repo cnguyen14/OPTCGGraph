@@ -53,6 +53,122 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/deck", tags=["deck"])
 
+# Shared keyword map for role-based card search
+ROLE_KEYWORDS_MAP: dict[str, list[str]] = {
+    "blocker": ["Blocker"],
+    "removal": ["KO", "Bounce", "Trash"],
+    "finisher": ["Rush", "Double Attack"],
+    "draw": ["Draw", "Search"],
+    "rush": ["Rush"],
+    "counter": [],  # special: high counter value cards
+}
+
+
+async def find_role_candidates(
+    driver: AsyncDriver,
+    leader_id: str,
+    deck_card_ids: list[str],
+    role: str,
+    exclude_ids: list[str],
+    limit: int = 5,
+) -> list[dict]:
+    """Find candidate cards for a given role, matching leader colors and sorted by synergy."""
+    role_keywords = ROLE_KEYWORDS_MAP.get(role.lower(), [])
+    is_counter_role = role.lower() == "counter"
+
+    async with driver.session() as session:
+        if is_counter_role:
+            neo_result = await session.run(
+                """
+                MATCH (leader:Card {id: $leader_id})-[:HAS_COLOR]->(lc:Color)
+                WITH collect(lc.name) AS leader_colors
+                MATCH (c:Card)-[:HAS_COLOR]->(color:Color)
+                WHERE color.name IN leader_colors
+                  AND c.card_type IN ['CHARACTER', 'EVENT']
+                  AND NOT c.id IN $exclude_ids
+                  AND c.counter IS NOT NULL AND c.counter > 0
+                OPTIONAL MATCH (c)-[:SYNERGY|MECHANICAL_SYNERGY]-(deck_card:Card)
+                WHERE deck_card.id IN $deck_card_ids
+                WITH c, count(DISTINCT deck_card) AS synergy_count
+                RETURN c.id AS card_id, c.name AS name,
+                       c.image_small AS image,
+                       c.power AS power, c.cost AS cost,
+                       c.counter AS counter, synergy_count
+                ORDER BY c.counter DESC, synergy_count DESC
+                LIMIT $limit
+                """,
+                leader_id=leader_id,
+                exclude_ids=exclude_ids,
+                deck_card_ids=deck_card_ids,
+                limit=limit,
+            )
+        elif role_keywords:
+            neo_result = await session.run(
+                """
+                MATCH (leader:Card {id: $leader_id})-[:HAS_COLOR]->(lc:Color)
+                WITH collect(lc.name) AS leader_colors
+                MATCH (c:Card)-[:HAS_COLOR]->(color:Color)
+                WHERE color.name IN leader_colors
+                  AND c.card_type IN ['CHARACTER', 'EVENT']
+                  AND NOT c.id IN $exclude_ids
+                OPTIONAL MATCH (c)-[:HAS_KEYWORD]->(kw:Keyword)
+                WHERE kw.name IN $role_keywords
+                WITH c, count(DISTINCT kw) AS role_match, leader_colors
+                WHERE role_match > 0
+                OPTIONAL MATCH (c)-[:SYNERGY|MECHANICAL_SYNERGY]-(deck_card:Card)
+                WHERE deck_card.id IN $deck_card_ids
+                WITH c, role_match, count(DISTINCT deck_card) AS synergy_count
+                RETURN c.id AS card_id, c.name AS name,
+                       c.image_small AS image,
+                       c.power AS power, c.cost AS cost,
+                       c.counter AS counter, synergy_count
+                ORDER BY synergy_count DESC, role_match DESC, c.power DESC
+                LIMIT $limit
+                """,
+                leader_id=leader_id,
+                exclude_ids=exclude_ids,
+                deck_card_ids=deck_card_ids,
+                role_keywords=role_keywords,
+                limit=limit,
+            )
+        else:
+            neo_result = await session.run(
+                """
+                MATCH (leader:Card {id: $leader_id})-[:HAS_COLOR]->(lc:Color)
+                WITH collect(lc.name) AS leader_colors
+                MATCH (c:Card)-[:HAS_COLOR]->(color:Color)
+                WHERE color.name IN leader_colors
+                  AND c.card_type IN ['CHARACTER', 'EVENT']
+                  AND NOT c.id IN $exclude_ids
+                OPTIONAL MATCH (c)-[:SYNERGY|MECHANICAL_SYNERGY]-(deck_card:Card)
+                WHERE deck_card.id IN $deck_card_ids
+                WITH c, count(DISTINCT deck_card) AS synergy_count
+                RETURN c.id AS card_id, c.name AS name,
+                       c.image_small AS image,
+                       c.power AS power, c.cost AS cost,
+                       c.counter AS counter, synergy_count
+                ORDER BY synergy_count DESC, c.power DESC
+                LIMIT $limit
+                """,
+                leader_id=leader_id,
+                exclude_ids=exclude_ids,
+                deck_card_ids=deck_card_ids,
+                limit=limit,
+            )
+
+        candidates = []
+        async for rec in neo_result:
+            candidates.append({
+                "card_id": rec["card_id"],
+                "name": rec["name"] or "",
+                "image": rec["image"] or "",
+                "power": rec["power"] or 0,
+                "cost": rec["cost"] or 0,
+                "counter": rec["counter"] or 0,
+                "synergy_count": rec["synergy_count"] or 0,
+            })
+        return candidates
+
 DECK_TTL_SECONDS = 90 * 24 * 3600  # 90 days
 
 
@@ -1133,6 +1249,92 @@ Focus on:
             for ms in health_data.get("matchup_spread", [])
         ]
 
+        # --- Find specific replacement suggestions ---
+        from backend.api.schemas.deck import ReplacementSuggestion, SwapCandidate
+
+        suggested_swaps: list[ReplacementSuggestion] = []
+        exclude_ids = list(req.card_ids) + [req.leader_id]
+        suggested_card_ids: set[str] = set()  # Track to avoid duplicate candidates
+        remaining_role_gaps = list(parsed.get("role_gaps", []))
+
+        # For each dead card: suggest replacements, rotating through role gaps
+        for dc in parsed.get("dead_cards", []):
+            dc_id = dc.get("card_id", "")
+            dc_reason = dc.get("reason", "Underperforming card")
+            dc_name = card_names.get(dc_id, dc_id)
+
+            # Look up image
+            dc_image = ""
+            try:
+                async with driver.session() as session:
+                    rec = await (
+                        await session.run(
+                            "MATCH (c:Card {id: $id}) RETURN c.image_small AS image LIMIT 1",
+                            id=dc_id,
+                        )
+                    ).single()
+                    if rec:
+                        dc_image = rec["image"] or ""
+            except Exception:
+                pass
+
+            # Pick a role gap for this dead card, then remove from list
+            search_role = remaining_role_gaps.pop(0) if remaining_role_gaps else ""
+
+            try:
+                candidates_raw = await find_role_candidates(
+                    driver,
+                    req.leader_id,
+                    req.card_ids,
+                    search_role,
+                    exclude_ids + list(suggested_card_ids),
+                )
+                candidates = [SwapCandidate(**c) for c in candidates_raw]
+            except Exception:
+                candidates = []
+
+            # Truncate long role names
+            display_role = search_role[:40] if search_role else ""
+
+            if candidates:
+                suggested_swaps.append(
+                    ReplacementSuggestion(
+                        remove_id=dc_id,
+                        remove_name=dc_name,
+                        remove_image=dc_image,
+                        role_needed=display_role,
+                        reason=dc_reason,
+                        candidates=candidates,
+                    )
+                )
+                suggested_card_ids.update(c.card_id for c in candidates)
+
+        # For remaining role gaps without a dead card swap
+        for gap in remaining_role_gaps:
+            try:
+                candidates_raw = await find_role_candidates(
+                    driver,
+                    req.leader_id,
+                    req.card_ids,
+                    gap,
+                    exclude_ids + list(suggested_card_ids),
+                )
+                candidates = [SwapCandidate(**c) for c in candidates_raw]
+            except Exception:
+                candidates = []
+
+            display_gap = gap[:40] if gap else ""
+
+            if candidates:
+                suggested_swaps.append(
+                    ReplacementSuggestion(
+                        role_needed=display_gap,
+                        reason=f"Deck lacks {gap.lower()} cards",
+                        candidates=candidates,
+                    )
+                )
+                suggested_card_ids.update(c.card_id for c in candidates)
+
         result = DeckHealthAnalysisResponse(
             summary=parsed.get("summary", ""),
             consistency_rating=parsed.get("consistency_rating", "medium"),
@@ -1149,6 +1351,7 @@ Focus on:
             card_health=card_health_entries,
             top_synergies=top_synergies,
             matchup_spread=matchup_spread_entries,
+            suggested_swaps=suggested_swaps,
         )
 
         # Cache (1 hour)

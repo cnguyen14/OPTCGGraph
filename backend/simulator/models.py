@@ -391,6 +391,13 @@ class GameResult:
     # Cards drawn tracking (card_id -> times drawn)
     p1_cards_drawn: dict[str, int] = dataclass_field(default_factory=dict)
     p2_cards_drawn: dict[str, int] = dataclass_field(default_factory=dict)
+    # Per-card combat stats
+    cards_koed: dict[str, int] = dataclass_field(default_factory=dict)
+    cards_countered: dict[str, int] = dataclass_field(default_factory=dict)
+    cards_blocked: dict[str, int] = dataclass_field(default_factory=dict)
+    card_play_turns: dict[str, list[int]] = dataclass_field(default_factory=dict)
+    cards_damage: dict[str, int] = dataclass_field(default_factory=dict)
+    cards_effects: dict[str, int] = dataclass_field(default_factory=dict)
 
 
 @dataclass

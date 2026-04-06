@@ -177,6 +177,25 @@ class MatchupSpread(BaseModel):
     num_games: int
 
 
+class SwapCandidate(BaseModel):
+    card_id: str
+    name: str = ""
+    image: str = ""
+    power: int = 0
+    cost: int = 0
+    counter: int = 0
+    synergy_count: int = 0
+
+
+class ReplacementSuggestion(BaseModel):
+    remove_id: str = ""
+    remove_name: str = ""
+    remove_image: str = ""
+    role_needed: str = ""
+    reason: str = ""
+    candidates: list[SwapCandidate] = Field(default_factory=list)
+
+
 class DeckHealthAnalysisResponse(BaseModel):
     summary: str
     consistency_rating: str = ""
@@ -193,3 +212,4 @@ class DeckHealthAnalysisResponse(BaseModel):
     card_health: list[CardHealthEntry] = Field(default_factory=list)
     top_synergies: list[SynergyPair] = Field(default_factory=list)
     matchup_spread: list[MatchupSpread] = Field(default_factory=list)
+    suggested_swaps: list[ReplacementSuggestion] = Field(default_factory=list)
