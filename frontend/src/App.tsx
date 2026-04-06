@@ -50,6 +50,13 @@ function App() {
   // Deck state lifted to App so FloatingChat can access it
   const deckState = useDeckState();
 
+  // Reset chat session when leader changes (new leader = new conversation)
+  useEffect(() => {
+    if (!deckState.leader) {
+      setSessionId(null);
+    }
+  }, [deckState.leader]);
+
   // State for pre-selecting a deck in the simulator
   const [simDeck, setSimDeck] = useState<{ leaderId: string; cardIds: string[] } | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
