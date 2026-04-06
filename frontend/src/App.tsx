@@ -75,8 +75,13 @@ function App() {
     if (update.action === 'update_deck_list' && update.payload) {
       const { leader_id, cards } = update.payload as { leader_id?: string; cards?: string[] };
       if (leader_id && cards && cards.length > 0) {
-        deckState.loadDeckFromIds(leader_id, cards);
-        setActiveTab('deck');
+        // Only load if deck is empty or leader changed — prevent duplicate loads
+        const currentCount = deckState.entries.reduce((sum, e) => sum + e.quantity, 0);
+        const sameLeader = deckState.leader?.id === leader_id;
+        if (currentCount === 0 || !sameLeader) {
+          deckState.loadDeckFromIds(leader_id, cards);
+          setActiveTab('deck');
+        }
       }
     }
     if (update.action === 'update_deck_notes' && update.payload) {
