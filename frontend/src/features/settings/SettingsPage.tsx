@@ -560,6 +560,7 @@ export default function SettingsPage() {
   const [banPanelOpen, setBanPanelOpen] = useState(true);
   const [polling, setPolling] = useState(false);
   const [rebuildStatus, setRebuildStatus] = useState('idle');
+  const [stepStatuses, setStepStatuses] = useState<{ clean: string; crawl: string; index: string }>({ clean: 'idle', crawl: 'idle', index: 'idle' });
   const [rebuildStuckCount, setRebuildStuckCount] = useState(0);
   const [lastRebuildStep, setLastRebuildStep] = useState('');
   useEffect(() => {
@@ -572,13 +573,19 @@ export default function SettingsPage() {
         const rs = await fetchRebuildStatus();
         const status = rs.status || 'idle';
         setRebuildStatus(status);
+        if (rs.steps) setStepStatuses(rs.steps);
 
-        if (status === 'complete') {
-          setPolling(false);
-          setRebuildStatus('idle');
-          setRebuildStuckCount(0);
-          showAction('Rebuild complete!');
-          loadAll();
+        // Check if all steps are done or any individual step completed
+        const allDone = rs.steps && Object.values(rs.steps).every((s: string) => s === 'done' || s === 'idle');
+        const anyRunning = rs.steps && Object.values(rs.steps).some((s: string) => s !== 'done' && s !== 'idle' && !s.startsWith('error'));
+
+        if (status === 'complete' || (allDone && !anyRunning && status === 'idle')) {
+          if (rs.steps && Object.values(rs.steps).some((s: string) => s === 'done')) {
+            setPolling(false);
+            setRebuildStuckCount(0);
+            showAction('Step complete!');
+            loadAll();
+          }
         } else if (status.startsWith('error')) {
           setPolling(false);
           showAction(`Rebuild failed: ${status}`);
@@ -620,16 +627,19 @@ export default function SettingsPage() {
     setSysStatus(sys);
   };
 
+  const handleStep = async (step: 'clean' | 'crawl' | 'index') => {
+    const { triggerStep } = await import('../../lib/api');
+    await triggerStep(step);
+    const labels = { clean: 'Clean Neo4j', crawl: 'Crawl & Load', index: 'Build Index' };
+    showAction(`${labels[step]} started...`);
+    setPolling(true);
+  };
+
   const handleRebuild = async () => {
     const { triggerRebuild } = await import('../../lib/api');
     await triggerRebuild();
-    showAction('Full rebuild started: clean → Bandai crawl → prices → index...');
+    showAction('Full rebuild started...');
     setPolling(true);
-    // Refresh banned cards after rebuild completes
-    setTimeout(async () => {
-      const banned = await fetchBannedCards();
-      setBannedCards(banned);
-    }, 120000); // 2 min estimate
   };
 
   const handleModelSwitch = async (provider: string, model: string) => {
@@ -707,44 +717,45 @@ export default function SettingsPage() {
           <Button onClick={loadAll} variant="secondary" size="sm" className="w-full">
             Refresh All
           </Button>
-          <Button onClick={handleRebuild} variant="danger" size="sm" className="w-full" disabled={rebuildStatus !== 'idle'}>
-            {rebuildStatus !== 'idle' ? 'Rebuilding...' : 'Full Rebuild (Clean + Crawl + Index)'}
-          </Button>
-          {rebuildStatus !== 'idle' && rebuildStatus !== 'complete' && (
-            <div className="mt-1 space-y-1">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-op-ocean animate-pulse" />
-                <span className="text-[10px] text-op-ocean font-mono">
-                  {rebuildStatus.startsWith('error') ? rebuildStatus : rebuildStatus.replace(/_/g, ' ')}
-                </span>
+          {/* Step buttons */}
+          {(['clean', 'crawl', 'index'] as const).map((step) => {
+            const labels = { clean: '1. Clean Neo4j', crawl: '2. Crawl & Load', index: '3. Build Index' };
+            const st = stepStatuses[step];
+            const isRunning = st !== 'idle' && st !== 'done' && !st.startsWith('error');
+            const isDone = st === 'done';
+            const isError = st.startsWith('error');
+            return (
+              <div key={step}>
+                <Button
+                  onClick={() => handleStep(step)}
+                  variant={isError ? 'danger' : 'secondary'}
+                  size="sm"
+                  className="w-full"
+                  disabled={isRunning}
+                >
+                  {isRunning ? `${labels[step]}...` : isDone ? `${labels[step]} ✓` : labels[step]}
+                </Button>
+                {isRunning && (
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-op-ocean animate-pulse" />
+                    <span className="text-[9px] text-op-ocean font-mono">{st.replace(/_/g, ' ')}</span>
+                  </div>
+                )}
+                {isError && (
+                  <p className="text-[9px] text-red-400 mt-0.5 break-all">{st.slice(0, 80)}</p>
+                )}
               </div>
-              <div className="w-full bg-surface-2 rounded-full h-1">
-                <div
-                  className={`h-1 rounded-full transition-all duration-500 ${rebuildStatus.startsWith('error') ? 'bg-red-500' : 'bg-op-ocean'}`}
-                  style={{
-                    width: `${
-                      rebuildStatus === 'cleaning_done' ? 10 :
-                      rebuildStatus === 'crawling_bandai' ? 25 :
-                      rebuildStatus === 'crawling_prices' ? 45 :
-                      rebuildStatus === 'loading_cards' ? 55 :
-                      rebuildStatus === 'building_keywords' ? 65 :
-                      rebuildStatus === 'building_edges' ? 75 :
-                      rebuildStatus === 'crawling_tournaments' ? 85 :
-                      rebuildStatus === 'applying_bans' ? 95 :
-                      rebuildStatus.startsWith('error') ? 100 : 0
-                    }%`,
-                  }}
-                />
-              </div>
-              {rebuildStuckCount >= 30 && (
-                <p className="text-[10px] text-yellow-400">
-                  Appears stuck on this step. Consider stopping.
-                </p>
-              )}
-              <Button onClick={handleStopRebuild} variant="secondary" size="sm" className="w-full mt-1">
-                Stop Rebuild
-              </Button>
-            </div>
+            );
+          })}
+          <div className="border-t border-glass-border pt-2 mt-1">
+            <Button onClick={handleRebuild} variant="danger" size="sm" className="w-full" disabled={rebuildStatus !== 'idle'}>
+              {rebuildStatus !== 'idle' ? 'Rebuilding...' : 'Full Rebuild (All Steps)'}
+            </Button>
+          </div>
+          {(rebuildStatus !== 'idle' || Object.values(stepStatuses).some(s => s !== 'idle' && s !== 'done')) && (
+            <Button onClick={handleStopRebuild} variant="secondary" size="sm" className="w-full mt-1">
+              Stop / Reset
+            </Button>
           )}
           {actionMsg && (
             <p className="text-[10px] text-op-ocean mt-1">{actionMsg}</p>

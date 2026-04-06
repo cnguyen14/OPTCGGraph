@@ -399,7 +399,16 @@ export async function triggerRebuild(): Promise<{ status: string }> {
   return resp.json();
 }
 
-export async function fetchRebuildStatus(): Promise<{ status: string; last_run: string | null }> {
+export async function triggerStep(step: 'clean' | 'crawl' | 'index'): Promise<{ status: string }> {
+  const resp = await fetch(`${BASE_URL}/data/step/${step}`, { method: 'POST' });
+  return resp.json();
+}
+
+export async function fetchRebuildStatus(): Promise<{
+  status: string;
+  last_run: string | null;
+  steps: { clean: string; crawl: string; index: string };
+}> {
   const resp = await fetch(`${BASE_URL}/data/rebuild-status`);
   return resp.json();
 }
