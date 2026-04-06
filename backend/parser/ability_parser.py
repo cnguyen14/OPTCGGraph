@@ -208,6 +208,8 @@ def _regex_parse(card: dict) -> dict:
         timing.append("Activate: Main")
     if "On Your Opponent's Attack" in ability:
         timing.append("On Your Opponent's Attack")
+    if "[Opponent's Turn]" in ability or "Opponent's Turn" in ability:
+        timing.append("Opponent's Turn")
     if "[Counter]" in ability:
         timing.append("Counter")
     if "[Trigger]" in ability:
@@ -246,17 +248,19 @@ def _regex_parse(card: dict) -> dict:
         effects.append("Bounce")
     if re.search(r"draw \d+ card|draw a card", ability, re.I):
         effects.append("Draw")
-    if re.search(r"trash", ability, re.I):
+    # "trash" as verb (trash N cards) but NOT "trashed" or "instead of being trashed"
+    if re.search(r"\btrash \d|you may trash|trash.*from", ability, re.I):
         effects.append("Trash")
     if re.search(r"\bK\.?O\.?\b", ability) and "On K.O." not in ability:
         effects.append("KO")
     if re.search(r"look at.*top|add.*from.*deck.*to.*hand|search", ability, re.I):
         effects.append("Search")
-    if re.search(r"\+\d+000 power|\bgain.*power\b", ability, re.I):
+    if re.search(r"\+\d+000 power|\bgains?\s+\+?\d+000\b", ability, re.I):
         effects.append("Power Buff")
-    if re.search(r"-\d+000 power|reduce.*power|loses.*power", ability, re.I):
+    if re.search(r"[−-]\d+000 power|\b[−-]\d+000\b", ability):
         effects.append("Power Debuff")
-    if re.search(r"\brest\b", ability, re.I) and "rested" not in ability.lower():
+    # "rest this" / "rest up to" = game action, NOT "the rest" (remainder)
+    if re.search(r"rest this|rest up to|may rest|rest \d|you may rest", ability, re.I):
         effects.append("Rest")
     if (
         re.search(r"play.*from.*hand|play.*character", ability, re.I)
