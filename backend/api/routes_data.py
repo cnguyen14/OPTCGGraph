@@ -43,7 +43,7 @@ async def rebuild(background_tasks: BackgroundTasks):
         compute_card_meta_stats, apply_ban_list,
     )
     from backend.graph.connection import get_driver as gd
-    from backend.parser.ability_parser import build_keyword_graph
+    from backend.parser.ability_parser import parse_abilities, build_keyword_graph
     from backend.graph.edges import build_all_edges
 
     async def _run():
@@ -51,6 +51,13 @@ async def rebuild(background_tasks: BackgroundTasks):
         redis = await get_redis()
         now = datetime.now(timezone.utc).isoformat()
 
+        try:
+            await _run_pipeline(driver, redis, now)
+        except Exception as e:
+            logger.error("[Rebuild] FAILED: %s", e, exc_info=True)
+            await redis.set("rebuild:status", f"error: {e}")
+
+    async def _run_pipeline(driver, redis, now):
         # Step 1: Clean Neo4j
         logger.info("[Rebuild 1/8] Cleaning Neo4j...")
         async with driver.session() as session:
@@ -91,10 +98,11 @@ async def rebuild(background_tasks: BackgroundTasks):
         await create_indexes(driver)
         await load_cards(driver, bandai_cards)
 
-        # Step 5: Build keyword graph
-        logger.info("[Rebuild 5/8] Building keyword graph...")
+        # Step 5: Parse abilities + build keyword graph
+        logger.info("[Rebuild 5/8] Parsing abilities + building keyword graph...")
         await redis.set("rebuild:status", "building_keywords")
-        await build_keyword_graph(driver)
+        parsed = await parse_abilities(bandai_cards)
+        await build_keyword_graph(driver, parsed, bandai_cards)
 
         # Step 6: Build synergy edges
         logger.info("[Rebuild 6/8] Building synergy edges...")
