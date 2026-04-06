@@ -105,6 +105,32 @@ async def crawl_banned(background_tasks: BackgroundTasks):
     return {"status": "ban_crawl_started"}
 
 
+@router.post("/crawl-bandai")
+async def crawl_bandai_endpoint(background_tasks: BackgroundTasks):
+    """Crawl card data directly from Bandai official site."""
+    from backend.crawlers.bandai import crawl_bandai
+    from backend.graph.builder import create_indexes, load_cards
+    from backend.graph.connection import get_driver as gd
+    from backend.parser.ability_parser import build_keyword_graph
+    from backend.graph.edges import build_all_edges
+
+    async def _run():
+        cards = await crawl_bandai(download_images=True)
+        driver = await gd()
+        await create_indexes(driver)
+        await load_cards(driver, cards)
+        await build_keyword_graph(driver)
+        await build_all_edges(driver)
+
+        r = await get_redis()
+        now = datetime.now(timezone.utc).isoformat()
+        await r.set("crawl:bandai:last_run", now)
+        await r.set("crawl:bandai:count", str(len(cards)))
+
+    background_tasks.add_task(_run)
+    return {"status": "bandai_crawl_started"}
+
+
 @router.get("/crawl-status")
 async def crawl_status():
     """Get last crawl timestamps and counts for all sources."""
@@ -123,6 +149,7 @@ async def crawl_status():
         "optcgapi": await _source_status("optcgapi"),
         "limitlesstcg": await _source_status("limitlesstcg"),
         "banned": await _source_status("banned"),
+        "bandai": await _source_status("bandai"),
     }
 
 

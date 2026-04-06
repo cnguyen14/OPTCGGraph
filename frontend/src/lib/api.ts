@@ -409,6 +409,11 @@ export async function triggerBanCrawl(): Promise<{ status: string }> {
   return resp.json();
 }
 
+export async function triggerBandaiCrawl(): Promise<{ status: string }> {
+  const resp = await fetch(`${BASE_URL}/data/crawl-bandai`, { method: 'POST' });
+  return resp.json();
+}
+
 export async function fetchBannedCards(): Promise<BannedCard[]> {
   const resp = await fetch(`${BASE_URL}/data/banned-cards`);
   return resp.json();

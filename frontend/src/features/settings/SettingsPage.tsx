@@ -586,6 +586,13 @@ export default function SettingsPage() {
     setPolling(true);
   };
 
+  const handleBandaiCrawl = async () => {
+    const { triggerBandaiCrawl } = await import('../../lib/api');
+    await triggerBandaiCrawl();
+    showAction('Bandai crawl started (cards + images)...');
+    setPolling(true);
+  };
+
   const handleBanCrawl = async () => {
     await triggerBanCrawl();
     showAction('Ban list update started...');
@@ -676,6 +683,9 @@ export default function SettingsPage() {
           </Button>
           <Button onClick={handlePriceUpdate} variant="secondary" size="sm" className="w-full">
             Update Prices
+          </Button>
+          <Button onClick={handleBandaiCrawl} variant="secondary" size="sm" className="w-full">
+            Crawl Bandai (Official)
           </Button>
           <Button onClick={handleBanCrawl} variant="danger" size="sm" className="w-full">
             Update Ban List
@@ -773,6 +783,7 @@ export default function SettingsPage() {
                         src: crawlStatus.limitlesstcg,
                       },
                       { key: 'banned' as const, label: 'Bandai (Ban List)', src: crawlStatus.banned },
+                      { key: 'bandai' as const, label: 'Bandai Official (Cards + Images)', src: crawlStatus.bandai ?? { last_run: null, count: 0 } },
                     ].map(({ key, label, src }) => (
                       <div
                         key={key}

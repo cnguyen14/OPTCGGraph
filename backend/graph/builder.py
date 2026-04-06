@@ -107,6 +107,7 @@ async def load_cards(
             c.market_price = row.market_price,
             c.source_apitcg = row.source_apitcg,
             c.source_optcgapi = row.source_optcgapi,
+            c.source_bandai = row.source_bandai,
             c.life = row.life
         """,
         card_params,
@@ -198,6 +199,7 @@ def _card_params(card: dict) -> dict:
         "market_price": _to_float(card.get("market_price")),
         "source_apitcg": card.get("source_apitcg", False),
         "source_optcgapi": card.get("source_optcgapi", False),
+        "source_bandai": card.get("source_bandai", False),
         "life": card.get("life", ""),
     }
 
