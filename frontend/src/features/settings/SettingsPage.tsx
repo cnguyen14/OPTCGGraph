@@ -560,7 +560,7 @@ export default function SettingsPage() {
   const [banPanelOpen, setBanPanelOpen] = useState(true);
   const [polling, setPolling] = useState(false);
   const [rebuildStatus, setRebuildStatus] = useState('idle');
-  const [stepStatuses, setStepStatuses] = useState<{ clean: string; crawl: string; index: string }>({ clean: 'idle', crawl: 'idle', index: 'idle' });
+  const [stepStatuses, setStepStatuses] = useState<Record<string, string>>({ clean: 'idle', bandai: 'idle', prices: 'idle', banned: 'idle', tournaments: 'idle', index: 'idle' });
   const [rebuildStuckCount, setRebuildStuckCount] = useState(0);
   const [lastRebuildStep, setLastRebuildStep] = useState('');
   useEffect(() => {
@@ -627,18 +627,10 @@ export default function SettingsPage() {
     setSysStatus(sys);
   };
 
-  const handleStep = async (step: 'clean' | 'crawl' | 'index') => {
+  const handleStep = async (step: string) => {
     const { triggerStep } = await import('../../lib/api');
-    await triggerStep(step);
-    const labels = { clean: 'Clean Neo4j', crawl: 'Crawl & Load', index: 'Build Index' };
-    showAction(`${labels[step]} started...`);
-    setPolling(true);
-  };
-
-  const handleRebuild = async () => {
-    const { triggerRebuild } = await import('../../lib/api');
-    await triggerRebuild();
-    showAction('Full rebuild started...');
+    await triggerStep(step as any);
+    showAction(`${step} started...`);
     setPolling(true);
   };
 
@@ -717,23 +709,29 @@ export default function SettingsPage() {
           <Button onClick={loadAll} variant="secondary" size="sm" className="w-full">
             Refresh All
           </Button>
-          {/* Step buttons */}
-          {(['clean', 'crawl', 'index'] as const).map((step) => {
-            const labels = { clean: '1. Clean Neo4j', crawl: '2. Crawl & Load', index: '3. Build Index' };
-            const st = stepStatuses[step];
+          {/* Pipeline steps */}
+          {([
+            { key: 'clean', label: '1. Clean Up Old Data', variant: 'danger' as const },
+            { key: 'bandai', label: '2. Load Cards (Bandai)', variant: 'secondary' as const },
+            { key: 'prices', label: '3. Update Prices', variant: 'secondary' as const },
+            { key: 'banned', label: '4. Update Ban List', variant: 'secondary' as const },
+            { key: 'tournaments', label: '5. Load Tournaments', variant: 'secondary' as const },
+            { key: 'index', label: '6. Build Index', variant: 'secondary' as const },
+          ]).map(({ key, label, variant }) => {
+            const st = stepStatuses[key] || 'idle';
             const isRunning = st !== 'idle' && st !== 'done' && !st.startsWith('error');
             const isDone = st === 'done';
             const isError = st.startsWith('error');
             return (
-              <div key={step}>
+              <div key={key}>
                 <Button
-                  onClick={() => handleStep(step)}
-                  variant={isError ? 'danger' : 'secondary'}
+                  onClick={() => handleStep(key)}
+                  variant={isError ? 'danger' : variant}
                   size="sm"
                   className="w-full"
                   disabled={isRunning}
                 >
-                  {isRunning ? `${labels[step]}...` : isDone ? `${labels[step]} ✓` : labels[step]}
+                  {isRunning ? `${label}...` : isDone ? `${label} ✓` : label}
                 </Button>
                 {isRunning && (
                   <div className="flex items-center gap-1 mt-0.5">
@@ -747,12 +745,7 @@ export default function SettingsPage() {
               </div>
             );
           })}
-          <div className="border-t border-glass-border pt-2 mt-1">
-            <Button onClick={handleRebuild} variant="danger" size="sm" className="w-full" disabled={rebuildStatus !== 'idle'}>
-              {rebuildStatus !== 'idle' ? 'Rebuilding...' : 'Full Rebuild (All Steps)'}
-            </Button>
-          </div>
-          {(rebuildStatus !== 'idle' || Object.values(stepStatuses).some(s => s !== 'idle' && s !== 'done')) && (
+          {Object.values(stepStatuses).some(s => s !== 'idle' && s !== 'done') && (
             <Button onClick={handleStopRebuild} variant="secondary" size="sm" className="w-full mt-1">
               Stop / Reset
             </Button>

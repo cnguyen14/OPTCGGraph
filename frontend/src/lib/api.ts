@@ -394,12 +394,9 @@ export async function fetchCrawlStatus(): Promise<CrawlStatus> {
   return resp.json();
 }
 
-export async function triggerRebuild(): Promise<{ status: string }> {
-  const resp = await fetch(`${BASE_URL}/data/rebuild`, { method: 'POST' });
-  return resp.json();
-}
+export type StepName = 'clean' | 'bandai' | 'prices' | 'banned' | 'tournaments' | 'index';
 
-export async function triggerStep(step: 'clean' | 'crawl' | 'index'): Promise<{ status: string }> {
+export async function triggerStep(step: StepName): Promise<{ status: string }> {
   const resp = await fetch(`${BASE_URL}/data/step/${step}`, { method: 'POST' });
   return resp.json();
 }
@@ -407,7 +404,7 @@ export async function triggerStep(step: 'clean' | 'crawl' | 'index'): Promise<{ 
 export async function fetchRebuildStatus(): Promise<{
   status: string;
   last_run: string | null;
-  steps: { clean: string; crawl: string; index: string };
+  steps: Record<StepName, string>;
 }> {
   const resp = await fetch(`${BASE_URL}/data/rebuild-status`);
   return resp.json();
