@@ -545,16 +545,28 @@ export default function SettingsPage() {
     loadAll();
   }, [loadAll]);
 
-  // Auto-refresh crawl status while polling
+  // Auto-refresh crawl status + rebuild status while polling
   const [banPanelOpen, setBanPanelOpen] = useState(true);
   const [polling, setPolling] = useState(false);
+  const [rebuildStatus, setRebuildStatus] = useState('idle');
   useEffect(() => {
     if (!polling) return;
     const id = setInterval(async () => {
       const cs = await fetchCrawlStatus();
       setCrawlStatus(cs);
-    }, 5000);
-    const timeout = setTimeout(() => setPolling(false), 120000);
+      try {
+        const { fetchRebuildStatus } = await import('../../lib/api');
+        const rs = await fetchRebuildStatus();
+        setRebuildStatus(rs.status || 'idle');
+        if (rs.status === 'complete') {
+          setPolling(false);
+          setRebuildStatus('idle');
+          showAction('Rebuild complete!');
+          loadAll();
+        }
+      } catch { /* ignore */ }
+    }, 3000);
+    const timeout = setTimeout(() => setPolling(false), 600000); // 10 min max
     return () => {
       clearInterval(id);
       clearTimeout(timeout);
@@ -658,9 +670,36 @@ export default function SettingsPage() {
           <Button onClick={loadAll} variant="secondary" size="sm" className="w-full">
             Refresh All
           </Button>
-          <Button onClick={handleRebuild} variant="danger" size="sm" className="w-full">
-            Full Rebuild (Clean + Crawl + Index)
+          <Button onClick={handleRebuild} variant="danger" size="sm" className="w-full" disabled={rebuildStatus !== 'idle'}>
+            {rebuildStatus !== 'idle' ? 'Rebuilding...' : 'Full Rebuild (Clean + Crawl + Index)'}
           </Button>
+          {rebuildStatus !== 'idle' && rebuildStatus !== 'complete' && (
+            <div className="mt-1 space-y-1">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-op-ocean animate-pulse" />
+                <span className="text-[10px] text-op-ocean font-mono">
+                  {rebuildStatus.replace(/_/g, ' ')}
+                </span>
+              </div>
+              <div className="w-full bg-surface-2 rounded-full h-1">
+                <div
+                  className="bg-op-ocean h-1 rounded-full transition-all duration-500"
+                  style={{
+                    width: `${
+                      rebuildStatus === 'cleaning_done' ? 10 :
+                      rebuildStatus === 'crawling_bandai' ? 25 :
+                      rebuildStatus === 'crawling_prices' ? 45 :
+                      rebuildStatus === 'loading_cards' ? 55 :
+                      rebuildStatus === 'building_keywords' ? 65 :
+                      rebuildStatus === 'building_edges' ? 75 :
+                      rebuildStatus === 'crawling_tournaments' ? 85 :
+                      rebuildStatus === 'applying_bans' ? 95 : 0
+                    }%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
           {actionMsg && (
             <p className="text-[10px] text-op-ocean mt-1">{actionMsg}</p>
           )}
