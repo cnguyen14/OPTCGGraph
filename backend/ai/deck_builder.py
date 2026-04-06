@@ -258,6 +258,8 @@ async def build_deck(
                 "card_type": c.get("card_type", ""),
                 "keywords": c.get("keywords", []),
                 "market_price": c.get("market_price"),
+                "tournament_pick_rate": c.get("tournament_pick_rate"),
+                "top_cut_rate": c.get("top_cut_rate"),
             }
             for c in deck
         ],
