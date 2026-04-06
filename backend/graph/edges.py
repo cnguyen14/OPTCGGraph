@@ -133,6 +133,8 @@ async def build_all_edges(
     if tracer:
         tracer.log("neo4j_start", step="build_all_edges")
 
+    import asyncio
+
     results = {}
     for name, fn in [
         ("SYNERGY", build_synergy_edges),
@@ -141,8 +143,10 @@ async def build_all_edges(
         ("LED_BY", build_led_by_edges),
     ]:
         et = time.time()
+        logger.info("Building %s edges...", name)
         results[name] = await fn(driver)
         edge_ms = round((time.time() - et) * 1000, 1)
+        logger.info("  %s: %d edges in %.1fs", name, results[name], edge_ms / 1000)
         if tracer:
             tracer.log(
                 "edge_built",
@@ -150,6 +154,8 @@ async def build_all_edges(
                 count=results[name],
                 latency_ms=edge_ms,
             )
+        # Let Neo4j reclaim memory between heavy edge computations
+        await asyncio.sleep(2)
 
     latency_ms = round((time.time() - t0) * 1000, 1)
     logger.info(f"All edges built: {results} ({latency_ms}ms)")

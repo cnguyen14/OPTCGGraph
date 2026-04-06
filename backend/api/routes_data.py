@@ -1,5 +1,6 @@
 """Data management API endpoints."""
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -58,11 +59,21 @@ async def rebuild(background_tasks: BackgroundTasks):
             await redis.set("rebuild:status", f"error: {e}")
 
     async def _run_pipeline(driver, redis, now):
-        # Step 1: Clean Neo4j
+        # Step 1: Clean Neo4j (delete in batches to avoid memory overflow)
         logger.info("[Rebuild 1/8] Cleaning Neo4j...")
-        async with driver.session() as session:
-            await session.run("MATCH (n) WHERE n:Card OR n:Color OR n:Family OR n:Set OR n:Keyword DETACH DELETE n")
+        for label in ["Card", "Keyword", "Family", "Color", "Set", "CostTier", "Deck", "Tournament"]:
+            deleted = 1
+            while deleted > 0:
+                async with driver.session() as session:
+                    result = await session.run(
+                        f"MATCH (n:{label}) WITH n LIMIT 500 DETACH DELETE n RETURN count(*) AS cnt"
+                    )
+                    rec = await result.single()
+                    deleted = rec["cnt"] if rec else 0
+                if deleted > 0:
+                    logger.info("[Rebuild 1/8] Deleted %d %s nodes", deleted, label)
         await redis.set("rebuild:status", "cleaning_done")
+        logger.info("[Rebuild 1/8] Clean complete")
 
         # Step 2: Crawl Bandai (cards + images)
         logger.info("[Rebuild 2/8] Crawling Bandai (51 series)...")
@@ -104,7 +115,10 @@ async def rebuild(background_tasks: BackgroundTasks):
         parsed = await parse_abilities(bandai_cards, force_regex=True)
         await build_keyword_graph(driver, parsed, bandai_cards)
 
-        # Step 6: Build synergy edges
+        # Let Neo4j reclaim memory between heavy operations
+        await asyncio.sleep(3)
+
+        # Step 6: Build synergy edges (memory-heavy — one type at a time)
         logger.info("[Rebuild 6/8] Building synergy edges...")
         await redis.set("rebuild:status", "building_edges")
         await build_all_edges(driver)
