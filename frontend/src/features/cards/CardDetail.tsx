@@ -67,7 +67,7 @@ export default function CardDetail({ card, onClose }: Props) {
             )}
           </div>
 
-          {card.colors.length > 0 && (
+          {(card.colors?.length ?? 0) > 0 && (
             <div className="mb-3">
               <span className="text-text-secondary text-sm">Colors: </span>
               {card.colors.map(c => {
@@ -79,7 +79,7 @@ export default function CardDetail({ card, onClose }: Props) {
             </div>
           )}
 
-          {card.families.length > 0 && (
+          {(card.families?.length ?? 0) > 0 && (
             <div className="mb-3">
               <span className="text-text-secondary text-sm">Family: </span>
               {card.families.map(f => (
@@ -97,7 +97,7 @@ export default function CardDetail({ card, onClose }: Props) {
             </div>
           )}
 
-          {card.keywords.length > 0 && (
+          {(card.keywords?.length ?? 0) > 0 && (
             <div className="mb-3">
               <div className="text-text-secondary text-sm mb-1">Keywords</div>
               <div className="flex flex-wrap gap-1">
