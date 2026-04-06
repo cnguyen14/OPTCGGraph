@@ -142,6 +142,15 @@ async def rebuild(background_tasks: BackgroundTasks):
     return {"status": "rebuild_started"}
 
 
+@router.post("/rebuild-stop")
+async def rebuild_stop():
+    """Force-reset rebuild status to idle (for stuck builds)."""
+    redis = await get_redis()
+    await redis.set("rebuild:status", "idle")
+    logger.info("[Rebuild] Force-stopped by user")
+    return {"status": "stopped"}
+
+
 @router.get("/rebuild-status")
 async def rebuild_status():
     """Get current rebuild progress."""

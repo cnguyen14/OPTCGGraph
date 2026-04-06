@@ -404,6 +404,11 @@ export async function fetchRebuildStatus(): Promise<{ status: string; last_run: 
   return resp.json();
 }
 
+export async function stopRebuild(): Promise<{ status: string }> {
+  const resp = await fetch(`${BASE_URL}/data/rebuild-stop`, { method: 'POST' });
+  return resp.json();
+}
+
 export async function fetchBannedCards(): Promise<BannedCard[]> {
   const resp = await fetch(`${BASE_URL}/data/banned-cards`);
   return resp.json();

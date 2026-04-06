@@ -560,6 +560,8 @@ export default function SettingsPage() {
   const [banPanelOpen, setBanPanelOpen] = useState(true);
   const [polling, setPolling] = useState(false);
   const [rebuildStatus, setRebuildStatus] = useState('idle');
+  const [rebuildStuckCount, setRebuildStuckCount] = useState(0);
+  const [lastRebuildStep, setLastRebuildStep] = useState('');
   useEffect(() => {
     if (!polling) return;
     const id = setInterval(async () => {
@@ -568,21 +570,45 @@ export default function SettingsPage() {
       try {
         const { fetchRebuildStatus } = await import('../../lib/api');
         const rs = await fetchRebuildStatus();
-        setRebuildStatus(rs.status || 'idle');
-        if (rs.status === 'complete') {
+        const status = rs.status || 'idle';
+        setRebuildStatus(status);
+
+        if (status === 'complete') {
           setPolling(false);
           setRebuildStatus('idle');
+          setRebuildStuckCount(0);
           showAction('Rebuild complete!');
           loadAll();
+        } else if (status.startsWith('error')) {
+          setPolling(false);
+          showAction(`Rebuild failed: ${status}`);
+          setRebuildStuckCount(0);
+        } else if (status !== 'idle') {
+          // Stuck detection: if same step for 90s (30 polls × 3s)
+          if (status === lastRebuildStep) {
+            setRebuildStuckCount(prev => prev + 1);
+          } else {
+            setRebuildStuckCount(0);
+            setLastRebuildStep(status);
+          }
         }
       } catch { /* ignore */ }
     }, 3000);
-    const timeout = setTimeout(() => setPolling(false), 600000); // 10 min max
+    const timeout = setTimeout(() => setPolling(false), 600000);
     return () => {
       clearInterval(id);
       clearTimeout(timeout);
     };
-  }, [polling]);
+  }, [polling, lastRebuildStep]);
+
+  const handleStopRebuild = async () => {
+    const { stopRebuild } = await import('../../lib/api');
+    await stopRebuild();
+    setRebuildStatus('idle');
+    setPolling(false);
+    setRebuildStuckCount(0);
+    showAction('Rebuild stopped');
+  };
 
   const showAction = (msg: string) => {
     setActionMsg(msg);
@@ -689,12 +715,12 @@ export default function SettingsPage() {
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-op-ocean animate-pulse" />
                 <span className="text-[10px] text-op-ocean font-mono">
-                  {rebuildStatus.replace(/_/g, ' ')}
+                  {rebuildStatus.startsWith('error') ? rebuildStatus : rebuildStatus.replace(/_/g, ' ')}
                 </span>
               </div>
               <div className="w-full bg-surface-2 rounded-full h-1">
                 <div
-                  className="bg-op-ocean h-1 rounded-full transition-all duration-500"
+                  className={`h-1 rounded-full transition-all duration-500 ${rebuildStatus.startsWith('error') ? 'bg-red-500' : 'bg-op-ocean'}`}
                   style={{
                     width: `${
                       rebuildStatus === 'cleaning_done' ? 10 :
@@ -704,11 +730,20 @@ export default function SettingsPage() {
                       rebuildStatus === 'building_keywords' ? 65 :
                       rebuildStatus === 'building_edges' ? 75 :
                       rebuildStatus === 'crawling_tournaments' ? 85 :
-                      rebuildStatus === 'applying_bans' ? 95 : 0
+                      rebuildStatus === 'applying_bans' ? 95 :
+                      rebuildStatus.startsWith('error') ? 100 : 0
                     }%`,
                   }}
                 />
               </div>
+              {rebuildStuckCount >= 30 && (
+                <p className="text-[10px] text-yellow-400">
+                  Appears stuck on this step. Consider stopping.
+                </p>
+              )}
+              <Button onClick={handleStopRebuild} variant="secondary" size="sm" className="w-full mt-1">
+                Stop Rebuild
+              </Button>
             </div>
           )}
           {actionMsg && (
