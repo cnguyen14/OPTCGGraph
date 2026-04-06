@@ -101,7 +101,7 @@ async def rebuild(background_tasks: BackgroundTasks):
         # Step 5: Parse abilities + build keyword graph
         logger.info("[Rebuild 5/8] Parsing abilities + building keyword graph...")
         await redis.set("rebuild:status", "building_keywords")
-        parsed = await parse_abilities(bandai_cards)
+        parsed = await parse_abilities(bandai_cards, force_regex=True)
         await build_keyword_graph(driver, parsed, bandai_cards)
 
         # Step 6: Build synergy edges

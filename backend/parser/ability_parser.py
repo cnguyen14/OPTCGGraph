@@ -32,13 +32,18 @@ async def parse_abilities(
     cards: list[dict],
     batch_size: int = BATCH_SIZE,
     tracer: CrawlTracer | None = None,
+    force_regex: bool = False,
 ) -> list[dict]:
-    """Parse ability text for all cards using LLM in concurrent batches.
+    """Parse ability text for all cards using LLM or regex.
+
+    Args:
+        force_regex: If True, always use regex parser (fast, free).
+                     Recommended for bulk rebuild operations.
 
     Returns list of parsed results: [{card_id, timing_keywords, ability_keywords, ...}]
     """
     t0 = time.time()
-    use_llm = has_any_llm_key()
+    use_llm = has_any_llm_key() and not force_regex
 
     if not use_llm:
         logger.warning("No LLM API key configured, using regex fallback parser")
