@@ -543,6 +543,17 @@ export default function SettingsPage() {
 
   useEffect(() => {
     loadAll();
+    // Check if a rebuild is already running (e.g. after page refresh)
+    (async () => {
+      try {
+        const { fetchRebuildStatus } = await import('../../lib/api');
+        const rs = await fetchRebuildStatus();
+        if (rs.status && rs.status !== 'idle' && rs.status !== 'complete') {
+          setRebuildStatus(rs.status);
+          setPolling(true);
+        }
+      } catch { /* ignore */ }
+    })();
   }, [loadAll]);
 
   // Auto-refresh crawl status + rebuild status while polling
