@@ -159,7 +159,7 @@ async def step_index(background_tasks: BackgroundTasks):
             logger.info("[Index] Crawling tournament data...")
             try:
                 tournament_data = await crawl_limitlesstcg()
-                await load_tournament_data(driver, tournament_data)
+                await load_tournament_data(driver, tournament_data.get("tournaments", []), tournament_data.get("decks", []))
                 await compute_card_meta_stats(driver)
                 await redis.set("crawl:limitlesstcg:last_run", now)
                 await redis.set("crawl:limitlesstcg:count", str(len(tournament_data.get("decks", []))))
@@ -282,7 +282,7 @@ async def rebuild(background_tasks: BackgroundTasks):
 
         try:
             tournament_data = await crawl_limitlesstcg()
-            await load_tournament_data(driver, tournament_data)
+            await load_tournament_data(driver, tournament_data.get("tournaments", []), tournament_data.get("decks", []))
             await compute_card_meta_stats(driver)
             await redis.set("crawl:limitlesstcg:last_run", now)
             await redis.set("crawl:limitlesstcg:count", str(len(tournament_data.get("decks", []))))
