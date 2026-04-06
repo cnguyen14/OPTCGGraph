@@ -276,10 +276,13 @@ export default function FloatingChat({ sessionId, onSessionId, clientId, leaderI
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Persist sessionId to localStorage
+  // Persist sessionId to localStorage, clear messages when session reset
   useEffect(() => {
     if (sessionId) {
       localStorage.setItem('optcg-chat-session', sessionId);
+    } else {
+      localStorage.removeItem('optcg-chat-session');
+      setMessages([]);
     }
   }, [sessionId]);
 
