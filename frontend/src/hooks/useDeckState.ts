@@ -152,6 +152,7 @@ export function useDeckState() {
 
   const clearLeader = useCallback(() => {
     setLeader(null);
+    setDeckNotes('');
   }, []);
 
   const bulkReplace = useCallback((removes: string[], adds: Card[]) => {
