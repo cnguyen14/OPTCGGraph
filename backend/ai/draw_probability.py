@@ -20,9 +20,9 @@ CARDS_SEEN_BY_TURN = {1: 6, 2: 7, 3: 8, 4: 9, 5: 10}
 ROLE_TARGET_TURNS = {
     "blockers": 4,  # Need blockers by mid game
     "removal": 4,
-    "draw": 3,      # Want draw engine early
+    "draw": 3,  # Want draw engine early
     "searcher": 3,  # Searchers most valuable early
-    "rush": 2,      # Rush matters turn 1-2
+    "rush": 2,  # Rush matters turn 1-2
 }
 
 
@@ -35,9 +35,7 @@ def p_draw_at_least_one(deck_size: int, copies: int, cards_drawn: int) -> float:
     return 1.0 - comb(deck_size - copies, cards_drawn) / comb(deck_size, cards_drawn)
 
 
-def p_draw_at_least_k(
-    deck_size: int, copies: int, cards_drawn: int, k: int
-) -> float:
+def p_draw_at_least_k(deck_size: int, copies: int, cards_drawn: int, k: int) -> float:
     """P(draw ≥k copies) using hypergeometric CDF complement."""
     if k <= 0:
         return 1.0
@@ -61,9 +59,7 @@ def p_draw_at_least_k(
     return 1.0 - p_less_than_k
 
 
-def analyze_deck_draw_probability(
-    cards: list[dict], opening_hand: int = 5
-) -> dict:
+def analyze_deck_draw_probability(cards: list[dict], opening_hand: int = 5) -> dict:
     """Compute draw probabilities for a full deck.
 
     Args:
@@ -78,7 +74,12 @@ def analyze_deck_draw_probability(
         return {
             "opening_hand_size": opening_hand,
             "deck_size": 0,
-            "early_game_access": {"probability": 0, "eligible_cards": 0, "threshold": 0.80, "status": "FAIL"},
+            "early_game_access": {
+                "probability": 0,
+                "eligible_cards": 0,
+                "threshold": 0.80,
+                "status": "FAIL",
+            },
             "role_access": {},
             "per_card": [],
             "consistency_score": 0,
@@ -93,8 +94,7 @@ def analyze_deck_draw_probability(
     # --- Early game access ---
     # Count cards playable on turn 1-2 (cost ≤ 2)
     early_game_copies = sum(
-        cnt for cid, cnt in id_counts.items()
-        if (unique_cards[cid].get("cost") or 0) <= 2
+        cnt for cid, cnt in id_counts.items() if (unique_cards[cid].get("cost") or 0) <= 2
     )
     early_p = p_draw_at_least_one(deck_size, early_game_copies, opening_hand)
     early_threshold = 0.80
@@ -111,7 +111,8 @@ def analyze_deck_draw_probability(
     for role, role_kws in ROLE_KEYWORDS.items():
         role_kw_set = set(role_kws)
         role_copies = sum(
-            cnt for cid, cnt in id_counts.items()
+            cnt
+            for cid, cnt in id_counts.items()
             if set(unique_cards[cid].get("keywords") or []) & role_kw_set
         )
         target_turn = ROLE_TARGET_TURNS.get(role, 4)
@@ -126,14 +127,20 @@ def analyze_deck_draw_probability(
     per_card = []
     for cid, card in sorted(unique_cards.items(), key=lambda x: -(id_counts[x[0]])):
         copies = id_counts[cid]
-        per_card.append({
-            "card_id": cid,
-            "name": card.get("name", ""),
-            "copies": copies,
-            "p_opening_hand": round(p_draw_at_least_one(deck_size, copies, opening_hand), 3),
-            "p_by_turn_3": round(p_draw_at_least_one(deck_size, copies, CARDS_SEEN_BY_TURN[3]), 3),
-            "p_by_turn_5": round(p_draw_at_least_one(deck_size, copies, CARDS_SEEN_BY_TURN[5]), 3),
-        })
+        per_card.append(
+            {
+                "card_id": cid,
+                "name": card.get("name", ""),
+                "copies": copies,
+                "p_opening_hand": round(p_draw_at_least_one(deck_size, copies, opening_hand), 3),
+                "p_by_turn_3": round(
+                    p_draw_at_least_one(deck_size, copies, CARDS_SEEN_BY_TURN[3]), 3
+                ),
+                "p_by_turn_5": round(
+                    p_draw_at_least_one(deck_size, copies, CARDS_SEEN_BY_TURN[5]), 3
+                ),
+            }
+        )
 
     # --- Consistency score (0-100) ---
     # 30 pts: early game access
@@ -156,7 +163,8 @@ def analyze_deck_draw_probability(
 
     # 20 pts: searcher boost — decks with searchers have higher effective consistency
     searcher_copies = sum(
-        cnt for cid, cnt in id_counts.items()
+        cnt
+        for cid, cnt in id_counts.items()
         if "Search" in (unique_cards[cid].get("keywords") or [])
     )
     searcher_boost = min(searcher_copies / 8, 1.0)  # Max boost at 8 searcher copies

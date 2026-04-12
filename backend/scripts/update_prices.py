@@ -6,14 +6,12 @@ import sys
 import time
 from datetime import datetime, timezone
 
-sys.path.insert(
-    0, str(__import__("pathlib").Path(__file__).resolve().parent.parent.parent)
-)
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent.parent))
 
 from backend.crawlers.optcgapi import crawl_optcgapi
 from backend.crawlers.tracer import CrawlTracer
 from backend.graph.batch import batch_write
-from backend.graph.connection import get_driver, close_driver
+from backend.graph.connection import close_driver, get_driver
 
 logging.basicConfig(
     level=logging.INFO,

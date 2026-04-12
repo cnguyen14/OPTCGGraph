@@ -206,9 +206,7 @@ def evaluate_board(state: GameState, player_id: str) -> float:
     score -= active_opp * 10.0
 
     # Blocker presence — defensive value
-    blockers_own = sum(
-        1 for c in player.characters if _has_effect(c, EffectType.BLOCKER)
-    )
+    blockers_own = sum(1 for c in player.characters if _has_effect(c, EffectType.BLOCKER))
     score += blockers_own * 8.0
 
     # Effect quality on board
@@ -320,9 +318,7 @@ def _estimate_action_value(
             if power_gap < 0:
                 return -5.0
             # Value = remove threat from board
-            removal_value = (
-                _keyword_score(target) * 5.0 + target.effective_power * 0.003
-            )
+            removal_value = _keyword_score(target) * 5.0 + target.effective_power * 0.003
             return removal_value + 10.0
 
     return 0.0
@@ -511,9 +507,7 @@ class HeuristicAgent:
                 player_hand_size=len(player.hand),
                 player_field_power=sum(c.effective_power for c in player.characters),
                 player_don_available=player.don_field,
-                opponent_field_power=sum(
-                    c.effective_power for c in opponent.characters
-                ),
+                opponent_field_power=sum(c.effective_power for c in opponent.characters),
                 opponent_hand_size=len(opponent.hand),
                 num_legal_actions=len(legal_actions),
                 action_scores=scores or [],
@@ -576,9 +570,7 @@ class HeuristicAgent:
     # Main phase
     # ------------------------------------------------------------------
 
-    async def choose_main_action(
-        self, state: GameState, legal_actions: list[GameAction]
-    ) -> int:
+    async def choose_main_action(self, state: GameState, legal_actions: list[GameAction]) -> int:
         if len(legal_actions) <= 1:
             self._log_decision(state, legal_actions, 0)
             return 0
@@ -611,19 +603,13 @@ class HeuristicAgent:
 
         # --- Heuristic path for new/amateur/easy/medium ---
         play_actions = [
-            (i, a)
-            for i, a in enumerate(legal_actions)
-            if a.action_type == ActionType.PLAY_CARD
+            (i, a) for i, a in enumerate(legal_actions) if a.action_type == ActionType.PLAY_CARD
         ]
         don_actions = [
-            (i, a)
-            for i, a in enumerate(legal_actions)
-            if a.action_type == ActionType.ATTACH_DON
+            (i, a) for i, a in enumerate(legal_actions) if a.action_type == ActionType.ATTACH_DON
         ]
         attack_actions = [
-            (i, a)
-            for i, a in enumerate(legal_actions)
-            if a.action_type == ActionType.ATTACK
+            (i, a) for i, a in enumerate(legal_actions) if a.action_type == ActionType.ATTACK
         ]
 
         plays_first = self.rng.random() < prof["play_before_attack"]
@@ -633,15 +619,11 @@ class HeuristicAgent:
         if plays_first:
             chosen = self._try_play_card(play_actions, player)
             if chosen is None:
-                chosen = self._try_attach_don(
-                    don_actions, player, opponent, can_attack=has_attacks
-                )
+                chosen = self._try_attach_don(don_actions, player, opponent, can_attack=has_attacks)
             if chosen is None:
                 chosen = self._try_attack(attack_actions, player, opponent, state)
         else:
-            chosen = self._try_attach_don(
-                don_actions, player, opponent, can_attack=has_attacks
-            )
+            chosen = self._try_attach_don(don_actions, player, opponent, can_attack=has_attacks)
             if chosen is None:
                 chosen = self._try_attack(attack_actions, player, opponent, state)
             if chosen is None:
@@ -676,8 +658,7 @@ class HeuristicAgent:
         )
         # Check if there are affordable cards at all
         has_playable_cards = any(
-            c.card_type in ("CHARACTER", "EVENT", "STAGE")
-            and c.cost <= player.don_field
+            c.card_type in ("CHARACTER", "EVENT", "STAGE") and c.cost <= player.don_field
             for c in player.hand
         )
         # Check if we have unattached DON and active attackers
@@ -790,8 +771,7 @@ class HeuristicAgent:
             if prof["don_boost_awareness"] >= 0.85:
                 tv = _keyword_score(target) + target.effective_power / 1000.0
                 bv = (
-                    _keyword_score(sorted_blockers[0])
-                    + sorted_blockers[0].effective_power / 1000.0
+                    _keyword_score(sorted_blockers[0]) + sorted_blockers[0].effective_power / 1000.0
                 )
                 if tv > bv + 2.0:
                     return sorted_blockers[0]
@@ -825,25 +805,19 @@ class HeuristicAgent:
         # Aggressive countering (new/easy players counter everything)
         if prof["counter_aggressively"]:
             if self.rng.random() < 0.7:
-                return self._select_counters(
-                    counter_cards, power_gap, state.defending_player
-                )
+                return self._select_counters(counter_cards, power_gap, state.defending_player)
             return []
 
         # Pro/hard path: evaluate whether countering is worth the card cost
         if prof.get("use_lookahead"):
-            return self._smart_counter_decision(
-                state, counter_cards, power_gap, life, archetype
-            )
+            return self._smart_counter_decision(state, counter_cards, power_gap, life, archetype)
 
         # Standard heuristic: take early life, counter later
         if life >= 4:
             return []
         if life == 3:
             low_utility = [
-                c
-                for c in counter_cards
-                if _card_utility(c, state.defending_player) < 3.0
+                c for c in counter_cards if _card_utility(c, state.defending_player) < 3.0
             ]
             if low_utility:
                 return self._select_counters(
@@ -854,9 +828,7 @@ class HeuristicAgent:
         sorted_by_utility = sorted(
             counter_cards, key=lambda c: _card_utility(c, state.defending_player)
         )
-        return self._select_counters(
-            sorted_by_utility, power_gap, state.defending_player
-        )
+        return self._select_counters(sorted_by_utility, power_gap, state.defending_player)
 
     def _smart_counter_decision(
         self,
@@ -881,34 +853,24 @@ class HeuristicAgent:
 
         # Always counter at 0 life (next hit loses)
         if life == 0:
-            sorted_by_utility = sorted(
-                counter_cards, key=lambda c: _card_utility(c, player)
-            )
+            sorted_by_utility = sorted(counter_cards, key=lambda c: _card_utility(c, player))
             return self._select_counters(sorted_by_utility, power_gap, player)
 
         # Critical life (1): always counter
         if life == 1:
-            sorted_by_utility = sorted(
-                counter_cards, key=lambda c: _card_utility(c, player)
-            )
+            sorted_by_utility = sorted(counter_cards, key=lambda c: _card_utility(c, player))
             return self._select_counters(sorted_by_utility, power_gap, player)
 
         # Dangerous (2): counter with lowest-utility cards
         if life == 2:
             if archetype == "aggro":
                 # Aggro: counter with only expendable cards
-                low_utility = [
-                    c for c in counter_cards if _card_utility(c, player) < 3.0
-                ]
+                low_utility = [c for c in counter_cards if _card_utility(c, player) < 3.0]
                 if low_utility:
-                    return self._select_counters(
-                        low_utility, power_gap, player, max_cards=2
-                    )
+                    return self._select_counters(low_utility, power_gap, player, max_cards=2)
                 return []
             # Midrange/Control: always counter at life 2
-            sorted_by_utility = sorted(
-                counter_cards, key=lambda c: _card_utility(c, player)
-            )
+            sorted_by_utility = sorted(counter_cards, key=lambda c: _card_utility(c, player))
             return self._select_counters(sorted_by_utility, power_gap, player)
 
         # Life 3: only counter if opponent has many threats or we're control
@@ -934,9 +896,7 @@ class HeuristicAgent:
         if not play_actions:
             return None
 
-        affordable = [
-            (i, a) for i, a in play_actions if _extract_cost(a) <= player.don_field
-        ]
+        affordable = [(i, a) for i, a in play_actions if _extract_cost(a) <= player.don_field]
         if not affordable:
             return None
 
@@ -1301,9 +1261,7 @@ class LLMAgent:
         if self._use_openrouter:
             self._openrouter_key = get_active_api_key("openrouter")
             if not self._openrouter_key:
-                raise ValueError(
-                    "OpenRouter API key not configured. Set it in Settings > BYOK."
-                )
+                raise ValueError("OpenRouter API key not configured. Set it in Settings > BYOK.")
             self.client = None
             self._http_client = httpx.AsyncClient(timeout=15)
         else:
@@ -1318,18 +1276,14 @@ class LLMAgent:
                     self.client = None
                     self._http_client = httpx.AsyncClient(timeout=15)
                 else:
-                    raise ValueError(
-                        "No LLM API key configured. Set one in Settings > BYOK."
-                    )
+                    raise ValueError("No LLM API key configured. Set one in Settings > BYOK.")
             else:
                 self._openrouter_key = ""
                 self._http_client = None
                 self.client = anthropic.AsyncAnthropic(api_key=claude_key)
         prompt_key = f"{role}_{level}"
         self._system = (
-            LLM_PROMPTS.get(prompt_key, LLM_PROMPTS["bot_medium"])
-            + "\n"
-            + LLM_BASE_RULES
+            LLM_PROMPTS.get(prompt_key, LLM_PROMPTS["bot_medium"]) + "\n" + LLM_BASE_RULES
         )
         self._fallback = HeuristicAgent(role=role, level=level)
         self._decision_collector: list[DecisionPoint] | None = None
@@ -1357,9 +1311,7 @@ class LLMAgent:
         rush_count = sum(1 for c in deck if "Rush" in c.keywords)
         blocker_count = sum(1 for c in deck if "Blocker" in c.keywords)
         removal_count = sum(
-            1
-            for c in deck
-            if any(k.lower() in ("ko", "bounce", "rest") for k in c.keywords)
+            1 for c in deck if any(k.lower() in ("ko", "bounce", "rest") for k in c.keywords)
         )
         counter_count = sum(1 for c in deck if c.counter > 0)
         if avg_cost <= 3.5 and rush_count >= 4:
@@ -1374,13 +1326,9 @@ class LLMAgent:
             f"{removal_count} Removal, {counter_count}/{len(deck)} Counter)"
         )
         if archetype == "Aggro":
-            self._game_strategy = (
-                "Rush damage early, use Rush characters, go for lethal by Turn 7"
-            )
+            self._game_strategy = "Rush damage early, use Rush characters, go for lethal by Turn 7"
         elif archetype == "Control":
-            self._game_strategy = (
-                "Survive early, remove threats, win with high-cost finishers"
-            )
+            self._game_strategy = "Survive early, remove threats, win with high-cost finishers"
         else:
             self._game_strategy = (
                 "Build board efficiently, apply steady pressure, adapt to opponent"
@@ -1418,9 +1366,7 @@ class LLMAgent:
                 player_hand_size=len(player.hand),
                 player_field_power=sum(c.effective_power for c in player.characters),
                 player_don_available=player.don_field,
-                opponent_field_power=sum(
-                    c.effective_power for c in opponent.characters
-                ),
+                opponent_field_power=sum(c.effective_power for c in opponent.characters),
                 opponent_hand_size=len(opponent.hand),
                 num_legal_actions=len(legal_actions),
                 action_scores=[],
@@ -1457,9 +1403,7 @@ class LLMAgent:
                 me = state.active_player
                 opp = state.defending_player
             score = evaluate_board(state, me.player_id)
-            phase = (
-                "early" if state.turn <= 3 else ("mid" if state.turn <= 6 else "late")
-            )
+            phase = "early" if state.turn <= 3 else ("mid" if state.turn <= 6 else "late")
             game_state = {
                 "life": len(me.life),
                 "opp_life": len(opp.life),
@@ -1508,7 +1452,7 @@ class LLMAgent:
                     latency_ms=latency,
                 )
                 return result
-            except (json.JSONDecodeError, KeyError, ValueError) as e:
+            except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 self._trace(
                     turn=0,
                     player=self.role,
@@ -1546,19 +1490,14 @@ class LLMAgent:
             if card.ability_text:
                 txt = card.ability_text[:80]
                 ability = f" — {txt}"
-            lines.append(
-                f"  {card.name} (Cost:{card.cost} P:{card.power}{kw}){ability}"
-            )
+            lines.append(f"  {card.name} (Cost:{card.cost} P:{card.power}{kw}){ability}")
         lines.append("")
         if self._deck_profile:
             lines.append(f"Deck: {self._deck_profile}")
         lines.append(
-            "Consider: Do you have early plays (cost 1-3)? "
-            "Is the curve good for turns 1-5?"
+            "Consider: Do you have early plays (cost 1-3)? Is the curve good for turns 1-5?"
         )
-        lines.append(
-            'Respond with ONLY valid JSON: {"mulligan": true} or {"mulligan": false}'
-        )
+        lines.append('Respond with ONLY valid JSON: {"mulligan": true} or {"mulligan": false}')
         return "\n".join(lines)
 
     def _is_trivial_decision(self, legal_actions: list[GameAction]) -> int | None:
@@ -1566,11 +1505,7 @@ class LLMAgent:
         if len(legal_actions) <= 1:
             return 0
 
-        non_pass = [
-            (i, a)
-            for i, a in enumerate(legal_actions)
-            if a.action_type != ActionType.PASS
-        ]
+        non_pass = [(i, a) for i, a in enumerate(legal_actions) if a.action_type != ActionType.PASS]
         # Only pass available (all other actions filtered)
         if not non_pass:
             return len(legal_actions) - 1  # Pass is always last
@@ -1581,9 +1516,7 @@ class LLMAgent:
 
         return None
 
-    async def choose_main_action(
-        self, state: GameState, legal_actions: list[GameAction]
-    ) -> int:
+    async def choose_main_action(self, state: GameState, legal_actions: list[GameAction]) -> int:
         # Skip LLM for trivial decisions
         trivial = self._is_trivial_decision(legal_actions)
         if trivial is not None:
@@ -1608,11 +1541,7 @@ class LLMAgent:
         if action.action_type == ActionType.ATTACK:
             attacker = _find_card(action.source_id, player)
             target = _find_card(action.target_id, opponent)
-            if (
-                attacker
-                and target
-                and attacker.effective_power < target.effective_power
-            ):
+            if attacker and target and attacker.effective_power < target.effective_power:
                 was_fallback = True
                 choice = await self._fallback.choose_main_action(state, legal_actions)
                 action = legal_actions[choice]
@@ -1680,7 +1609,7 @@ class LLMAgent:
                 idx = int(block_val)
                 if 0 <= idx < len(blockers):
                     return blockers[idx]
-            except (json.JSONDecodeError, KeyError, IndexError, ValueError) as e:
+            except (json.JSONDecodeError, KeyError, IndexError, ValueError, TypeError) as e:
                 self._trace(
                     turn=state.turn,
                     player=state.defending_player.player_id,
@@ -1748,9 +1677,7 @@ class LLMAgent:
         counter_cards = [c for c in hand if c.counter > 0]
         if not counter_cards:
             return []
-        prompt = self._build_counter_prompt(
-            state, counter_cards, attacker, target, power_gap
-        )
+        prompt = self._build_counter_prompt(state, counter_cards, attacker, target, power_gap)
         t0 = time.monotonic()
         text = await self._call_llm(prompt)
         latency = (time.monotonic() - t0) * 1000
@@ -1776,7 +1703,7 @@ class LLMAgent:
                         if isinstance(i, int) and 0 <= i < len(counter_cards)
                     ]
                     return selected
-            except (json.JSONDecodeError, KeyError, ValueError) as e:
+            except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                 self._trace(
                     turn=state.turn,
                     player=state.defending_player.player_id,
@@ -1803,9 +1730,7 @@ class LLMAgent:
                 error="no response",
                 state=state,
             )
-        return await self._fallback.choose_counters(
-            state, hand, attacker, target, power_gap
-        )
+        return await self._fallback.choose_counters(state, hand, attacker, target, power_gap)
 
     def _build_counter_prompt(
         self,
@@ -1828,9 +1753,7 @@ class LLMAgent:
         ]
         for i, c in enumerate(counter_cards):
             kw = f" [{', '.join(c.keywords)}]" if c.keywords else ""
-            lines.append(
-                f"  [{i}] {c.name} (Cost:{c.cost} P:{c.power} Counter:+{c.counter}{kw})"
-            )
+            lines.append(f"  [{i}] {c.name} (Cost:{c.cost} P:{c.power} Counter:+{c.counter}{kw})")
         # Strategic guidance based on life
         life_count = len(defender.life)
         lines.append("")
@@ -1840,9 +1763,7 @@ class LLMAgent:
                 "MUST counter if total counter >= power gap!"
             )
         elif life_count == 1:
-            lines.append(
-                "⚠ DANGER: Life = 1. Counter if possible — next unblocked hit is lethal."
-            )
+            lines.append("⚠ DANGER: Life = 1. Counter if possible — next unblocked hit is lethal.")
         elif life_count <= 3:
             lines.append(
                 "Counter only with low-value cards (low cost, no important abilities). "
@@ -1906,9 +1827,7 @@ class LLMAgent:
             if card.ability_text:
                 txt = card.ability_text[:80]
                 ability = f" — {txt}"
-            lines.append(
-                f"  {card.name} (Cost:{card.cost} P:{card.power}{kw}){ability}"
-            )
+            lines.append(f"  {card.name} (Cost:{card.cost} P:{card.power}{kw}){ability}")
 
         lines.append("Your field:")
         lines.append(
@@ -1922,9 +1841,7 @@ class LLMAgent:
 
         # Opponent threat assessment
         lines.append("Opp field:")
-        lines.append(
-            f"  Leader: {opponent.leader.name} P:{opponent.leader.effective_power}"
-        )
+        lines.append(f"  Leader: {opponent.leader.name} P:{opponent.leader.effective_power}")
         opp_threats: list[str] = []
         for card in opponent.field:
             status = "ACTIVE" if card.state == CardState.ACTIVE else "RESTED"
@@ -2037,6 +1954,6 @@ class LLMAgent:
             data = json.loads(text)
             idx = int(data.get("action_index", 0))
             return max(0, min(idx, num_options - 1))
-        except (json.JSONDecodeError, KeyError, IndexError, ValueError) as e:
+        except (json.JSONDecodeError, KeyError, IndexError, ValueError, TypeError) as e:
             logger.debug(f"LLM parse error: {e}")
             return 0

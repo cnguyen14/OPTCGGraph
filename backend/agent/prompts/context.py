@@ -28,17 +28,28 @@ def get_deck_context_section(deck: DeckContext) -> str:
             "No deck currently built. The user has not added any cards yet."
         )
     card_counts = Counter(deck.card_ids)
-    deck_summary = ", ".join(
-        f"{cnt}x {cid}" for cid, cnt in card_counts.most_common()
-    )
-    return (
-        f"\n## User's Current Deck ({len(deck.card_ids)}/50 cards)\n"
-        f"Leader: {deck.leader_id or 'Not set'}\n"
-        f"Cards: {deck_summary}\n"
+    deck_summary = ", ".join(f"{cnt}x {cid}" for cid, cnt in card_counts.most_common())
+    parts = [
+        f"\n## User's Current Deck ({len(deck.card_ids)}/50 cards)",
+        f"Leader: {deck.leader_id or 'Not set'}",
+        f"Cards: {deck_summary}",
+    ]
+
+    if deck.no_synergy_card_ids:
+        no_syn = ", ".join(deck.no_synergy_card_ids)
+        parts.append(
+            f"\n### Cards with No Synergy ({len(deck.no_synergy_card_ids)})\n"
+            f"These cards have 0 synergy connections with other cards in the deck: {no_syn}\n"
+            "When the user mentions 'cards with no synergy', they are referring to these specific cards. "
+            "Use these exact card IDs — do NOT guess which cards have no synergy."
+        )
+
+    parts.append(
         "\nYou can see the user's current deck above. When they ask to validate, "
         "use the validate_deck tool with this leader and these card IDs. "
         "When they ask about their deck, reference these actual cards."
     )
+    return "\n".join(parts)
 
 
 def get_leader_context_section(leader_id: str | None) -> str:

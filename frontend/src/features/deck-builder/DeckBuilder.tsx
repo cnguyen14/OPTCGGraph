@@ -17,9 +17,10 @@ interface Props {
   onCardSelect: (card: Card) => void;
   deckState: DeckStateReturn;
   chatOpen?: boolean;
+  onNoSynergyCards?: (cardIds: string[]) => void;
 }
 
-export default function DeckBuilder({ onCardSelect, deckState, chatOpen }: Props) {
+export default function DeckBuilder({ onCardSelect, deckState, chatOpen, onNoSynergyCards }: Props) {
   const {
     leader,
     entries,
@@ -262,6 +263,7 @@ export default function DeckBuilder({ onCardSelect, deckState, chatOpen }: Props
             leader={leader}
             entries={entries}
             onCardSelect={onCardSelect}
+            onNoSynergyCards={onNoSynergyCards}
           />
         </div>
       )}

@@ -32,7 +32,9 @@ async def stream_agent_response(result: dict) -> AsyncGenerator[str, None]:
     # Stream tool calls as steps
     for tc in result.get("tool_calls", []):
         yield _sse_event("STEP_STARTED", {"tool": tc["name"]})
-        yield _sse_event("STEP_FINISHED", {"tool": tc["name"], "result_preview": str(tc["result"])[:200]})
+        yield _sse_event(
+            "STEP_FINISHED", {"tool": tc["name"], "result_preview": str(tc["result"])[:200]}
+        )
 
     # UI state updates
     for ui in result.get("ui_updates", []):
@@ -46,7 +48,9 @@ async def stream_agent_response(result: dict) -> AsyncGenerator[str, None]:
         # Stream in chunks
         chunk_size = 50
         for i in range(0, len(text), chunk_size):
-            yield _sse_event("TextMessageContent", {"messageId": msg_id, "delta": text[i : i + chunk_size]})
+            yield _sse_event(
+                "TextMessageContent", {"messageId": msg_id, "delta": text[i : i + chunk_size]}
+            )
         yield _sse_event("TextMessageEnd", {"messageId": msg_id})
 
     # RUN_FINISHED

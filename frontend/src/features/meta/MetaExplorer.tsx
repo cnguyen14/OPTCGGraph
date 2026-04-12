@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { DeckStateReturn } from '../../hooks/useDeckState';
 import type { Card, MetaDeckSummary, MetaDeckDetail, MetaDeckCard, MetaOverview, SwapSuggestion } from '../../types';
 import {
@@ -71,40 +71,44 @@ export default function MetaExplorer({ onCardSelect, deckState }: Props) {
       });
   }, []);
 
+  const { addCard, entries, totalCards, leader } = deckState;
+
   const handleAddCard = useCallback(async (metaCard: MetaDeckCard) => {
     // Build full Card from meta card + fetch
     try {
       const card = await fetchCard(metaCard.id);
-      if (deckState.totalCards >= 50) {
+      if (totalCards >= 50) {
         // Deck full — suggest swap
         const deckCardIds: string[] = [];
-        deckState.entries.forEach((entry) => {
+        entries.forEach((entry) => {
           for (let i = 0; i < entry.quantity; i++) {
             deckCardIds.push(entry.card.id);
           }
         });
-        const suggestion = await suggestSwap(deckCardIds, metaCard.id, deckState.leader?.id);
+        const suggestion = await suggestSwap(deckCardIds, metaCard.id, leader?.id);
         if (suggestion) {
           setSwapInfo({ suggestion, incomingCard: metaCard });
         }
       } else {
-        deckState.addCard(card);
+        addCard(card);
       }
     } catch {
       // Card fetch failed
     }
-  }, [deckState]);
+  }, [addCard, entries, totalCards, leader]);
+
+  const { bulkReplace, loadDeckFromIds } = deckState;
 
   const handleConfirmSwap = useCallback(async () => {
     if (!swapInfo) return;
     try {
-      const addCard = await fetchCard(swapInfo.suggestion.add_id);
-      deckState.bulkReplace([swapInfo.suggestion.remove_id], [addCard]);
+      const swapCard = await fetchCard(swapInfo.suggestion.add_id);
+      bulkReplace([swapInfo.suggestion.remove_id], [swapCard]);
       setSwapInfo(null);
     } catch {
       // ignore
     }
-  }, [swapInfo, deckState]);
+  }, [swapInfo, bulkReplace]);
 
   const handleCopyFullDeck = useCallback(async () => {
     if (!selectedDeck) return;
@@ -114,11 +118,10 @@ export default function MetaExplorer({ onCardSelect, deckState }: Props) {
         cardIds.push(c.id);
       }
     }
-    await deckState.loadDeckFromIds(selectedDeck.leader_id, cardIds);
-  }, [selectedDeck, deckState]);
+    await loadDeckFromIds(selectedDeck.leader_id, cardIds);
+  }, [selectedDeck, loadDeckFromIds]);
 
   // Build DeckMap entries from selected tournament deck
-  const mapEntries = new Map<string, DeckEntry>();
   const [mapLeader, setMapLeader] = useState<Card | null>(null);
 
   useEffect(() => {
@@ -129,36 +132,40 @@ export default function MetaExplorer({ onCardSelect, deckState }: Props) {
     }
   }, [viewMode, selectedDeck?.leader_id]);
 
-  if (selectedDeck && viewMode === 'map') {
-    for (const mc of selectedDeck.cards) {
-      mapEntries.set(mc.id, {
-        card: {
-          id: mc.id,
-          code: '',
-          name: mc.name,
-          card_type: mc.card_type,
-          cost: mc.cost,
-          power: mc.power,
-          counter: mc.counter,
-          rarity: '',
-          attribute: '',
-          color: '',
-          ability: '',
-          trigger_effect: '',
-          image_small: mc.image_small,
-          image_large: '',
-          inventory_price: null,
-          market_price: null,
-          life: '',
-          colors: [],
-          families: [],
-          set_name: '',
-          keywords: mc.keywords,
-        },
-        quantity: mc.count,
-      });
+  const mapEntries = useMemo(() => {
+    const m = new Map<string, DeckEntry>();
+    if (selectedDeck && viewMode === 'map') {
+      for (const mc of selectedDeck.cards) {
+        m.set(mc.id, {
+          card: {
+            id: mc.id,
+            code: '',
+            name: mc.name,
+            card_type: mc.card_type,
+            cost: mc.cost,
+            power: mc.power,
+            counter: mc.counter,
+            rarity: '',
+            attribute: '',
+            color: '',
+            ability: '',
+            trigger_effect: '',
+            image_small: mc.image_small,
+            image_large: '',
+            inventory_price: null,
+            market_price: null,
+            life: '',
+            colors: [],
+            families: [],
+            set_name: '',
+            keywords: mc.keywords,
+          },
+          quantity: mc.count,
+        });
+      }
     }
-  }
+    return m;
+  }, [selectedDeck, viewMode]);
 
   // Group cards by type for list view
   const groupedCards: Record<string, MetaDeckCard[]> = {};
@@ -284,9 +291,9 @@ export default function MetaExplorer({ onCardSelect, deckState }: Props) {
             </div>
           ) : (
             <div className="divide-y divide-glass-border/50">
-              {decks.map((deck) => (
+              {decks.map((deck, i) => (
                 <button
-                  key={deck.id}
+                  key={`${deck.id}-${i}`}
                   onClick={() => handleDeckClick(deck.id)}
                   className={`w-full text-left px-4 py-2.5 hover:bg-surface-2 transition-colors ${
                     selectedDeck?.id === deck.id ? 'bg-surface-2 ring-1 ring-op-ocean' : ''

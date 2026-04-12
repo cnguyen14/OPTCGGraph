@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from backend.config import OPTCGAPI_BASE_URL, OPTCGAPI_DELAY, CRAWL_CACHE_DIR
+from backend.config import CRAWL_CACHE_DIR, OPTCGAPI_BASE_URL, OPTCGAPI_DELAY
 from backend.crawlers.families import parse_families
 
 if TYPE_CHECKING:
@@ -106,9 +106,7 @@ async def _fetch_endpoint(
             if resp.status_code == 200:
                 return resp.json()
             wait = 5 * (attempt + 1)
-            logger.warning(
-                f"  HTTP {resp.status_code} for {url}, retrying in {wait}s..."
-            )
+            logger.warning(f"  HTTP {resp.status_code} for {url}, retrying in {wait}s...")
             await asyncio.sleep(wait)
         except httpx.RequestError as e:
             wait = 5 * (attempt + 1)

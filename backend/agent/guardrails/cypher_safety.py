@@ -8,7 +8,9 @@ from typing import Any
 from backend.agent.types import GuardrailResult, JSONDict, ToolExecutionResult
 
 _WRITE_PATTERN = re.compile(
-    r"\b(CREATE|DELETE|DETACH\s+DELETE|SET|MERGE|REMOVE|DROP|CALL\s*\{)\b",
+    r"\b(CREATE|DELETE|DETACH\s+DELETE|SET|MERGE|REMOVE|DROP|"
+    r"CALL\s*\{|CALL\s+\w+\.\w+|LOAD\s+CSV|ALTER\s+DATABASE|"
+    r"GRANT|REVOKE)\b",
     re.IGNORECASE,
 )
 
@@ -24,15 +26,14 @@ class CypherSafetyGuard:
     def applies_to(self) -> tuple[str, ...]:
         return ("query_neo4j",)
 
-    async def check_pre(
-        self, tool_name: str, arguments: JSONDict, ctx: Any
-    ) -> GuardrailResult:
+    async def check_pre(self, tool_name: str, arguments: JSONDict, ctx: Any) -> GuardrailResult:
         cypher = arguments.get("cypher", "")
         if _WRITE_PATTERN.search(cypher):
             return GuardrailResult(
                 passed=False,
                 violations=(
-                    "Write operations (CREATE, DELETE, SET, MERGE, DROP, REMOVE) "
+                    "Write operations (CREATE, DELETE, SET, MERGE, DROP, REMOVE, "
+                    "CALL procedures, LOAD CSV, ALTER DATABASE, GRANT, REVOKE) "
                     "are not allowed in agent Cypher queries. Use read-only queries.",
                 ),
             )

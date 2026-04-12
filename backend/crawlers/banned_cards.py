@@ -119,9 +119,7 @@ async def _scrape_banlist() -> list[dict]:
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
         resp = await client.get(
             BANDAI_BANLIST_URL,
-            headers={
-                "User-Agent": "Mozilla/5.0 (OPTCG Knowledge Graph; card data research)"
-            },
+            headers={"User-Agent": "Mozilla/5.0 (OPTCG Knowledge Graph; card data research)"},
         )
         resp.raise_for_status()
         html = resp.text

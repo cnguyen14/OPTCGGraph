@@ -12,6 +12,7 @@ import {
   checkApiBalance,
   fetchProviderModels,
 } from '../../lib/api';
+import type { StepName } from '../../lib/api';
 import type {
   SystemStatus,
   CrawlStatus,
@@ -516,6 +517,7 @@ export default function SettingsPage() {
   const [balance, setBalance] = useState<{ has_balance: boolean; status: string; message: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [adminToken, setAdminToken] = useState(() => sessionStorage.getItem('admin_token') ?? '');
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -559,9 +561,9 @@ export default function SettingsPage() {
   // Auto-refresh crawl status + rebuild status while polling
   const [banPanelOpen, setBanPanelOpen] = useState(true);
   const [polling, setPolling] = useState(false);
-  const [rebuildStatus, setRebuildStatus] = useState('idle');
+  const [_rebuildStatus, setRebuildStatus] = useState('idle');
   const [stepStatuses, setStepStatuses] = useState<Record<string, string>>({ clean: 'idle', bandai: 'idle', prices: 'idle', banned: 'idle', tournaments: 'idle', index: 'idle' });
-  const [rebuildStuckCount, setRebuildStuckCount] = useState(0);
+  const [_rebuildStuckCount, setRebuildStuckCount] = useState(0);
   const [lastRebuildStep, setLastRebuildStep] = useState('');
   useEffect(() => {
     if (!polling) return;
@@ -610,7 +612,7 @@ export default function SettingsPage() {
 
   const handleStopRebuild = async () => {
     const { stopRebuild } = await import('../../lib/api');
-    await stopRebuild();
+    await stopRebuild(adminToken || undefined);
     setRebuildStatus('idle');
     setPolling(false);
     setRebuildStuckCount(0);
@@ -629,9 +631,13 @@ export default function SettingsPage() {
 
   const handleStep = async (step: string) => {
     const { triggerStep } = await import('../../lib/api');
-    await triggerStep(step as any);
-    showAction(`${step} started...`);
-    setPolling(true);
+    try {
+      await triggerStep(step as StepName, adminToken || undefined);
+      showAction(`${step} started...`);
+      setPolling(true);
+    } catch (err) {
+      showAction(err instanceof Error ? err.message : 'Step failed');
+    }
   };
 
   const handleModelSwitch = async (provider: string, model: string) => {
@@ -701,6 +707,21 @@ export default function SettingsPage() {
               Add Credits
             </a>
           )}
+        </div>
+
+        {/* Admin Token */}
+        <div>
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1.5 block">Admin Token</label>
+          <input
+            type="password"
+            value={adminToken}
+            onChange={(e) => {
+              setAdminToken(e.target.value);
+              sessionStorage.setItem('admin_token', e.target.value);
+            }}
+            placeholder="Required for data ops"
+            className="w-full text-xs bg-glass-bg border border-glass-border rounded-lg px-2 py-1.5 text-text-primary placeholder:text-text-muted/50 focus:outline-none focus:border-op-ocean/50"
+          />
         </div>
 
         {/* Actions */}
@@ -894,7 +915,10 @@ export default function SettingsPage() {
                   <div className="text-center">
                     <p className="text-sm">No banned cards found</p>
                     <p className="text-xs mt-1 mb-3">Fetch the ban list from Bandai</p>
-                    <Button onClick={handleRebuild} variant="danger" size="sm">
+                    <Button onClick={() => {
+                      const steps = ['bandai', 'prices', 'banned', 'tournaments', 'index'];
+                      steps.reduce((p, step) => p.then(() => handleStep(step)), Promise.resolve());
+                    }} variant="danger" size="sm">
                       Full Rebuild
                     </Button>
                   </div>

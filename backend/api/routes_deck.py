@@ -8,46 +8,46 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from pydantic import BaseModel, Field
 from neo4j import AsyncDriver
+from pydantic import BaseModel, Field
 
+from backend.ai.deck_suggestions import suggest_fixes
+from backend.ai.deck_validator import validate_deck
+from backend.api.models import (
+    AggregateAnalysisRequest,
+    CardHealthEntry,
+    DeckAnalyzeRequest,
+    DeckAnalyzeResponse,
+    DeckHealthAnalysisResponse,
+    DeckImproveRequest,
+    DeckImproveResponse,
+    Improvement,
+    ImprovementCard,
+    MatchupAnalysisRequest,
+    MatchupAnalysisResponse,
+    MatchupSpread,
+    SavedDeckListItem,
+    SavedDeckResponse,
+    SaveDeckRequest,
+    SimHistoryEntry,
+    SimHistoryRequest,
+    SimHistoryResponse,
+    SynergyPair,
+    ValidationSummary,
+)
+from backend.graph.connection import get_driver
+from backend.graph.queries import get_card_by_id
 from backend.services.llm_service import (
     LLMNotAvailableError,
     has_any_llm_key,
     llm_complete,
     strip_json_fences,
 )
-from backend.graph.connection import get_driver
-from backend.graph.queries import get_card_by_id
-from backend.ai.deck_validator import validate_deck
-from backend.ai.deck_suggestions import suggest_fixes
 from backend.simulator.analytics import (
     aggregate_deck_health,
     compute_detailed_sim_stats,
 )
 from backend.storage.redis_client import get_redis
-from backend.api.models import (
-    DeckAnalyzeRequest,
-    DeckAnalyzeResponse,
-    DeckImproveRequest,
-    DeckImproveResponse,
-    Improvement,
-    ImprovementCard,
-    AggregateAnalysisRequest,
-    CardHealthEntry,
-    DeckHealthAnalysisResponse,
-    MatchupAnalysisRequest,
-    MatchupAnalysisResponse,
-    MatchupSpread,
-    SynergyPair,
-    SaveDeckRequest,
-    SavedDeckResponse,
-    SavedDeckListItem,
-    SimHistoryEntry,
-    SimHistoryRequest,
-    SimHistoryResponse,
-    ValidationSummary,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -158,16 +158,19 @@ async def find_role_candidates(
 
         candidates = []
         async for rec in neo_result:
-            candidates.append({
-                "card_id": rec["card_id"],
-                "name": rec["name"] or "",
-                "image": rec["image"] or "",
-                "power": rec["power"] or 0,
-                "cost": rec["cost"] or 0,
-                "counter": rec["counter"] or 0,
-                "synergy_count": rec["synergy_count"] or 0,
-            })
+            candidates.append(
+                {
+                    "card_id": rec["card_id"],
+                    "name": rec["name"] or "",
+                    "image": rec["image"] or "",
+                    "power": rec["power"] or 0,
+                    "cost": rec["cost"] or 0,
+                    "counter": rec["counter"] or 0,
+                    "synergy_count": rec["synergy_count"] or 0,
+                }
+            )
         return candidates
+
 
 DECK_TTL_SECONDS = 90 * 24 * 3600  # 90 days
 
@@ -199,9 +202,7 @@ class DeckValidateRequest(BaseModel):
 
 
 @router.post("/validate")
-async def validate(
-    req: DeckValidateRequest, driver: AsyncDriver = Depends(_get_driver)
-):
+async def validate(req: DeckValidateRequest, driver: AsyncDriver = Depends(_get_driver)):
     """Validate a deck against official OPTCG rules and competitive quality standards.
 
     Returns a detailed report with PASS/FAIL/WARNING for each check.
@@ -246,9 +247,7 @@ def _compute_deck_hash(card_ids: list[str]) -> str:
     return hashlib.md5(json.dumps(sorted(card_ids)).encode()).hexdigest()[:12]
 
 
-async def _fetch_cards(
-    driver: AsyncDriver, card_ids: list[str]
-) -> tuple[list[dict], list[str]]:
+async def _fetch_cards(driver: AsyncDriver, card_ids: list[str]) -> tuple[list[dict], list[str]]:
     """Fetch card data for a list of IDs. Returns (cards, missing_ids)."""
     cards: list[dict] = []
     missing: list[str] = []
@@ -366,8 +365,7 @@ async def analyze_deck(
         report = validate_deck(leader, cards)
         validation = ValidationSummary(
             checks=[
-                {"name": c.name, "status": c.status, "message": c.message}
-                for c in report.checks
+                {"name": c.name, "status": c.status, "message": c.message} for c in report.checks
             ],
             pass_count=len(report.passes),
             fail_count=len(report.fails),
@@ -546,9 +544,7 @@ async def improve_deck(
                             add=ImprovementCard(
                                 card_id=replacement["id"],
                                 card_name=replacement.get("name", ""),
-                                reason=replacement.get(
-                                    "benefit", "Better synergy with deck"
-                                ),
+                                reason=replacement.get("benefit", "Better synergy with deck"),
                             ),
                             impact="high",
                         )
@@ -563,11 +559,7 @@ async def improve_deck(
                 continue
 
             priority = sug.get("priority", "low")
-            impact = (
-                "high"
-                if priority == "high"
-                else ("medium" if priority == "medium" else "low")
-            )
+            impact = "high" if priority == "high" else ("medium" if priority == "medium" else "low")
 
             improvements.append(
                 Improvement(
@@ -684,11 +676,7 @@ async def analyze_matchup(
     wins = sum(1 for g in games if g.get("winner") == "p1")
     num_games = len(games)
     win_rate = round(wins / num_games * 100, 1) if num_games else 0.0
-    avg_turns = (
-        round(sum(g.get("turns", 0) for g in games) / num_games, 1)
-        if num_games
-        else 0.0
-    )
+    avg_turns = round(sum(g.get("turns", 0) for g in games) / num_games, 1) if num_games else 0.0
 
     leader_id = req.leader_id
     leader_name = metadata.get("p1_leader", leader_id)
@@ -716,17 +704,13 @@ async def analyze_matchup(
     card_stats_lines: list[str] = []
     for card_id, played in sorted(card_play_counts.items(), key=lambda x: -x[1]):
         win_games = card_win_counts.get(card_id, 0)
-        total_games_played = sum(
-            1 for g in games if card_id in g.get("p1_cards_played", {})
-        )
+        total_games_played = sum(1 for g in games if card_id in g.get("p1_cards_played", {}))
         win_corr = win_games / total_games_played if total_games_played > 0 else 0.0
         card_stats_lines.append(
             f"  {card_id}: played {played}x in {total_games_played} games, win correlation {win_corr:.0%}"
         )
     card_stats_summary = (
-        "\n".join(card_stats_lines)
-        if card_stats_lines
-        else "No card-level stats available"
+        "\n".join(card_stats_lines) if card_stats_lines else "No card-level stats available"
     )
 
     # Build enhanced stats from games data
@@ -775,14 +759,10 @@ IMPORTANT for suggested_swaps:
 - Only suggest removing cards that appear in the card performance list above."""
 
     if not has_any_llm_key():
-        raise HTTPException(
-            400, "No LLM API key configured. Set one in Settings > BYOK."
-        )
+        raise HTTPException(400, "No LLM API key configured. Set one in Settings > BYOK.")
 
     try:
-        raw_text = await llm_complete(
-            "", prompt, prefer="fast", max_tokens=2048, timeout=60.0
-        )
+        raw_text = await llm_complete("", prompt, prefer="fast", max_tokens=2048, timeout=60.0)
 
         # Try to parse JSON from the response
         try:
@@ -1140,14 +1120,10 @@ Focus on:
 5. How CONSISTENT is the deck across different matchups?"""
 
     if not has_any_llm_key():
-        raise HTTPException(
-            400, "No LLM API key configured. Set one in Settings > BYOK."
-        )
+        raise HTTPException(400, "No LLM API key configured. Set one in Settings > BYOK.")
 
     try:
-        raw_text = await llm_complete(
-            "", prompt, prefer="fast", max_tokens=2048, timeout=60.0
-        )
+        raw_text = await llm_complete("", prompt, prefer="fast", max_tokens=2048, timeout=60.0)
         json_text = strip_json_fences(raw_text)
 
         parsed = json.loads(json_text)

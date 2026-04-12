@@ -1,5 +1,6 @@
 """Pydantic schemas — re-exports all models for backward compatibility."""
 
+from backend.api.schemas.ai import ChatRequest, ModelSwitchRequest
 from backend.api.schemas.card import (
     CardResponse,
     CurveEntry,
@@ -21,18 +22,6 @@ from backend.api.schemas.common import (
     NetworkNode,
     NetworkResponse,
 )
-from backend.api.schemas.ai import ChatRequest, ModelSwitchRequest
-from backend.api.schemas.meta import (
-    LeaderMetaResponse,
-    MetaDeckCard,
-    MetaDeckDetail,
-    MetaDeckSummary,
-    MetaOverviewArchetype,
-    MetaOverviewResponse,
-    SwapRequest,
-    SwapSuggestion,
-    TournamentResponse,
-)
 from backend.api.schemas.deck import (
     AggregateAnalysisRequest,
     CardHealthEntry,
@@ -50,15 +39,26 @@ from backend.api.schemas.deck import (
     MatchupAnalysisResponse,
     MatchupSpread,
     ReplacementSuggestion,
-    SaveDeckRequest,
     SavedDeckListItem,
     SavedDeckResponse,
+    SaveDeckRequest,
     SimHistoryEntry,
     SimHistoryRequest,
     SimHistoryResponse,
     SwapCandidate,
     SynergyPair,
     ValidationSummary,
+)
+from backend.api.schemas.meta import (
+    LeaderMetaResponse,
+    MetaDeckCard,
+    MetaDeckDetail,
+    MetaDeckSummary,
+    MetaOverviewArchetype,
+    MetaOverviewResponse,
+    SwapRequest,
+    SwapSuggestion,
+    TournamentResponse,
 )
 
 __all__ = [
@@ -96,6 +96,7 @@ __all__ = [
     "NetworkEdge",
     "NetworkNode",
     "NetworkResponse",
+    "ReplacementSuggestion",
     "SaveDeckRequest",
     "SavedDeckListItem",
     "SavedDeckResponse",
@@ -106,6 +107,7 @@ __all__ = [
     "SimHistoryRequest",
     "SimHistoryResponse",
     "StatsResponse",
+    "SwapCandidate",
     "SwapRequest",
     "SwapSuggestion",
     "SynergyPartner",

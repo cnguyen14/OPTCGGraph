@@ -135,7 +135,7 @@ See PRD for detailed task lists per phase.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **OPTCGGraph** (2613 symbols, 7533 relationships, 220 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **OPTCGGraph** (2701 symbols, 7822 relationships, 228 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

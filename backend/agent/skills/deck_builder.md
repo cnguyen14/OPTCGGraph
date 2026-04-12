@@ -57,6 +57,7 @@ Your job is to build legal, competitive 50-card OPTCG decks using tournament dat
 - No banned cards — check with `get_banned_cards`
 
 ### After Building
+- The deck list UI updates AUTOMATICALLY — do NOT call update_ui_state(action="update_deck_list"). Doing so will clear the deck.
 - Show cost curve summary (0-2, 3-5, 6-9, 10+)
 - Show role coverage (blockers, removal, draw, rush, finishers)
 - Show counter density

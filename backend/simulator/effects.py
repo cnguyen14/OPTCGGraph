@@ -245,9 +245,7 @@ class EffectHandler:
             target.attached_don = 0
             target.power_modifier = 0
             opponent.hand.append(target)
-            engine.state.log(
-                opponent.player_id, "effect", "bounced", card_name=target.name
-            )
+            engine.state.log(opponent.player_id, "effect", "bounced", card_name=target.name)
 
     def _resolve_draw(
         self,
@@ -263,9 +261,7 @@ class EffectHandler:
             if player.deck:
                 card = player.deck.pop(0)
                 player.hand.append(card)
-                engine.state.log(
-                    player.player_id, "effect", "draw", card_name=card.name
-                )
+                engine.state.log(player.player_id, "effect", "draw", card_name=card.name)
 
     def _resolve_search(
         self,
@@ -285,9 +281,7 @@ class EffectHandler:
 
         # Filter by condition if present
         if tmpl.condition:
-            matching = [
-                c for c in top if self._matches_condition(c, tmpl.condition, source)
-            ]
+            matching = [c for c in top if self._matches_condition(c, tmpl.condition, source)]
             if matching:
                 best = max(matching, key=lambda c: c.cost)
             else:
@@ -318,9 +312,7 @@ class EffectHandler:
             card = self.rng.choice(opponent.hand)
             opponent.hand.remove(card)
             opponent.trash.append(card)
-            engine.state.log(
-                opponent.player_id, "effect", "trashed", card_name=card.name
-            )
+            engine.state.log(opponent.player_id, "effect", "trashed", card_name=card.name)
 
     def _resolve_rest(
         self,
@@ -334,9 +326,7 @@ class EffectHandler:
         targets = self._select_targets(tmpl, source, player, opponent)
         for target in targets[: tmpl.count]:
             target.state = CardState.RESTED
-            engine.state.log(
-                opponent.player_id, "effect", "rested", card_name=target.name
-            )
+            engine.state.log(opponent.player_id, "effect", "rested", card_name=target.name)
 
     def _resolve_power_boost(
         self,
@@ -390,9 +380,7 @@ class EffectHandler:
         candidates = [c for c in player.trash if c.card_type == "CHARACTER"]
         if tmpl.condition:
             candidates = [
-                c
-                for c in candidates
-                if self._matches_condition(c, tmpl.condition, source)
+                c for c in candidates if self._matches_condition(c, tmpl.condition, source)
             ]
         if not candidates:
             return
@@ -402,9 +390,7 @@ class EffectHandler:
         best.power_modifier = 0
         best.attached_don = 0
         player.field.append(best)
-        engine.state.log(
-            player.player_id, "effect", "play_from_trash", card_name=best.name
-        )
+        engine.state.log(player.player_id, "effect", "play_from_trash", card_name=best.name)
 
     def _resolve_don_minus(
         self,
@@ -441,9 +427,7 @@ class EffectHandler:
             target.power_modifier = 0
             target.state = CardState.ACTIVE
             opponent.deck.append(target)  # Bottom of deck
-            engine.state.log(
-                opponent.player_id, "effect", "bottom_deck", card_name=target.name
-            )
+            engine.state.log(opponent.player_id, "effect", "bottom_deck", card_name=target.name)
 
     def _resolve_trigger_play(
         self,
@@ -458,9 +442,7 @@ class EffectHandler:
         if tmpl.condition and tmpl.condition.cost_lte is not None:
             max_cost = tmpl.condition.cost_lte
 
-        playable = [
-            c for c in player.hand if c.card_type == "CHARACTER" and c.cost <= max_cost
-        ]
+        playable = [c for c in player.hand if c.card_type == "CHARACTER" and c.cost <= max_cost]
         if not playable:
             return
         card = max(playable, key=lambda c: c.cost)
@@ -469,9 +451,7 @@ class EffectHandler:
         player.hand.remove(card)
         card.state = CardState.RESTED
         player.field.append(card)
-        engine.state.log(
-            player.player_id, "effect", "trigger_play", card_name=card.name
-        )
+        engine.state.log(player.player_id, "effect", "trigger_play", card_name=card.name)
 
     # --- Target selection ---
 
@@ -495,9 +475,7 @@ class EffectHandler:
         # Apply conditions
         if tmpl.condition:
             candidates = [
-                c
-                for c in candidates
-                if self._matches_condition(c, tmpl.condition, source)
+                c for c in candidates if self._matches_condition(c, tmpl.condition, source)
             ]
 
         # For rest effects, only target active characters
@@ -516,15 +494,9 @@ class EffectHandler:
         source: GameCard,
     ) -> bool:
         """Check if a target card matches the effect condition."""
-        if (
-            condition.power_lte is not None
-            and target.effective_power > condition.power_lte
-        ):
+        if condition.power_lte is not None and target.effective_power > condition.power_lte:
             return False
-        if (
-            condition.power_gte is not None
-            and target.effective_power < condition.power_gte
-        ):
+        if condition.power_gte is not None and target.effective_power < condition.power_gte:
             return False
         if condition.cost_lte is not None and target.cost > condition.cost_lte:
             return False
@@ -619,9 +591,7 @@ class EffectHandler:
             if player.deck:
                 card = player.deck.pop(0)
                 player.hand.append(card)
-                engine.state.log(
-                    player.player_id, "effect", "draw", card_name=card.name
-                )
+                engine.state.log(player.player_id, "effect", "draw", card_name=card.name)
 
     def _search(self, engine: GameEngine, player: PlayerState) -> None:
         if not player.deck:
@@ -652,9 +622,7 @@ class EffectHandler:
         opponent.hand.append(lowest)
         engine.state.log(opponent.player_id, "effect", "bounced", card_name=lowest.name)
 
-    def _ko_weakest(
-        self, engine: GameEngine, source: GameCard, opponent: PlayerState
-    ) -> None:
+    def _ko_weakest(self, engine: GameEngine, source: GameCard, opponent: PlayerState) -> None:
         threshold = source.cost * 1000
         targets = [c for c in opponent.characters if c.effective_power <= threshold]
         if not targets:
@@ -685,9 +653,7 @@ class EffectHandler:
         target.state = CardState.RESTED
         engine.state.log(opponent.player_id, "effect", "rested", card_name=target.name)
 
-    def _debuff_opponent(
-        self, engine: GameEngine, opponent: PlayerState, amount: int
-    ) -> None:
+    def _debuff_opponent(self, engine: GameEngine, opponent: PlayerState, amount: int) -> None:
         chars = opponent.characters
         if not chars:
             return
@@ -702,9 +668,7 @@ class EffectHandler:
         )
 
     def _trigger_play(self, engine: GameEngine, player: PlayerState) -> None:
-        playable = [
-            c for c in player.hand if c.card_type == "CHARACTER" and c.cost <= 3
-        ]
+        playable = [c for c in player.hand if c.card_type == "CHARACTER" and c.cost <= 3]
         if not playable:
             return
         card = max(playable, key=lambda c: c.cost)
@@ -713,6 +677,4 @@ class EffectHandler:
         player.hand.remove(card)
         card.state = CardState.RESTED
         player.field.append(card)
-        engine.state.log(
-            player.player_id, "effect", "trigger_play", card_name=card.name
-        )
+        engine.state.log(player.player_id, "effect", "trigger_play", card_name=card.name)

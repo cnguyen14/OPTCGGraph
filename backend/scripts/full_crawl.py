@@ -7,16 +7,14 @@ from collections import Counter
 from datetime import datetime, timezone
 
 # Add project root to path
-sys.path.insert(
-    0, str(__import__("pathlib").Path(__file__).resolve().parent.parent.parent)
-)
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent.parent))
 
 from backend.crawlers.apitcg import crawl_apitcg
-from backend.crawlers.optcgapi import crawl_optcgapi
 from backend.crawlers.merge import merge_cards
+from backend.crawlers.optcgapi import crawl_optcgapi
 from backend.crawlers.tracer import CrawlTracer
-from backend.graph.connection import get_driver, close_driver
 from backend.graph.builder import create_indexes, load_cards
+from backend.graph.connection import close_driver, get_driver
 from backend.services.settings_service import load_persisted_settings
 
 logging.basicConfig(
@@ -48,9 +46,7 @@ async def main():
         apitcg_count=len(apitcg_cards),
         optcgapi_count=len(optcgapi_cards),
     )
-    logger.info(
-        f"apitcg: {len(apitcg_cards)} cards, optcgapi: {len(optcgapi_cards)} cards"
-    )
+    logger.info(f"apitcg: {len(apitcg_cards)} cards, optcgapi: {len(optcgapi_cards)} cards")
 
     # Step 2: Merge
     tracer.log_step_start("merge")

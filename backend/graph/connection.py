@@ -1,8 +1,8 @@
 """Neo4j async driver connection management."""
 
-from neo4j import AsyncGraphDatabase, AsyncDriver
+from neo4j import AsyncDriver, AsyncGraphDatabase
 
-from backend.config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
+from backend.config import NEO4J_PASSWORD, NEO4J_URI, NEO4J_USER
 
 _driver: AsyncDriver | None = None
 

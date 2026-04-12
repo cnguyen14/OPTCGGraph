@@ -5,14 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, AsyncIterator
 
 from neo4j import AsyncDriver
 
 from backend.graph.queries import get_card_by_id
-
-from datetime import datetime, timezone
-from pathlib import Path
 
 from .agent import HeuristicAgent, LLMAgent, LLMTracer
 from .data_export import SimulationDataExporter
@@ -25,9 +24,7 @@ SIMULATIONS_DIR = Path("data/simulations")
 logger = logging.getLogger(__name__)
 
 
-async def _load_game_card(
-    driver: AsyncDriver, card_id: str, instance_id: str
-) -> GameCard:
+async def _load_game_card(driver: AsyncDriver, card_id: str, instance_id: str) -> GameCard:
     """Load a card from Neo4j and convert to GameCard."""
     data = await get_card_by_id(driver, card_id)
     if not data:
@@ -85,9 +82,7 @@ async def load_deck(
     return leader, deck
 
 
-def _clone_cards(
-    leader: GameCard, deck: list[GameCard]
-) -> tuple[GameCard, list[GameCard]]:
+def _clone_cards(leader: GameCard, deck: list[GameCard]) -> tuple[GameCard, list[GameCard]]:
     """Deep-clone leader and deck for a fresh game."""
     import copy
 
@@ -138,12 +133,8 @@ class SimulationRunner:
         """Run simulation, yielding progress events via SSE."""
         yield {"type": "loading", "message": "Loading decks from database..."}
 
-        p1_leader, p1_deck = await load_deck(
-            self.driver, deck1_leader_id, deck1_card_ids, "p1"
-        )
-        p2_leader, p2_deck = await load_deck(
-            self.driver, deck2_leader_id, deck2_card_ids, "p2"
-        )
+        p1_leader, p1_deck = await load_deck(self.driver, deck1_leader_id, deck1_card_ids, "p1")
+        p2_leader, p2_deck = await load_deck(self.driver, deck2_leader_id, deck2_card_ids, "p2")
 
         yield {
             "type": "loaded",
@@ -178,9 +169,7 @@ class SimulationRunner:
             concurrency = 10 if is_real else num_games
 
         if is_real:
-            logger.info(
-                "Real mode: using LLM model=%s, concurrency=%d", model, concurrency
-            )
+            logger.info("Real mode: using LLM model=%s, concurrency=%d", model, concurrency)
         else:
             logger.info("Virtual mode: using HeuristicAgent (no LLM)")
 
@@ -242,9 +231,7 @@ class SimulationRunner:
             batch_end = min(batch_start + concurrency, num_games + 1)
             batch_nums = list(range(batch_start, batch_end))
 
-            batch_results = await asyncio.gather(
-                *(_run_single_game(gn) for gn in batch_nums)
-            )
+            batch_results = await asyncio.gather(*(_run_single_game(gn) for gn in batch_nums))
 
             for game_num, result in zip(batch_nums, batch_results):
                 results.append(result)
@@ -321,15 +308,27 @@ class SimulationRunner:
                         "llm_model": self.llm_model,
                         "base_seed": self.base_seed,
                         "p1_deck_cards": [
-                            {"id": c.card_id, "name": c.name, "cost": c.cost,
-                             "power": c.power, "counter": c.counter,
-                             "card_type": c.card_type, "keywords": c.keywords}
+                            {
+                                "id": c.card_id,
+                                "name": c.name,
+                                "cost": c.cost,
+                                "power": c.power,
+                                "counter": c.counter,
+                                "card_type": c.card_type,
+                                "keywords": c.keywords,
+                            }
                             for c in p1_deck
                         ],
                         "p2_deck_cards": [
-                            {"id": c.card_id, "name": c.name, "cost": c.cost,
-                             "power": c.power, "counter": c.counter,
-                             "card_type": c.card_type, "keywords": c.keywords}
+                            {
+                                "id": c.card_id,
+                                "name": c.name,
+                                "cost": c.cost,
+                                "power": c.power,
+                                "counter": c.counter,
+                                "card_type": c.card_type,
+                                "keywords": c.keywords,
+                            }
                             for c in p2_deck
                         ],
                     },
@@ -444,8 +443,7 @@ class SimulationRunner:
         mulligan_wins = sum(
             1
             for r in results
-            if (r.p1_mulligan and r.winner == "p1")
-            or (r.p2_mulligan and r.winner == "p2")
+            if (r.p1_mulligan and r.winner == "p1") or (r.p2_mulligan and r.winner == "p2")
         )
         total_mulligans = p1_mulligans + p2_mulligans
 

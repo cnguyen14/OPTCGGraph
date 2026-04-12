@@ -33,6 +33,7 @@ interface Props {
   clientId: string;
   leaderId?: string | null;
   deckCardIds?: string[];
+  noSynergyCardIds?: string[];
   onUiUpdate?: (update: { action: string; payload: Record<string, unknown> }) => void;
   onOpenChange?: (open: boolean) => void;
 }
@@ -92,7 +93,7 @@ function randomQuote(hasTools: boolean): string {
   return quotes[Math.floor(Math.random() * quotes.length)];
 }
 
-export default function FloatingChat({ sessionId, onSessionId, clientId, leaderId, deckCardIds, onUiUpdate, onOpenChange }: Props) {
+export default function FloatingChat({ sessionId, onSessionId, clientId, leaderId, deckCardIds, noSynergyCardIds, onUiUpdate, onOpenChange }: Props) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -348,6 +349,7 @@ export default function FloatingChat({ sessionId, onSessionId, clientId, leaderI
           session_id: sessionId,
           leader_id: leaderId,
           deck_card_ids: deckCardIds,
+          no_synergy_card_ids: noSynergyCardIds,
         }),
       });
 
@@ -355,7 +357,8 @@ export default function FloatingChat({ sessionId, onSessionId, clientId, leaderI
       const newSessionId = resp.headers.get('X-Session-ID');
       if (newSessionId) onSessionId(newSessionId);
 
-      const reader = resp.body!.getReader();
+      if (!resp.body) throw new Error('No response body');
+      const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let fullText = '';
       const toolSummaries: string[] = [];
@@ -392,7 +395,11 @@ export default function FloatingChat({ sessionId, onSessionId, clientId, leaderI
                 break;
 
               case 'STATE_SNAPSHOT':
-                onUiUpdate?.(event);
+                try {
+                  onUiUpdate?.(event);
+                } catch (err) {
+                  console.error('[FloatingChat] UI update error:', err);
+                }
                 break;
             }
           } catch {

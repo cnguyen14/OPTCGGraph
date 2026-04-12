@@ -1,7 +1,6 @@
 """FastAPI application entry point."""
 
 from contextlib import asynccontextmanager
-
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -9,18 +8,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.core.exceptions import OPTCGError
-
-from backend.graph.connection import get_driver, close_driver
-from backend.storage.redis_client import get_redis, close_redis, verify_redis
-from backend.api.routes_graph import router as graph_router
-from backend.api.routes_data import router as data_router
-from backend.api.routes_settings import router as settings_router
 from backend.api.routes_ai import router as ai_router
+from backend.api.routes_data import router as data_router
 from backend.api.routes_deck import router as deck_router
+from backend.api.routes_graph import router as graph_router
 from backend.api.routes_meta import router as meta_router
+from backend.api.routes_settings import router as settings_router
 from backend.api.routes_simulator import router as simulator_router
+from backend.core.exceptions import OPTCGError
+from backend.graph.connection import close_driver, get_driver
 from backend.services.settings_service import load_persisted_settings
+from backend.storage.redis_client import close_redis, get_redis, verify_redis
 
 
 @asynccontextmanager
@@ -54,6 +52,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Global exception handler for application errors
 @app.exception_handler(OPTCGError)
 async def optcg_error_handler(request: Request, exc: OPTCGError):
@@ -83,6 +82,7 @@ async def root():
 @app.get("/health")
 async def health():
     from backend.graph.connection import verify_connection
+
     neo4j_ok = await verify_connection()
     redis_ok = await verify_redis()
     all_ok = neo4j_ok and redis_ok

@@ -5,13 +5,13 @@ from __future__ import annotations
 from neo4j import AsyncDriver
 
 from backend.graph.queries import (
+    get_banned_cards,
     get_card_by_id,
     get_card_network,
     get_card_synergies,
     get_db_stats,
     get_deck_synergies,
     get_facets,
-    get_banned_cards,
     search_cards,
 )
 
@@ -48,13 +48,15 @@ class CardRepository:
             )
             cards = []
             async for r in result:
-                cards.append({
-                    **dict(r["c"]),
-                    "colors": r["colors"],
-                    "families": r["families"],
-                    "set_name": r["set_name"],
-                    "keywords": r["keywords"],
-                })
+                cards.append(
+                    {
+                        **dict(r["c"]),
+                        "colors": r["colors"],
+                        "families": r["families"],
+                        "set_name": r["set_name"],
+                        "keywords": r["keywords"],
+                    }
+                )
             return cards
 
     async def get_synergies(

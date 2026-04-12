@@ -10,8 +10,8 @@ from collections import Counter
 
 from neo4j import AsyncDriver
 
-from backend.graph.queries import get_card_by_id
 from backend.ai.deck_validator import validate_deck
+from backend.graph.queries import get_card_by_id
 
 logger = logging.getLogger(__name__)
 
@@ -99,9 +99,7 @@ async def suggest_fixes(
                                 "check_name": "COPY_LIMIT",
                                 "remove": {
                                     "id": cid,
-                                    "name": card_data.get("name", "")
-                                    if card_data
-                                    else cid,
+                                    "name": card_data.get("name", "") if card_data else cid,
                                     "reason": f"Exceeds 4-copy limit ({count} copies)",
                                 },
                                 "add": {
@@ -131,9 +129,7 @@ async def suggest_fixes(
                             "check_name": "NO_LEADER_IN_DECK",
                             "remove": {
                                 "id": lid,
-                                "name": leader_card.get("name", "")
-                                if leader_card
-                                else lid,
+                                "name": leader_card.get("name", "") if leader_card else lid,
                                 "reason": "LEADER cards cannot be in the main deck",
                             },
                             "add": {
@@ -166,9 +162,7 @@ async def suggest_fixes(
                     min_counter=1000,
                     exclude_ids=set(deck_ids.keys()),
                 )
-                if replacement and (replacement.get("counter") or 0) > (
-                    card.get("counter") or 0
-                ):
+                if replacement and (replacement.get("counter") or 0) > (card.get("counter") or 0):
                     suggestions.append(
                         {
                             "type": "quality_improvement",
@@ -367,9 +361,7 @@ def _find_replacement(
     if min_power is not None:
         candidates = [c for c in candidates if (c.get("power") or 0) >= min_power]
     if required_keyword:
-        candidates = [
-            c for c in candidates if required_keyword in (c.get("keywords") or [])
-        ]
+        candidates = [c for c in candidates if required_keyword in (c.get("keywords") or [])]
 
     if not candidates:
         return None

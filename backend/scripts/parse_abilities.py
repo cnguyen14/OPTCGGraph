@@ -5,13 +5,11 @@ import logging
 import sys
 from datetime import datetime, timezone
 
-sys.path.insert(
-    0, str(__import__("pathlib").Path(__file__).resolve().parent.parent.parent)
-)
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent.parent))
 
 from backend.crawlers.tracer import CrawlTracer
-from backend.graph.connection import get_driver, close_driver
-from backend.parser.ability_parser import parse_abilities, build_keyword_graph
+from backend.graph.connection import close_driver, get_driver
+from backend.parser.ability_parser import build_keyword_graph, parse_abilities
 from backend.services.settings_service import load_persisted_settings
 
 logging.basicConfig(
@@ -62,9 +60,7 @@ async def main():
         kw_count = record["count"]
         logger.info(f"Keyword nodes: {kw_count}")
 
-        result = await session.run(
-            "MATCH ()-[r:HAS_KEYWORD]->() RETURN count(r) AS count"
-        )
+        result = await session.run("MATCH ()-[r:HAS_KEYWORD]->() RETURN count(r) AS count")
         record = await result.single()
         hk_count = record["count"]
         logger.info(f"HAS_KEYWORD edges: {hk_count}")
@@ -74,9 +70,7 @@ async def main():
         ct_count = record["count"]
         logger.info(f"CostTier nodes: {ct_count}")
 
-        result = await session.run(
-            "MATCH ()-[r:IN_COST_TIER]->() RETURN count(r) AS count"
-        )
+        result = await session.run("MATCH ()-[r:IN_COST_TIER]->() RETURN count(r) AS count")
         record = await result.single()
         ict_count = record["count"]
         logger.info(f"IN_COST_TIER edges: {ict_count}")

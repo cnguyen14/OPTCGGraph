@@ -8,15 +8,16 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from backend.api.models import ModelSwitchRequest
-from backend.config import NEO4J_URI, REDIS_URL
 from backend.graph.connection import verify_connection
 from backend.services.settings_service import (
+    clear_runtime_key_async,
     get_active_api_key,
     has_runtime_key,
-    list_models as list_models_service,
     set_runtime_key_async,
-    clear_runtime_key_async,
     switch_model_async,
+)
+from backend.services.settings_service import (
+    list_models as list_models_service,
 )
 from backend.storage.redis_client import verify_redis
 
@@ -90,10 +91,14 @@ async def test_api_key(req: TestKeyRequest):
     return {"status": "error", "message": f"Unknown provider: {req.provider}"}
 
 
-@router.get("/provider-models/{provider}")
-async def list_provider_models(provider: str, api_key: str | None = None):
+class ModelListRequest(BaseModel):
+    api_key: str | None = None
+
+
+@router.post("/provider-models/{provider}")
+async def list_provider_models(provider: str, req: ModelListRequest | None = None):
     """List available models from a provider using the given or stored API key."""
-    key = api_key or get_active_api_key(provider)
+    key = (req.api_key if req else None) or get_active_api_key(provider)
     if not key:
         return {"status": "error", "message": "No API key available", "models": []}
 
@@ -148,7 +153,11 @@ async def _check_anthropic_balance(api_key: str) -> dict:
     except Exception as e:
         error_msg = str(e)
         if "credit balance is too low" in error_msg:
-            return {"has_balance": False, "status": "no_balance", "message": "Credit balance too low. Please add credits at console.anthropic.com"}
+            return {
+                "has_balance": False,
+                "status": "no_balance",
+                "message": "Credit balance too low. Please add credits at console.anthropic.com",
+            }
         return {"has_balance": False, "status": "error", "message": error_msg}
 
 
@@ -156,6 +165,7 @@ async def _test_apitcg_key(api_key: str) -> dict:
     """Test an ApiTCG API key by fetching a single page."""
     try:
         from backend.config import APITCG_BASE_URL
+
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
             resp = await client.get(
                 APITCG_BASE_URL,
@@ -197,7 +207,7 @@ async def _list_claude_models(api_key: str) -> dict:
         for m in models_page.data:
             model_id = m.id
             # Filter to usable chat models
-            if not any(prefix in model_id for prefix in ("claude-", )):
+            if not any(prefix in model_id for prefix in ("claude-",)):
                 continue
             # Determine tier and display name
             display_name = m.display_name if hasattr(m, "display_name") else model_id
@@ -229,10 +239,14 @@ async def _list_openrouter_models(api_key: str) -> dict:
         models = []
         # Filter to popular/useful models
         POPULAR_PREFIXES = (
-            "openai/gpt-4", "openai/o",
-            "anthropic/claude", "google/gemini",
-            "meta-llama/llama", "mistralai/",
-            "deepseek/", "qwen/",
+            "openai/gpt-4",
+            "openai/o",
+            "anthropic/claude",
+            "google/gemini",
+            "meta-llama/llama",
+            "mistralai/",
+            "deepseek/",
+            "qwen/",
         )
         for m in data.get("data", []):
             model_id = m.get("id", "")
@@ -261,8 +275,6 @@ async def system_status():
     return {
         "neo4j": neo4j_ok,
         "redis": redis_ok,
-        "neo4j_uri": NEO4J_URI,
-        "redis_url": REDIS_URL,
         "api_keys": {
             "anthropic": bool(get_active_api_key("claude")),
             "openrouter": bool(get_active_api_key("openrouter")),

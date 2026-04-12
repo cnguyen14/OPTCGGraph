@@ -28,21 +28,57 @@ IMG_DIR = Path("data/card_images")
 
 # All series from Bandai official site (extracted via Playwright 2026-04-05)
 BANDAI_SERIES: dict[str, str] = {
-    "569101": "OP-01", "569102": "OP-02", "569103": "OP-03", "569104": "OP-04",
-    "569105": "OP-05", "569106": "OP-06", "569107": "OP-07", "569108": "OP-08",
-    "569109": "OP-09", "569110": "OP-10", "569111": "OP-11", "569112": "OP-12",
-    "569113": "OP-13", "569114": "OP14-EB04", "569115": "OP15-EB04",
-    "569001": "ST-01", "569002": "ST-02", "569003": "ST-03", "569004": "ST-04",
-    "569005": "ST-05", "569006": "ST-06", "569007": "ST-07", "569008": "ST-08",
-    "569009": "ST-09", "569010": "ST-10", "569011": "ST-11", "569012": "ST-12",
-    "569013": "ST-13", "569014": "ST-14", "569015": "ST-15", "569016": "ST-16",
-    "569017": "ST-17", "569018": "ST-18", "569019": "ST-19", "569020": "ST-20",
-    "569021": "ST-21", "569022": "ST-22", "569023": "ST-23", "569024": "ST-24",
-    "569025": "ST-25", "569026": "ST-26", "569027": "ST-27", "569028": "ST-28",
+    "569101": "OP-01",
+    "569102": "OP-02",
+    "569103": "OP-03",
+    "569104": "OP-04",
+    "569105": "OP-05",
+    "569106": "OP-06",
+    "569107": "OP-07",
+    "569108": "OP-08",
+    "569109": "OP-09",
+    "569110": "OP-10",
+    "569111": "OP-11",
+    "569112": "OP-12",
+    "569113": "OP-13",
+    "569114": "OP14-EB04",
+    "569115": "OP15-EB04",
+    "569001": "ST-01",
+    "569002": "ST-02",
+    "569003": "ST-03",
+    "569004": "ST-04",
+    "569005": "ST-05",
+    "569006": "ST-06",
+    "569007": "ST-07",
+    "569008": "ST-08",
+    "569009": "ST-09",
+    "569010": "ST-10",
+    "569011": "ST-11",
+    "569012": "ST-12",
+    "569013": "ST-13",
+    "569014": "ST-14",
+    "569015": "ST-15",
+    "569016": "ST-16",
+    "569017": "ST-17",
+    "569018": "ST-18",
+    "569019": "ST-19",
+    "569020": "ST-20",
+    "569021": "ST-21",
+    "569022": "ST-22",
+    "569023": "ST-23",
+    "569024": "ST-24",
+    "569025": "ST-25",
+    "569026": "ST-26",
+    "569027": "ST-27",
+    "569028": "ST-28",
     "569029": "ST-29",
-    "569201": "EB-01", "569202": "EB-02", "569203": "EB-03",
-    "569301": "PRB-01", "569302": "PRB-02",
-    "569901": "Promo", "569801": "Other",
+    "569201": "EB-01",
+    "569202": "EB-02",
+    "569203": "EB-03",
+    "569301": "PRB-01",
+    "569302": "PRB-02",
+    "569901": "Promo",
+    "569801": "Other",
 }
 
 # Regex patterns for parsing card data from .modalCol blocks
@@ -143,7 +179,9 @@ def _parse_html(html: str, series_label: str) -> list[dict[str, Any]]:
         power = _clean(_RE_POWER.search(block).group(1)) if _RE_POWER.search(block) else ""
         cost_raw = _clean(_RE_COST.search(block).group(1)) if _RE_COST.search(block) else ""
         counter = _clean(_RE_COUNTER.search(block).group(1)) if _RE_COUNTER.search(block) else ""
-        attribute = _clean(_RE_ATTRIBUTE.search(block).group(1)) if _RE_ATTRIBUTE.search(block) else ""
+        attribute = (
+            _clean(_RE_ATTRIBUTE.search(block).group(1)) if _RE_ATTRIBUTE.search(block) else ""
+        )
         family = _clean(_RE_FEATURE.search(block).group(1)) if _RE_FEATURE.search(block) else ""
         effect = _clean(_RE_EFFECT.search(block).group(1)) if _RE_EFFECT.search(block) else ""
         set_info = _clean(_RE_SET_INFO.search(block).group(1)) if _RE_SET_INFO.search(block) else ""
@@ -157,32 +195,34 @@ def _parse_html(html: str, series_label: str) -> list[dict[str, Any]]:
             life = cost_raw.strip()
             cost = None
 
-        cards.append({
-            "id": card_id,
-            "code": base_id,
-            "name": name,
-            "card_type": card_type,
-            "cost": cost,
-            "power": _to_int(power),
-            "counter": _to_int(counter),
-            "rarity": rarity,
-            "attribute": attribute,
-            "color": color,
-            "family": family,
-            "ability": effect,
-            "trigger_effect": "",
-            "image_url": img_path,  # Original Bandai URL path
-            "image_filename": Path(img_clean).name if img_clean else "",
-            "set_id": set_id,
-            "set_name": set_name,
-            "life": life,
-            "inventory_price": None,
-            "market_price": None,
-            "source_bandai": True,
-            "source_apitcg": False,
-            "source_optcgapi": False,
-            "_series_label": series_label,
-        })
+        cards.append(
+            {
+                "id": card_id,
+                "code": base_id,
+                "name": name,
+                "card_type": card_type,
+                "cost": cost,
+                "power": _to_int(power),
+                "counter": _to_int(counter),
+                "rarity": rarity,
+                "attribute": attribute,
+                "color": color,
+                "family": family,
+                "ability": effect,
+                "trigger_effect": "",
+                "image_url": img_path,  # Original Bandai URL path
+                "image_filename": Path(img_clean).name if img_clean else "",
+                "set_id": set_id,
+                "set_name": set_name,
+                "life": life,
+                "inventory_price": None,
+                "market_price": None,
+                "source_bandai": True,
+                "source_apitcg": False,
+                "source_optcgapi": False,
+                "_series_label": series_label,
+            }
+        )
 
     return cards
 
@@ -196,10 +236,7 @@ async def _download_images(
     IMG_DIR.mkdir(parents=True, exist_ok=True)
     existing = {f.stem for f in IMG_DIR.glob("*.png")}
 
-    to_download = [
-        c for c in cards
-        if c["id"] not in existing and c.get("image_url")
-    ]
+    to_download = [c for c in cards if c["id"] not in existing and c.get("image_url")]
 
     if not to_download:
         logger.info("All %d images already downloaded", len(cards))
@@ -312,7 +349,10 @@ async def crawl_bandai(
 
                 logger.info(
                     "  [%d/%d] %s: %d cards",
-                    i + 1, len(target_series), label, len(cards),
+                    i + 1,
+                    len(target_series),
+                    label,
+                    len(cards),
                 )
 
                 if tracer:
@@ -342,7 +382,9 @@ async def crawl_bandai(
     elapsed = time.time() - t0
     logger.info(
         "Bandai crawl complete: %d cards from %d series in %.1fs",
-        len(all_cards), len(target_series), elapsed,
+        len(all_cards),
+        len(target_series),
+        elapsed,
     )
 
     if tracer:

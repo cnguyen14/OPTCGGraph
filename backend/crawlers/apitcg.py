@@ -44,9 +44,7 @@ async def crawl_apitcg(tracer: CrawlTracer | None = None) -> list[dict]:
         first_data = await _fetch_page(client, 1)
         if first_data is None:
             if tracer:
-                tracer.log(
-                    "crawl_error", source="apitcg", message="First page returned None"
-                )
+                tracer.log("crawl_error", source="apitcg", message="First page returned None")
             return []
 
         raw_cards = first_data.get("data", [])
@@ -141,9 +139,7 @@ async def crawl_apitcg(tracer: CrawlTracer | None = None) -> list[dict]:
     return all_cards
 
 
-async def _fetch_page(
-    client: httpx.AsyncClient, page: int, retries: int = 3
-) -> dict | None:
+async def _fetch_page(client: httpx.AsyncClient, page: int, retries: int = 3) -> dict | None:
     """Fetch a single page with retry and exponential backoff."""
     for attempt in range(retries):
         try:

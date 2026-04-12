@@ -11,12 +11,11 @@ from typing import Any
 
 from neo4j import AsyncDriver
 
+from backend.agent.guardrails import build_default_guards
 from backend.agent.prompts import render_system_prompt
 from backend.agent.providers import LLMResponse, get_provider
 from backend.agent.router import resolve_skill
 from backend.agent.skills import load_all_skills
-from backend.agent.guardrails import build_default_guards
-from backend.agent.tracer import AgentTracer
 from backend.agent.tools import (
     AgentTool,
     ToolExecutionContext,
@@ -24,6 +23,7 @@ from backend.agent.tools import (
     execute_tool,
     filter_tools,
 )
+from backend.agent.tracer import AgentTracer
 from backend.agent.types import (
     AgentRunResult,
     DeckContext,
@@ -91,8 +91,12 @@ class OPTCGAgent:
 
         # 1. Route to skill
         skill = resolve_skill(message, active_skill, self.skills)
-        tracer.log("skill_resolved", skill=skill.name, message=message[:200],
-                    tools=list(skill.allowed_tools))
+        tracer.log(
+            "skill_resolved",
+            skill=skill.name,
+            message=message[:200],
+            tools=list(skill.allowed_tools),
+        )
 
         # 2. Filter tools for this skill (or all tools if tier allows)
         provider = get_provider(
@@ -124,12 +128,16 @@ class OPTCGAgent:
         ctx = ToolExecutionContext(driver=driver)
         guards = build_default_guards()
         text = ""
+        text_parts: list[str] = []  # Accumulate text from all iterations
+        awaiting_user_choice = False  # Stop loop when suggestions need user input
 
         try:
             for iteration in range(skill.max_iterations):
                 logger.info(
                     "Agent iteration %d (skill=%s, model=%s)",
-                    iteration + 1, skill.name, provider.model_name,
+                    iteration + 1,
+                    skill.name,
+                    provider.model_name,
                 )
 
                 t0 = time.time()
@@ -137,16 +145,20 @@ class OPTCGAgent:
                 llm_ms = round((time.time() - t0) * 1000, 1)
                 messages.append({"role": "assistant", "content": response.content})
 
-                tracer.log("llm_response",
-                           iteration=iteration + 1,
-                           model=provider.model_name,
-                           latency_ms=llm_ms,
-                           stop_reason=response.stop_reason,
-                           tool_calls=[tc.get("name", "") for tc in response.tool_calls],
-                           text_preview=response.text[:200] if response.text else "")
+                tracer.log(
+                    "llm_response",
+                    iteration=iteration + 1,
+                    model=provider.model_name,
+                    latency_ms=llm_ms,
+                    stop_reason=response.stop_reason,
+                    tool_calls=[tc.get("name", "") for tc in response.tool_calls],
+                    text_preview=response.text[:200] if response.text else "",
+                )
 
                 if response.stop_reason != "tool_use" or not response.tool_calls:
-                    text = response.text
+                    if response.text:
+                        text_parts.append(response.text)
+                    text = "\n\n".join(text_parts)
                     break
 
                 tool_results = []
@@ -163,41 +175,59 @@ class OPTCGAgent:
                     logger.info("  Executing tool: %s", tool_name)
                     t1 = time.time()
                     result = await execute_tool(
-                        self.tool_registry, tool_name, tool_input, ctx,
+                        self.tool_registry,
+                        tool_name,
+                        tool_input,
+                        ctx,
                         guards=guards,
                     )
                     tool_ms = round((time.time() - t1) * 1000, 1)
 
                     # Parse result content for downstream processing
                     try:
-                        result_data = json.loads(result.content) if result.ok else {"error": result.content}
+                        result_data = (
+                            json.loads(result.content) if result.ok else {"error": result.content}
+                        )
                     except (json.JSONDecodeError, TypeError):
                         result_data = {"raw": result.content}
 
-                    tracer.log("tool_finish", tool=tool_name, ok=result.ok,
-                               latency_ms=tool_ms,
-                               preview=result.content[:300])
+                    tracer.log(
+                        "tool_finish",
+                        tool=tool_name,
+                        ok=result.ok,
+                        latency_ms=tool_ms,
+                        preview=result.content[:300],
+                    )
 
                     # Emit STEP_FINISHED
-                    await self._emit(event_queue, {
-                        "type": "STEP_FINISHED",
-                        "tool": tool_name,
-                        "result_preview": result.content[:200],
-                    })
+                    await self._emit(
+                        event_queue,
+                        {
+                            "type": "STEP_FINISHED",
+                            "tool": tool_name,
+                            "result_preview": result.content[:200],
+                        },
+                    )
 
                     # Emit suggestions if applicable
                     suggestions = _build_suggestions_from_tool(tool_name, result_data)
                     if suggestions:
-                        await self._emit(event_queue, {
-                            "type": "SUGGESTIONS",
-                            "suggestions": suggestions,
-                        })
+                        await self._emit(
+                            event_queue,
+                            {
+                                "type": "SUGGESTIONS",
+                                "suggestions": suggestions,
+                            },
+                        )
+                        awaiting_user_choice = True
 
-                    all_tool_calls.append({
-                        "name": tool_name,
-                        "input": tool_input,
-                        "result": result_data,
-                    })
+                    all_tool_calls.append(
+                        {
+                            "name": tool_name,
+                            "input": tool_input,
+                            "result": result_data,
+                        }
+                    )
 
                     # UI updates
                     if tool_name == "update_ui_state":
@@ -237,41 +267,134 @@ class OPTCGAgent:
                         ui_updates.append(ui_update)
                         await self._emit(event_queue, {"type": "STATE_SNAPSHOT", **ui_update})
 
-                    # Auto-emit card list on search results
-                    if (
-                        tool_name == "search_cards"
-                        and isinstance(result_data, dict)
-                        and result_data.get("cards")
-                    ):
-                        card_ids = [c["id"] for c in result_data["cards"] if c.get("id")]
-                        if card_ids:
-                            ui_update = {
-                                "action": "show_card_list",
-                                "payload": {
-                                    "card_ids": card_ids,
-                                    "title": f"Search Results ({len(card_ids)} cards)",
-                                },
-                                "status": "emitted",
-                            }
-                            ui_updates.append(ui_update)
-                            await self._emit(event_queue, {"type": "STATE_SNAPSHOT", **ui_update})
+                    # Note: search_cards results are shown via card links in
+                    # the chat response. Auto-emitting show_card_list was removed
+                    # because it caused cascading modal issues when the agent
+                    # searches multiple times (e.g., finding swap replacements).
+                    # The agent can explicitly use update_ui_state(show_card_list)
+                    # if it wants to open a card gallery modal.
 
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tool_id,
-                        "content": json.dumps(result_data, default=str),
-                    })
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_id,
+                            "content": json.dumps(result_data, default=str),
+                        }
+                    )
 
                 messages.append({"role": "user", "content": tool_results})
+
+                # Accumulate intermediate text from tool_use iterations
+                if response.text:
+                    text_parts.append(response.text)
+
+                # After suggestions emitted, do one more LLM call without
+                # build_deck_shell so it can explain the analysis, then stop.
+                if awaiting_user_choice:
+                    logger.info("Suggestions emitted — one more LLM call to present analysis")
+                    # Remove deck-building tools so LLM can only explain
+                    presentation_tools = [
+                        t for t in tools_for_llm if t["name"] not in ("build_deck_shell",)
+                    ]
+                    t0 = time.time()
+                    followup: LLMResponse = await provider.chat(
+                        system, messages, presentation_tools
+                    )
+                    llm_ms = round((time.time() - t0) * 1000, 1)
+                    # Only keep text blocks if we won't execute tool calls (prevent dangling tool_use)
+                    if followup.stop_reason == "tool_use" and followup.tool_calls:
+                        messages.append({"role": "assistant", "content": followup.content})
+                    else:
+                        safe_content = [b for b in followup.content if b.get("type") != "tool_use"]
+                        messages.append(
+                            {
+                                "role": "assistant",
+                                "content": safe_content
+                                or [{"type": "text", "text": followup.text or ""}],
+                            }
+                        )
+                    tracer.log(
+                        "llm_response",
+                        iteration=iteration + 1,
+                        model=provider.model_name,
+                        latency_ms=llm_ms,
+                        stop_reason=followup.stop_reason,
+                        tool_calls=[tc.get("name", "") for tc in followup.tool_calls],
+                        text_preview=followup.text[:200] if followup.text else "",
+                    )
+
+                    # If LLM wants to call more tools (e.g., get_card), execute them
+                    followup_text = followup.text or ""
+                    if followup.stop_reason == "tool_use" and followup.tool_calls:
+                        followup_results = []
+                        for tc in followup.tool_calls:
+                            fn = tc["name"]
+                            fi = tc.get("input", {})
+                            fid = tc.get("id", "")
+                            await self._emit(event_queue, {"type": "STEP_STARTED", "tool": fn})
+                            r = await execute_tool(self.tool_registry, fn, fi, ctx, guards=guards)
+                            await self._emit(
+                                event_queue,
+                                {
+                                    "type": "STEP_FINISHED",
+                                    "tool": fn,
+                                    "result_preview": r.content[:200],
+                                },
+                            )
+                            try:
+                                rd = json.loads(r.content) if r.ok else {"error": r.content}
+                            except (json.JSONDecodeError, TypeError):
+                                rd = {"raw": r.content}
+                            all_tool_calls.append({"name": fn, "input": fi, "result": rd})
+                            followup_results.append(
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": fid,
+                                    "content": json.dumps(rd, default=str),
+                                }
+                            )
+                        messages.append({"role": "user", "content": followup_results})
+                        # Final text generation after tool calls
+                        t0 = time.time()
+                        final: LLMResponse = await provider.chat(
+                            system, messages, presentation_tools
+                        )
+                        # Strip tool_use blocks to prevent dangling tool_use in conversation history
+                        final_content = [b for b in final.content if b.get("type") != "tool_use"]
+                        messages.append(
+                            {
+                                "role": "assistant",
+                                "content": final_content
+                                or [{"type": "text", "text": final.text or ""}],
+                            }
+                        )
+                        # Combine followup analysis text with final text
+                        final_text = final.text or ""
+                        text = (
+                            (followup_text + "\n\n" + final_text).strip()
+                            if final_text
+                            else followup_text
+                        )
+                    else:
+                        text = followup_text
+
+                    logger.info("Pausing agent loop — awaiting user playstyle choice")
+                    break
+
+            # Fallback: if loop ended without break (hit max_iterations), join accumulated text
+            if not text and text_parts:
+                text = "\n\n".join(text_parts)
 
             # Stream final text as chunks
             if event_queue is not None and text:
                 chunk_size = 50
                 for i in range(0, len(text), chunk_size):
-                    await event_queue.put({
-                        "type": "TextMessageContent",
-                        "delta": text[i : i + chunk_size],
-                    })
+                    await event_queue.put(
+                        {
+                            "type": "TextMessageContent",
+                            "delta": text[i : i + chunk_size],
+                        }
+                    )
 
                 # Emit deck notes if a deck was built
                 built_deck = any(
@@ -281,11 +404,14 @@ class OPTCGAgent:
                     for tc in all_tool_calls
                 )
                 if built_deck and text:
-                    await self._emit(event_queue, {
-                        "type": "STATE_SNAPSHOT",
-                        "action": "update_deck_notes",
-                        "payload": {"notes": text},
-                    })
+                    await self._emit(
+                        event_queue,
+                        {
+                            "type": "STATE_SNAPSHOT",
+                            "action": "update_deck_notes",
+                            "payload": {"notes": text},
+                        },
+                    )
 
         except Exception as e:
             logger.error("Agent error: %s", e, exc_info=True)
@@ -294,10 +420,12 @@ class OPTCGAgent:
             if event_queue is not None:
                 await event_queue.put({"type": "TextMessageContent", "delta": text})
         finally:
-            tracer.log("agent_complete",
-                       tool_calls=len(all_tool_calls),
-                       skill=skill.name,
-                       text_length=len(text))
+            tracer.log(
+                "agent_complete",
+                tool_calls=len(all_tool_calls),
+                skill=skill.name,
+                text_length=len(text),
+            )
             if event_queue is not None:
                 await event_queue.put(None)  # Sentinel: streaming done
 

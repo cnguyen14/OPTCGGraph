@@ -110,7 +110,9 @@ async def build_mechanical_synergy_edges(driver: AsyncDriver) -> int:
             total += batch_count
 
         if i % (EDGE_CHUNK_SIZE * 3) == 0 and i > 0:
-            logger.info("  MECHANICAL_SYNERGY progress: %d/%d cards, %d edges", i, len(card_ids), total)
+            logger.info(
+                "  MECHANICAL_SYNERGY progress: %d/%d cards, %d edges", i, len(card_ids), total
+            )
 
     logger.info("Created %d MECHANICAL_SYNERGY edges", total)
     return total
@@ -198,9 +200,7 @@ async def build_led_by_edges(driver: AsyncDriver) -> int:
     return total
 
 
-async def build_all_edges(
-    driver: AsyncDriver, tracer: CrawlTracer | None = None
-) -> dict[str, int]:
+async def build_all_edges(driver: AsyncDriver, tracer: CrawlTracer | None = None) -> dict[str, int]:
     """Build all computed edges. Returns counts per edge type."""
     t0 = time.time()
     if tracer:

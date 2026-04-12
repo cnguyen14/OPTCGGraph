@@ -2,18 +2,15 @@
 
 import pytest
 
+from backend.simulator.effects import EffectHandler
+from backend.simulator.engine import GameEngine
 from backend.simulator.models import (
     ActionType,
     CardState,
     GameAction,
     GameCard,
     GameState,
-    Phase,
-    PlayerState,
 )
-from backend.simulator.engine import GameEngine
-from backend.simulator.effects import EffectHandler
-
 
 # --- Helpers ---
 
@@ -85,9 +82,7 @@ class DummyAgent:
     async def choose_mulligan(self, hand) -> bool:
         return False  # Never mulligan
 
-    async def choose_main_action(
-        self, state: GameState, legal_actions: list[GameAction]
-    ) -> int:
+    async def choose_main_action(self, state: GameState, legal_actions: list[GameAction]) -> int:
         # Prefer playing cards, then attacking, then pass
         for i, a in enumerate(legal_actions):
             if a.action_type == ActionType.PLAY_CARD:
@@ -97,14 +92,10 @@ class DummyAgent:
                 return i
         return len(legal_actions) - 1  # Pass
 
-    async def choose_blockers(
-        self, state, blockers, attacker, target
-    ) -> GameCard | None:
+    async def choose_blockers(self, state, blockers, attacker, target) -> GameCard | None:
         return None  # Never block
 
-    async def choose_counters(
-        self, state, hand, attacker, target, power_gap
-    ) -> list[GameCard]:
+    async def choose_counters(self, state, hand, attacker, target, power_gap) -> list[GameCard]:
         return []  # Never counter
 
 
@@ -114,14 +105,10 @@ class SmartDummyAgent:
     async def choose_mulligan(self, hand) -> bool:
         return False  # Never mulligan
 
-    async def choose_main_action(
-        self, state: GameState, legal_actions: list[GameAction]
-    ) -> int:
+    async def choose_main_action(self, state: GameState, legal_actions: list[GameAction]) -> int:
         # Play highest cost card first
         play_actions = [
-            (i, a)
-            for i, a in enumerate(legal_actions)
-            if a.action_type == ActionType.PLAY_CARD
+            (i, a) for i, a in enumerate(legal_actions) if a.action_type == ActionType.PLAY_CARD
         ]
         if play_actions:
             return play_actions[-1][
@@ -140,18 +127,14 @@ class SmartDummyAgent:
 
         return len(legal_actions) - 1  # Pass
 
-    async def choose_blockers(
-        self, state, blockers, attacker, target
-    ) -> GameCard | None:
+    async def choose_blockers(self, state, blockers, attacker, target) -> GameCard | None:
         # Block if a blocker has more power than attacker
         for b in blockers:
             if b.effective_power >= attacker.effective_power:
                 return b
         return None
 
-    async def choose_counters(
-        self, state, hand, attacker, target, power_gap
-    ) -> list[GameCard]:
+    async def choose_counters(self, state, hand, attacker, target, power_gap) -> list[GameCard]:
         if power_gap <= 0:
             return []  # Already safe
         # Use minimum counters to survive
@@ -209,12 +192,8 @@ class TestGameInit:
         engine_a = GameEngine(seed=1)
         engine_b = GameEngine(seed=2)
 
-        state_a = engine_a.init_game(
-            make_leader("p1"), deck1a, make_leader("p2"), make_deck("p2")
-        )
-        state_b = engine_b.init_game(
-            make_leader("p1"), deck1b, make_leader("p2"), make_deck("p2")
-        )
+        state_a = engine_a.init_game(make_leader("p1"), deck1a, make_leader("p2"), make_deck("p2"))
+        state_b = engine_b.init_game(make_leader("p1"), deck1b, make_leader("p2"), make_deck("p2"))
 
         # Different seeds should give different hand orders
         hand_a = [c.instance_id for c in state_a.p1.hand]
@@ -385,12 +364,8 @@ class TestLegalActions:
         )
         state.active_player_id = "p1"
         state.turn = 2  # Must be > 1 so attacks are allowed
-        active_char = make_card(
-            instance_id="p1-atk", state=CardState.ACTIVE, name="Attacker"
-        )
-        rested_char = make_card(
-            instance_id="p1-rested", state=CardState.RESTED, name="Rested"
-        )
+        active_char = make_card(instance_id="p1-atk", state=CardState.ACTIVE, name="Attacker")
+        rested_char = make_card(instance_id="p1-rested", state=CardState.RESTED, name="Rested")
         state.p1.field.extend([active_char, rested_char])
         engine.state = state
 
@@ -413,19 +388,13 @@ class TestLegalActions:
         )
         state.active_player_id = "p1"
         state.turn = 2  # Must be > 1 so attacks are allowed
-        opp_active = make_card(
-            instance_id="p2-act", state=CardState.ACTIVE, name="Active Opp"
-        )
-        opp_rested = make_card(
-            instance_id="p2-rest", state=CardState.RESTED, name="Rested Opp"
-        )
+        opp_active = make_card(instance_id="p2-act", state=CardState.ACTIVE, name="Active Opp")
+        opp_rested = make_card(instance_id="p2-rest", state=CardState.RESTED, name="Rested Opp")
         state.p2.field.extend([opp_active, opp_rested])
         engine.state = state
 
         actions = engine._get_legal_actions()
-        attack_targets = {
-            a.target_id for a in actions if a.action_type == ActionType.ATTACK
-        }
+        attack_targets = {a.target_id for a in actions if a.action_type == ActionType.ATTACK}
 
         assert "p2-rest" in attack_targets
         assert "p2-act" not in attack_targets
@@ -552,9 +521,7 @@ class TestCombat:
         )
         state.active_player_id = "p1"
         # Give p2 a 2000 counter card
-        counter_card = make_card(
-            instance_id="p2-counter", counter=2000, name="Counter Card"
-        )
+        counter_card = make_card(instance_id="p2-counter", counter=2000, name="Counter Card")
         state.p2.hand.append(counter_card)
         life_before = len(state.p2.life)
 
@@ -695,9 +662,7 @@ class TestStageLimit:
         # Get legal actions — should NOT include playing Stage 2
         legal = engine._get_legal_actions()
         play_stage_actions = [
-            a for a in legal
-            if a.action_type == ActionType.PLAY_CARD
-            and a.source_id == "p1-stage2"
+            a for a in legal if a.action_type == ActionType.PLAY_CARD and a.source_id == "p1-stage2"
         ]
         assert len(play_stage_actions) == 0, "Should not be able to play 2nd Stage"
 
@@ -724,9 +689,7 @@ class TestStageLimit:
 
         legal = engine._get_legal_actions()
         play_stage_actions = [
-            a for a in legal
-            if a.action_type == ActionType.PLAY_CARD
-            and a.source_id == "p1-stage"
+            a for a in legal if a.action_type == ActionType.PLAY_CARD and a.source_id == "p1-stage"
         ]
         assert len(play_stage_actions) == 1, "Should be able to play Stage when none on field"
 
@@ -974,17 +937,13 @@ class TestFirstTurnRules:
         state.turn = 1
         state.active_player_id = "p1"
         # Even with active characters on field, no attacks should be legal
-        active_char = make_card(
-            instance_id="p1-atk", state=CardState.ACTIVE, name="Attacker"
-        )
+        active_char = make_card(instance_id="p1-atk", state=CardState.ACTIVE, name="Attacker")
         state.p1.field.append(active_char)
         engine.state = state
 
         actions = engine._get_legal_actions()
         attack_actions = [a for a in actions if a.action_type == ActionType.ATTACK]
-        assert len(attack_actions) == 0, (
-            "First player must NOT be allowed to attack on turn 1"
-        )
+        assert len(attack_actions) == 0, "First player must NOT be allowed to attack on turn 1"
 
     def test_turn1_only_1_don_added(self):
         """Turn 1 should only add 1 DON (not 2)."""
@@ -1101,12 +1060,10 @@ class TestCoinFlip:
 
         assert init_entry is not None, "game_initialized log entry not found"
         # first_player may be top-level or nested in details
-        first_player = init_entry.get("first_player") or init_entry.get(
-            "details", {}
-        ).get("first_player")
-        assert first_player is not None, (
-            "first_player missing from game_initialized log"
+        first_player = init_entry.get("first_player") or init_entry.get("details", {}).get(
+            "first_player"
         )
+        assert first_player is not None, "first_player missing from game_initialized log"
         assert first_player in ("p1", "p2")
 
     def test_coin_flip_not_always_p1(self):

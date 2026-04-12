@@ -14,7 +14,7 @@ interface Props {
   label: string;
   currentDeckLeaderId?: string;
   currentDeckCardIds?: string[];
-  onSelect: (deck: SelectedDeck) => void;
+  onSelect: (deck: SelectedDeck | null) => void;
   selected: SelectedDeck | null;
   bare?: boolean;
 }
@@ -135,7 +135,7 @@ export default function DeckSelector({
             <div className="text-[10px] text-text-muted">{selected.cardIds.length} cards</div>
           </div>
           <Button
-            onClick={() => onSelect(null as unknown as SelectedDeck)}
+            onClick={() => onSelect(null)}
             variant="ghost"
             size="sm"
           >
@@ -227,9 +227,9 @@ export default function DeckSelector({
             {/* Tournament decks tab */}
             {!loading && tab === 'tournament' && (
               <>
-                {filteredMeta.map((deck) => (
+                {filteredMeta.map((deck, i) => (
                   <button
-                    key={deck.id}
+                    key={`${deck.id}-${i}`}
                     onClick={() => handleSelectMeta(deck)}
                     disabled={loadingDeck}
                     className="w-full text-left flex items-center gap-2 py-1.5 px-2 rounded hover:bg-surface-2 transition-colors disabled:opacity-50"

@@ -114,9 +114,7 @@ class DeckService:
         self.card_repo = card_repo
         self.driver = driver
 
-    async def fetch_cards_validated(
-        self, card_ids: list[str]
-    ) -> list[dict]:
+    async def fetch_cards_validated(self, card_ids: list[str]) -> list[dict]:
         """Fetch cards by ID, raise if any are missing."""
         cards = await self.card_repo.get_batch(card_ids)
         found_ids = {c["id"] for c in cards}
@@ -146,8 +144,7 @@ class DeckService:
         report = validate_deck(leader, cards)
         validation = {
             "checks": [
-                {"name": c.name, "status": c.status, "message": c.message}
-                for c in report.checks
+                {"name": c.name, "status": c.status, "message": c.message} for c in report.checks
             ],
             "pass_count": len(report.passes),
             "fail_count": len(report.fails),
@@ -195,8 +192,7 @@ class DeckService:
             weak_cards = [
                 (card_id, stats)
                 for card_id, stats in sim_card_stats.items()
-                if stats.get("win_correlation", 1.0) < 0.3
-                and stats.get("times_played", 0) >= 3
+                if stats.get("win_correlation", 1.0) < 0.3 and stats.get("times_played", 0) >= 3
             ]
             weak_cards.sort(key=lambda x: x[1].get("win_correlation", 0))
 
@@ -214,20 +210,22 @@ class DeckService:
 
                 if replacement:
                     win_pct = int(stats.get("win_correlation", 0) * 100)
-                    improvements.append({
-                        "action": "swap",
-                        "remove": {
-                            "card_id": card_id,
-                            "card_name": card_name,
-                            "reason": f"Low win correlation ({win_pct}%)",
-                        },
-                        "add": {
-                            "card_id": replacement["id"],
-                            "card_name": replacement.get("name", ""),
-                            "reason": replacement.get("benefit", "Better synergy with deck"),
-                        },
-                        "impact": "high",
-                    })
+                    improvements.append(
+                        {
+                            "action": "swap",
+                            "remove": {
+                                "card_id": card_id,
+                                "card_name": card_name,
+                                "reason": f"Low win correlation ({win_pct}%)",
+                            },
+                            "add": {
+                                "card_id": replacement["id"],
+                                "card_name": replacement.get("name", ""),
+                                "reason": replacement.get("benefit", "Better synergy with deck"),
+                            },
+                            "impact": "high",
+                        }
+                    )
                     used_remove_ids.add(card_id)
 
         # Add remaining suggestions from validation
@@ -240,20 +238,22 @@ class DeckService:
             priority = sug.get("priority", "low")
             impact = "high" if priority == "high" else ("medium" if priority == "medium" else "low")
 
-            improvements.append({
-                "action": "swap",
-                "remove": {
-                    "card_id": remove_id,
-                    "card_name": sug.get("remove", {}).get("name", ""),
-                    "reason": sug.get("remove", {}).get("reason", ""),
-                },
-                "add": {
-                    "card_id": add_id,
-                    "card_name": sug.get("add", {}).get("name", ""),
-                    "reason": sug.get("add", {}).get("benefit", ""),
-                },
-                "impact": impact,
-            })
+            improvements.append(
+                {
+                    "action": "swap",
+                    "remove": {
+                        "card_id": remove_id,
+                        "card_name": sug.get("remove", {}).get("name", ""),
+                        "reason": sug.get("remove", {}).get("reason", ""),
+                    },
+                    "add": {
+                        "card_id": add_id,
+                        "card_name": sug.get("add", {}).get("name", ""),
+                        "reason": sug.get("add", {}).get("benefit", ""),
+                    },
+                    "impact": impact,
+                }
+            )
             used_remove_ids.add(remove_id)
             used_add_ids.add(add_id)
 

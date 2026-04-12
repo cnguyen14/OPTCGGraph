@@ -111,13 +111,9 @@ async def llm_complete(
     provider, api_key, model = _resolve_provider(prefer)
 
     if provider == "anthropic":
-        return await _call_anthropic(
-            api_key, model, system, message, max_tokens, timeout
-        )
+        return await _call_anthropic(api_key, model, system, message, max_tokens, timeout)
     else:
-        return await _call_openrouter(
-            api_key, model, system, message, max_tokens, timeout
-        )
+        return await _call_openrouter(api_key, model, system, message, max_tokens, timeout)
 
 
 # ---- Internal ---------------------------------------------------------------

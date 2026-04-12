@@ -15,8 +15,9 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends
 from neo4j import AsyncDriver
 
+from backend.api.deps import verify_admin_token
 from backend.graph.connection import get_driver
-from backend.graph.queries import get_db_stats, get_banned_cards
+from backend.graph.queries import get_banned_cards, get_db_stats
 from backend.storage.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,8 @@ async def _set_step(name: str, status: str) -> None:
 # Step 1: Clean Neo4j
 # ---------------------------------------------------------------------------
 
-@router.post("/step/clean")
+
+@router.post("/step/clean", dependencies=[Depends(verify_admin_token)])
 async def step_clean(background_tasks: BackgroundTasks):
     """Delete all card-related nodes from Neo4j (batched)."""
     from backend.graph.connection import get_driver as gd
@@ -48,7 +50,16 @@ async def step_clean(background_tasks: BackgroundTasks):
         try:
             await _set_step("clean", "running")
             driver = await gd()
-            for label in ["Card", "Keyword", "Family", "Color", "Set", "CostTier", "Deck", "Tournament"]:
+            for label in [
+                "Card",
+                "Keyword",
+                "Family",
+                "Color",
+                "Set",
+                "CostTier",
+                "Deck",
+                "Tournament",
+            ]:
                 deleted = 1
                 while deleted > 0:
                     async with driver.session() as session:
@@ -71,13 +82,14 @@ async def step_clean(background_tasks: BackgroundTasks):
 # Step 2: Crawl Bandai (cards + images)
 # ---------------------------------------------------------------------------
 
-@router.post("/step/bandai")
+
+@router.post("/step/bandai", dependencies=[Depends(verify_admin_token)])
 async def step_bandai(background_tasks: BackgroundTasks):
     """Crawl card data + images from Bandai official site. Load into Neo4j."""
     from backend.crawlers.bandai import crawl_bandai
     from backend.graph.builder import create_indexes, load_cards
     from backend.graph.connection import get_driver as gd
-    from backend.parser.ability_parser import parse_abilities, build_keyword_graph
+    from backend.parser.ability_parser import build_keyword_graph, parse_abilities
 
     async def _run():
         try:
@@ -112,7 +124,8 @@ async def step_bandai(background_tasks: BackgroundTasks):
 # Step 3: Update Prices (optcgapi)
 # ---------------------------------------------------------------------------
 
-@router.post("/step/prices")
+
+@router.post("/step/prices", dependencies=[Depends(verify_admin_token)])
 async def step_prices(background_tasks: BackgroundTasks):
     """Update card prices from optcgapi. Only updates existing cards in Neo4j."""
     from backend.crawlers.optcgapi import crawl_optcgapi
@@ -134,7 +147,9 @@ async def step_prices(background_tasks: BackgroundTasks):
                         await session.run(
                             "MATCH (c:Card {id: $id}) "
                             "SET c.market_price = $mp, c.inventory_price = $ip",
-                            id=card["id"], mp=mp, ip=ip,
+                            id=card["id"],
+                            mp=mp,
+                            ip=ip,
                         )
                         count += 1
 
@@ -155,7 +170,8 @@ async def step_prices(background_tasks: BackgroundTasks):
 # Step 4: Update Banned Cards
 # ---------------------------------------------------------------------------
 
-@router.post("/step/banned")
+
+@router.post("/step/banned", dependencies=[Depends(verify_admin_token)])
 async def step_banned(background_tasks: BackgroundTasks):
     """Crawl and apply official banned card list."""
     from backend.crawlers.banned_cards import crawl_banned_cards
@@ -188,11 +204,12 @@ async def step_banned(background_tasks: BackgroundTasks):
 # Step 5: Load Tournament Decks
 # ---------------------------------------------------------------------------
 
-@router.post("/step/tournaments")
+
+@router.post("/step/tournaments", dependencies=[Depends(verify_admin_token)])
 async def step_tournaments(background_tasks: BackgroundTasks):
     """Crawl tournament data from LimitlessTCG and compute meta stats."""
     from backend.crawlers.limitlesstcg import crawl_limitlesstcg
-    from backend.graph.builder import load_tournament_data, compute_card_meta_stats
+    from backend.graph.builder import compute_card_meta_stats, load_tournament_data
     from backend.graph.connection import get_driver as gd
 
     async def _run():
@@ -228,7 +245,8 @@ async def step_tournaments(background_tasks: BackgroundTasks):
 # Step 6: Build Index (synergy edges)
 # ---------------------------------------------------------------------------
 
-@router.post("/step/index")
+
+@router.post("/step/index", dependencies=[Depends(verify_admin_token)])
 async def step_index(background_tasks: BackgroundTasks):
     """Build synergy, mechanical synergy, curves_into, and led_by edges."""
     from backend.graph.connection import get_driver as gd
@@ -252,6 +270,7 @@ async def step_index(background_tasks: BackgroundTasks):
 # ---------------------------------------------------------------------------
 # Status + Stop
 # ---------------------------------------------------------------------------
+
 
 @router.get("/rebuild-status")
 async def rebuild_status():

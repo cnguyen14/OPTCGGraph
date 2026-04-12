@@ -3,18 +3,18 @@
 from fastapi import APIRouter, Depends, Query
 from neo4j import AsyncDriver
 
-from backend.graph.connection import get_driver
 from backend.api.models import (
-    TournamentResponse,
-    MetaDeckSummary,
-    MetaDeckDetail,
-    MetaDeckCard,
-    MetaOverviewResponse,
-    MetaOverviewArchetype,
     LeaderMetaResponse,
+    MetaDeckCard,
+    MetaDeckDetail,
+    MetaDeckSummary,
+    MetaOverviewArchetype,
+    MetaOverviewResponse,
     SwapRequest,
     SwapSuggestion,
+    TournamentResponse,
 )
+from backend.graph.connection import get_driver
 
 router = APIRouter(prefix="/api/meta", tags=["meta"])
 
@@ -94,15 +94,17 @@ async def list_decks(
             t = dict(record["t"]) if record["t"] else None
             leader_card = dict(record["leader"]) if record["leader"] else None
 
-            decks.append(MetaDeckSummary(
-                id=d.get("id", ""),
-                leader_id=d.get("leader_id", ""),
-                leader_name=leader_card.get("name", "") if leader_card else "",
-                archetype=d.get("archetype", ""),
-                placement=d.get("placement"),
-                player_name=d.get("player_name", ""),
-                tournament=TournamentResponse(**t) if t else None,
-            ))
+            decks.append(
+                MetaDeckSummary(
+                    id=d.get("id", ""),
+                    leader_id=d.get("leader_id", ""),
+                    leader_name=leader_card.get("name", "") if leader_card else "",
+                    archetype=d.get("archetype", ""),
+                    placement=d.get("placement"),
+                    player_name=d.get("player_name", ""),
+                    tournament=TournamentResponse(**t) if t else None,
+                )
+            )
     return decks
 
 
@@ -155,17 +157,19 @@ async def get_deck_detail(
             type_dist[card_type] = type_dist.get(card_type, 0) + count
             total_cards += count
 
-            cards.append(MetaDeckCard(
-                id=c.get("id", ""),
-                name=c.get("name", ""),
-                card_type=card_type,
-                cost=c.get("cost"),
-                power=c.get("power"),
-                counter=c.get("counter"),
-                count=count,
-                image_small=c.get("image_small", ""),
-                keywords=keywords,
-            ))
+            cards.append(
+                MetaDeckCard(
+                    id=c.get("id", ""),
+                    name=c.get("name", ""),
+                    card_type=card_type,
+                    cost=c.get("cost"),
+                    power=c.get("power"),
+                    counter=c.get("counter"),
+                    count=count,
+                    image_small=c.get("image_small", ""),
+                    keywords=keywords,
+                )
+            )
 
     return MetaDeckDetail(
         id=d.get("id", ""),
@@ -187,15 +191,11 @@ async def meta_overview(driver: AsyncDriver = Depends(_get_driver)):
     """Get current meta overview: top archetypes, leader popularity."""
     async with driver.session() as session:
         # Total counts
-        count_result = await session.run(
-            "MATCH (d:Deck) RETURN count(d) AS decks"
-        )
+        count_result = await session.run("MATCH (d:Deck) RETURN count(d) AS decks")
         count_record = await count_result.single()
         total_decks = count_record["decks"] if count_record else 0
 
-        t_result = await session.run(
-            "MATCH (t:Tournament) RETURN count(t) AS tournaments"
-        )
+        t_result = await session.run("MATCH (t:Tournament) RETURN count(t) AS tournaments")
         t_record = await t_result.single()
         total_tournaments = t_record["tournaments"] if t_record else 0
 
@@ -211,11 +211,13 @@ async def meta_overview(driver: AsyncDriver = Depends(_get_driver)):
         )
         archetypes = []
         async for r in arch_result:
-            archetypes.append(MetaOverviewArchetype(
-                archetype=r["archetype"],
-                count=r["cnt"],
-                share=r["cnt"] / total_decks if total_decks else 0,
-            ))
+            archetypes.append(
+                MetaOverviewArchetype(
+                    archetype=r["archetype"],
+                    count=r["cnt"],
+                    share=r["cnt"] / total_decks if total_decks else 0,
+                )
+            )
 
         # Top leaders
         leader_result = await session.run(
@@ -228,11 +230,13 @@ async def meta_overview(driver: AsyncDriver = Depends(_get_driver)):
         )
         top_leaders = []
         async for r in leader_result:
-            top_leaders.append({
-                "id": r["id"],
-                "name": r["name"],
-                "deck_count": r["cnt"],
-            })
+            top_leaders.append(
+                {
+                    "id": r["id"],
+                    "name": r["name"],
+                    "deck_count": r["cnt"],
+                }
+            )
 
     return MetaOverviewResponse(
         total_decks=total_decks,
@@ -281,14 +285,16 @@ async def leader_meta(
         )
         popular_cards = []
         async for r in cards_result:
-            popular_cards.append(MetaDeckCard(
-                id=r["id"],
-                name=r["name"],
-                card_type=r["card_type"] or "",
-                cost=r["cost"],
-                count=round(r["avg_copies"]) if r["avg_copies"] else 1,
-                image_small=r["image_small"] or "",
-            ))
+            popular_cards.append(
+                MetaDeckCard(
+                    id=r["id"],
+                    name=r["name"],
+                    card_type=r["card_type"] or "",
+                    cost=r["cost"],
+                    count=round(r["avg_copies"]) if r["avg_copies"] else 1,
+                    image_small=r["image_small"] or "",
+                )
+            )
 
     return LeaderMetaResponse(
         leader_id=leader_id,

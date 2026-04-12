@@ -9,15 +9,15 @@ import re
 import time
 from typing import TYPE_CHECKING
 
+from backend.graph.batch import RELATIONSHIP_CHUNK_SIZE, batch_write
+from backend.parser.keywords import COST_TIERS, get_cost_tier
+from backend.parser.prompts import ABILITY_PARSER_SYSTEM, ABILITY_PARSER_USER_TEMPLATE
 from backend.services.llm_service import (
     LLMNotAvailableError,
     has_any_llm_key,
     llm_complete,
     strip_json_fences,
 )
-from backend.parser.prompts import ABILITY_PARSER_SYSTEM, ABILITY_PARSER_USER_TEMPLATE
-from backend.parser.keywords import get_cost_tier, COST_TIERS
-from backend.graph.batch import batch_write, RELATIONSHIP_CHUNK_SIZE
 
 if TYPE_CHECKING:
     from backend.crawlers.tracer import CrawlTracer
@@ -71,9 +71,7 @@ async def parse_abilities(
     results: list[dict] = []
 
     # Filter cards that have ability text
-    cards_with_abilities = [
-        c for c in cards if c.get("ability") and c["ability"] != "-"
-    ]
+    cards_with_abilities = [c for c in cards if c.get("ability") and c["ability"] != "-"]
     cards_without = [c for c in cards if not c.get("ability") or c["ability"] == "-"]
 
     # Empty ability cards get empty results
@@ -107,9 +105,7 @@ async def parse_abilities(
     async def _parse_with_sem(batch_num: int, batch: list[dict]) -> list[dict]:
         nonlocal llm_failures
         async with sem:
-            logger.info(
-                f"Parsing batch {batch_num}/{total_batches} ({len(batch)} cards)..."
-            )
+            logger.info(f"Parsing batch {batch_num}/{total_batches} ({len(batch)} cards)...")
             bt = time.time()
             parsed = await _parse_batch(batch)
             batch_ms = round((time.time() - bt) * 1000, 1)
@@ -262,10 +258,7 @@ def _regex_parse(card: dict) -> dict:
     # "rest this" / "rest up to" = game action, NOT "the rest" (remainder)
     if re.search(r"rest this|rest up to|may rest|rest \d|you may rest", ability, re.I):
         effects.append("Rest")
-    if (
-        re.search(r"play.*from.*hand|play.*character", ability, re.I)
-        and "[On Play]" not in ability
-    ):
+    if re.search(r"play.*from.*hand|play.*character", ability, re.I) and "[On Play]" not in ability:
         effects.append("Play")
 
     extracted = list(set(timing + abilities + don_kw + effects))
@@ -343,14 +336,10 @@ async def build_keyword_graph(
             keyword_nodes[kw] = category
             keyword_edges.append({"card_id": card_id, "keyword": kw})
 
-    kw_node_params = [
-        {"name": name, "category": cat} for name, cat in keyword_nodes.items()
-    ]
+    kw_node_params = [{"name": name, "category": cat} for name, cat in keyword_nodes.items()]
 
     # 4. Parsed ability JSON updates
-    parsed_updates = [
-        {"id": p["card_id"], "parsed": json.dumps(p)} for p in parsed_results
-    ]
+    parsed_updates = [{"id": p["card_id"], "parsed": json.dumps(p)} for p in parsed_results]
 
     # --- Batch write to Neo4j ---
 

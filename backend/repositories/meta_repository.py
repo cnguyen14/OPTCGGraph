@@ -66,11 +66,13 @@ class MetaRepository:
             )
             decks = []
             async for r in result:
-                decks.append({
-                    "deck": dict(r["d"]),
-                    "tournament": dict(r["t"]) if r["t"] else None,
-                    "leader": dict(r["leader"]) if r["leader"] else None,
-                })
+                decks.append(
+                    {
+                        "deck": dict(r["d"]),
+                        "tournament": dict(r["t"]) if r["t"] else None,
+                        "leader": dict(r["leader"]) if r["leader"] else None,
+                    }
+                )
             return decks
 
     async def get_deck_detail(self, deck_id: str) -> dict | None:
@@ -100,11 +102,13 @@ class MetaRepository:
             )
             cards = []
             async for cr in cards_result:
-                cards.append({
-                    "card": dict(cr["c"]),
-                    "count": cr["count"] or 1,
-                    "keywords": cr["keywords"] or [],
-                })
+                cards.append(
+                    {
+                        "card": dict(cr["c"]),
+                        "count": cr["count"] or 1,
+                        "keywords": cr["keywords"] or [],
+                    }
+                )
 
             return {
                 "deck": dict(record["d"]),
@@ -133,11 +137,13 @@ class MetaRepository:
             )
             archetypes = []
             async for r in arch_r:
-                archetypes.append({
-                    "archetype": r["archetype"],
-                    "count": r["cnt"],
-                    "share": r["cnt"] / total_decks if total_decks else 0,
-                })
+                archetypes.append(
+                    {
+                        "archetype": r["archetype"],
+                        "count": r["cnt"],
+                        "share": r["cnt"] / total_decks if total_decks else 0,
+                    }
+                )
 
             leader_r = await session.run(
                 """
@@ -147,8 +153,7 @@ class MetaRepository:
                 """
             )
             top_leaders = [
-                {"id": r["id"], "name": r["name"], "deck_count": r["cnt"]}
-                async for r in leader_r
+                {"id": r["id"], "name": r["name"], "deck_count": r["cnt"]} async for r in leader_r
             ]
 
         return {

@@ -393,6 +393,7 @@ export interface CrawlStatus {
   optcgapi: CrawlSourceStatus;
   limitlesstcg: CrawlSourceStatus;
   banned: CrawlSourceStatus;
+  bandai?: CrawlSourceStatus;
 }
 
 export interface BannedCard {
@@ -494,6 +495,7 @@ export interface SwapCandidate {
   cost: number | null;
   counter: number | null;
   synergy_score: number;
+  synergy_count?: number;
 }
 
 export interface SuggestedSwap {
@@ -539,15 +541,6 @@ export interface MatchupSpread {
   num_games: number;
 }
 
-export interface SwapCandidate {
-  card_id: string;
-  name: string;
-  image: string;
-  power: number;
-  cost: number;
-  counter: number;
-  synergy_count: number;
-}
 
 export interface ReplacementSuggestion {
   remove_id: string;

@@ -41,24 +41,16 @@ def parse_effects(
     # --- Passive / static abilities ---
 
     if "blocker" in kw_lower:
-        effects.append(
-            EffectTemplate(type=EffectType.BLOCKER, trigger=EffectTrigger.PASSIVE)
-        )
+        effects.append(EffectTemplate(type=EffectType.BLOCKER, trigger=EffectTrigger.PASSIVE))
 
     if "rush" in kw_lower:
-        effects.append(
-            EffectTemplate(type=EffectType.RUSH, trigger=EffectTrigger.PASSIVE)
-        )
+        effects.append(EffectTemplate(type=EffectType.RUSH, trigger=EffectTrigger.PASSIVE))
 
     if "double attack" in kw_lower:
-        effects.append(
-            EffectTemplate(type=EffectType.DOUBLE_ATTACK, trigger=EffectTrigger.PASSIVE)
-        )
+        effects.append(EffectTemplate(type=EffectType.DOUBLE_ATTACK, trigger=EffectTrigger.PASSIVE))
 
     if "banish" in kw_lower:
-        effects.append(
-            EffectTemplate(type=EffectType.BANISH, trigger=EffectTrigger.PASSIVE)
-        )
+        effects.append(EffectTemplate(type=EffectType.BANISH, trigger=EffectTrigger.PASSIVE))
 
     # --- Determine trigger from ability text ---
 
@@ -249,10 +241,7 @@ def _detect_trigger(ability: str, card_type: str) -> EffectTrigger:
     """Detect the most likely trigger from ability text."""
     if "when attacking" in ability:
         return EffectTrigger.ON_ATTACK
-    if (
-        "when this character is k.o" in ability
-        or "when this character is ko" in ability
-    ):
+    if "when this character is k.o" in ability or "when this character is ko" in ability:
         return EffectTrigger.ON_KO
     if "when blocking" in ability:
         return EffectTrigger.ON_BLOCK
@@ -371,9 +360,7 @@ def _parse_rest_condition(ability: str) -> EffectCondition | None:
 # ---------------------------------------------------------------------------
 
 
-def _parse_power_amount(
-    ability: str, default: int = 2000, *, is_debuff: bool = False
-) -> int:
+def _parse_power_amount(ability: str, default: int = 2000, *, is_debuff: bool = False) -> int:
     """Parse power boost/reduce amount."""
     pattern = r"[-+]?\s*(\d+)\s*(?:000)?" if not is_debuff else r"-\s*(\d+)\s*(?:000)?"
     m = re.search(pattern, ability)
@@ -442,9 +429,7 @@ def _parse_trigger_effect(trigger_text: str, cost: int) -> list[EffectTemplate]:
         if m:
             amount = int(m.group(1))
         templates.append(
-            EffectTemplate(
-                type=EffectType.DRAW, trigger=EffectTrigger.TRIGGER, amount=amount
-            )
+            EffectTemplate(type=EffectType.DRAW, trigger=EffectTrigger.TRIGGER, amount=amount)
         )
 
     if "rest" in trigger_lower:
@@ -491,9 +476,7 @@ def _parse_trigger_effect(trigger_text: str, cost: int) -> list[EffectTemplate]:
         )
 
     # Trigger: bounce / return to hand
-    if "return" in trigger_lower and (
-        "hand" in trigger_lower or "owner" in trigger_lower
-    ):
+    if "return" in trigger_lower and ("hand" in trigger_lower or "owner" in trigger_lower):
         condition = None
         m = re.search(r"cost\s*(?:of\s*)?(\d+)\s*or\s*less", trigger_lower)
         if m:

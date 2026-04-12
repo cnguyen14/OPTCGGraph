@@ -21,9 +21,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-async def _handle_analyze_simulations(
-    args: dict[str, Any], ctx: ToolExecutionContext
-) -> str:
+async def _handle_analyze_simulations(args: dict[str, Any], ctx: ToolExecutionContext) -> str:
     """Analyze all simulation data and return structured insights."""
     logger.info("analyze_simulations called, question=%s", args.get("question", "")[:80])
     simulations = aggregate_all_simulations()
@@ -138,8 +136,7 @@ async def _handle_analyze_simulations(
             )
         if mc["efficiency_score"] > 0.6:
             recommendations.append(
-                f"{mc['model']} is highly efficient at "
-                f"{mc['efficiency_score']:.2f} damage/turn."
+                f"{mc['model']} is highly efficient at {mc['efficiency_score']:.2f} damage/turn."
             )
 
     for card in top_cards[:5]:
@@ -206,9 +203,7 @@ ANALYZE_SIMULATIONS = AgentTool(
 )
 
 
-async def _handle_analyze_deck_simulation(
-    args: dict[str, Any], ctx: ToolExecutionContext
-) -> str:
+async def _handle_analyze_deck_simulation(args: dict[str, Any], ctx: ToolExecutionContext) -> str:
     """Analyze a specific deck's performance from a single simulation."""
     sim_id = args.get("sim_id", "")
     player = args.get("player", "p1")
@@ -259,8 +254,7 @@ async def _handle_analyze_deck_simulation(
 
         if win_pct >= 0.75 and times >= 3:
             recommendations.append(
-                f"{name} is an MVP ({win_pct:.0%} win rate, "
-                f"avg turn {avg_turn}, played {times}x)"
+                f"{name} is an MVP ({win_pct:.0%} win rate, avg turn {avg_turn}, played {times}x)"
             )
         elif play_rate < 0.3 and num_games >= 5:
             recommendations.append(
@@ -312,7 +306,11 @@ async def _handle_analyze_deck_simulation(
 
     logger.info(
         "Deck simulation analysis: %s %s — %d games, %d card perfs, %d recommendations",
-        sim_id[:8], player, num_games, len(card_perf), len(recommendations),
+        sim_id[:8],
+        player,
+        num_games,
+        len(card_perf),
+        len(recommendations),
     )
 
     result = {

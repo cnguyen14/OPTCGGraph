@@ -15,11 +15,14 @@ async def _handle_analyze_leader_playstyles(args: dict, ctx: ToolExecutionContex
     from backend.ai.playstyle_analyzer import analyze_leader_playstyles
 
     profiles = await analyze_leader_playstyles(ctx.driver, args["leader_id"])
-    return json.dumps({
-        "leader_id": args["leader_id"],
-        "playstyles": [p.to_dict() for p in profiles],
-        "instruction": "Present these playstyles to the user and ask which they prefer before building.",
-    }, default=str)
+    return json.dumps(
+        {
+            "leader_id": args["leader_id"],
+            "playstyles": [p.to_dict() for p in profiles],
+            "instruction": "Present these playstyles to the user and ask which they prefer before building.",
+        },
+        default=str,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -5,8 +5,8 @@ from neo4j import AsyncDriver
 
 from backend.api.models import (
     CardResponse,
-    CurveResponse,
     CurveEntry,
+    CurveResponse,
     DeckSynergyRequest,
     DeckSynergyResponse,
     FacetsResponse,
@@ -20,12 +20,12 @@ from backend.api.models import (
 from backend.graph.connection import get_driver
 from backend.graph.queries import (
     get_card_by_id,
-    get_card_synergies,
     get_card_network,
+    get_card_synergies,
+    get_db_stats,
     get_deck_synergies,
     get_facets,
     search_cards,
-    get_db_stats,
 )
 
 router = APIRouter(prefix="/api/graph", tags=["graph"])
@@ -138,9 +138,7 @@ async def get_counters(
     driver: AsyncDriver = Depends(_get_driver),
 ):
     """Find cards that counter a specific card."""
-    color_clause = (
-        "AND (counter)-[:HAS_COLOR]->(:Color {name: $color})" if color else ""
-    )
+    color_clause = "AND (counter)-[:HAS_COLOR]->(:Color {name: $color})" if color else ""
     params: dict = {"target_id": against}
     if color:
         params["color"] = color
@@ -193,9 +191,7 @@ async def get_curve(
         entries = []
         total = 0
         async for r in result:
-            entries.append(
-                CurveEntry(cost=r["cost"], count=r["count"], cards=r["card_ids"][:10])
-            )
+            entries.append(CurveEntry(cost=r["cost"], count=r["count"], cards=r["card_ids"][:10]))
             total += r["count"]
         return CurveResponse(curve=entries, total=total)
 

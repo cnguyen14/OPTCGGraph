@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from backend.config import LIMITLESSTCG_BASE_URL, LIMITLESSTCG_DELAY, CRAWL_CACHE_DIR
+from backend.config import CRAWL_CACHE_DIR, LIMITLESSTCG_BASE_URL, LIMITLESSTCG_DELAY
 
 if TYPE_CHECKING:
     from backend.crawlers.tracer import CrawlTracer
@@ -71,9 +71,7 @@ async def crawl_limitlesstcg(
         all_decks: list[dict] = []
         tournament_sem = asyncio.Semaphore(2)
 
-        async def _crawl_with_sem(
-            idx: int, tournament: dict
-        ) -> tuple[int, str, list[dict]]:
+        async def _crawl_with_sem(idx: int, tournament: dict) -> tuple[int, str, list[dict]]:
             async with tournament_sem:
                 logger.info(
                     f"[{idx + 1}/{len(tournaments)}] Crawling decks from "
@@ -106,9 +104,7 @@ async def crawl_limitlesstcg(
     (CACHE_DIR / "decks.json").write_text(json.dumps(all_decks, indent=2))
 
     latency_ms = round((time.time() - t0) * 1000, 1)
-    logger.info(
-        f"Limitless crawl complete: {len(tournaments)} tournaments, {len(all_decks)} decks"
-    )
+    logger.info(f"Limitless crawl complete: {len(tournaments)} tournaments, {len(all_decks)} decks")
     if tracer:
         tracer.log(
             "crawl_finish",
@@ -124,9 +120,7 @@ async def _crawl_tournaments(client: httpx.AsyncClient, max_count: int) -> list[
     """Fetch tournament list page and extract tournament metadata."""
     cache_file = CACHE_DIR / "tournaments_page.html"
 
-    html = await _fetch_cached(
-        client, f"{LIMITLESSTCG_BASE_URL}/tournaments", cache_file
-    )
+    html = await _fetch_cached(client, f"{LIMITLESSTCG_BASE_URL}/tournaments", cache_file)
     if not html:
         return []
 
@@ -147,9 +141,7 @@ async def _crawl_tournament_decks(
     tid = tournament["id"]
     cache_file = CACHE_DIR / f"tournament_{tid}.html"
 
-    html = await _fetch_cached(
-        client, f"{LIMITLESSTCG_BASE_URL}/tournaments/{tid}", cache_file
-    )
+    html = await _fetch_cached(client, f"{LIMITLESSTCG_BASE_URL}/tournaments/{tid}", cache_file)
     if not html:
         return []
 
@@ -212,9 +204,7 @@ async def _fetch_cached(
                 return text
             if resp.status_code in (429, 500, 502, 503):
                 wait = (2**attempt) * 2
-                logger.warning(
-                    f"  HTTP {resp.status_code} for {url}, retrying in {wait}s..."
-                )
+                logger.warning(f"  HTTP {resp.status_code} for {url}, retrying in {wait}s...")
                 await asyncio.sleep(wait)
                 continue
             logger.error(f"  HTTP {resp.status_code} for {url}")

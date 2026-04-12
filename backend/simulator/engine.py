@@ -34,9 +34,7 @@ class Agent(Protocol):
         """Return True to mulligan (redraw entire hand). One chance only."""
         ...
 
-    async def choose_main_action(
-        self, state: GameState, legal_actions: list[GameAction]
-    ) -> int:
+    async def choose_main_action(self, state: GameState, legal_actions: list[GameAction]) -> int:
         """Choose an action index from legal_actions during main phase."""
         ...
 
@@ -199,12 +197,8 @@ class GameEngine:
                     p2_hand_size=len(self.state.p2.hand),
                     p1_field_count=len(self.state.p1.field),
                     p2_field_count=len(self.state.p2.field),
-                    p1_field_power=sum(
-                        c.effective_power for c in self.state.p1.characters
-                    ),
-                    p2_field_power=sum(
-                        c.effective_power for c in self.state.p2.characters
-                    ),
+                    p1_field_power=sum(c.effective_power for c in self.state.p1.characters),
+                    p2_field_power=sum(c.effective_power for c in self.state.p2.characters),
                     p1_don_available=self.state.p1.don_field,
                     p2_don_available=self.state.p2.don_field,
                     p1_deck_remaining=len(self.state.p1.deck),
@@ -329,8 +323,10 @@ class GameEngine:
 
         logger.debug(
             "Game complete: winner=%s turns=%d p1_drawn=%d unique p2_drawn=%d unique",
-            self.state.winner, self.state.turn,
-            len(self._cards_drawn_p1), len(self._cards_drawn_p2),
+            self.state.winner,
+            self.state.turn,
+            len(self._cards_drawn_p1),
+            len(self._cards_drawn_p2),
         )
         return GameResult(
             winner=self.state.winner,
@@ -454,11 +450,7 @@ class GameEngine:
             card = player.deck.pop(0)
             player.hand.append(card)
             # Track times drawn
-            tracker = (
-                self._cards_drawn_p1
-                if player.player_id == "p1"
-                else self._cards_drawn_p2
-            )
+            tracker = self._cards_drawn_p1 if player.player_id == "p1" else self._cards_drawn_p2
             tracker[card.card_id] = tracker.get(card.card_id, 0) + 1
             self.state.log(player.player_id, "draw", "draw_card", card_name=card.name)
 
@@ -628,9 +620,7 @@ class GameEngine:
 
         return actions
 
-    async def _execute_action(
-        self, action: GameAction, agents: dict[str, Agent]
-    ) -> None:
+    async def _execute_action(self, action: GameAction, agents: dict[str, Agent]) -> None:
         """Execute a chosen action."""
         player = self.state.active_player
         opponent = self.state.defending_player
@@ -689,9 +679,7 @@ class GameEngine:
             )
 
         # Track cards played + turn timing
-        tracker = (
-            self._cards_played_p1 if player.player_id == "p1" else self._cards_played_p2
-        )
+        tracker = self._cards_played_p1 if player.player_id == "p1" else self._cards_played_p2
         tracker[card.card_id] = tracker.get(card.card_id, 0) + 1
         self._card_play_turns.setdefault(card.card_id, []).append(self.state.turn)
 
@@ -741,9 +729,7 @@ class GameEngine:
         attacker.state = CardState.RESTED
 
         # When Attacking effects (resolve BEFORE logging so declared power is accurate)
-        self.effects.resolve_when_attacking(
-            self, attacker, attacker_player, defender_player
-        )
+        self.effects.resolve_when_attacking(self, attacker, attacker_player, defender_player)
 
         # Build display labels — disambiguate same-named cards (e.g. Leader vs Character)
         attacker_label = self._card_label(attacker, attacker_player)
@@ -786,9 +772,7 @@ class GameEngine:
                     blocker=blocker.name,
                 )
                 # Resolve "When Blocking" effects
-                self.effects.resolve_on_block(
-                    self, blocker, defender_player, attacker_player
-                )
+                self.effects.resolve_on_block(self, blocker, defender_player, attacker_player)
 
         # Counter step
         power_gap = attacker.effective_power - target.effective_power
@@ -840,12 +824,8 @@ class GameEngine:
                     self._deal_life_damage(attacker, defender_player, attacker_player)
             else:
                 # KO the character
-                self._cards_koed[target.card_id] = (
-                    self._cards_koed.get(target.card_id, 0) + 1
-                )
-                self.effects.resolve_on_ko(
-                    self, target, defender_player, attacker_player
-                )
+                self._cards_koed[target.card_id] = self._cards_koed.get(target.card_id, 0) + 1
+                self.effects.resolve_on_ko(self, target, defender_player, attacker_player)
                 if target not in defender_player.field:
                     return  # Already removed by KO effect chain
                 defender_player.field.remove(target)
@@ -936,9 +916,7 @@ class GameEngine:
         else:
             self._effects_p2 += 1
         if card_id:
-            self._cards_effects[card_id] = (
-                self._cards_effects.get(card_id, 0) + 1
-            )
+            self._cards_effects[card_id] = self._cards_effects.get(card_id, 0) + 1
 
     # --- Utility ---
 
@@ -971,8 +949,7 @@ class GameEngine:
         for i, card in enumerate(player.hand):
             kw = ", ".join(card.keywords) if card.keywords else ""
             lines.append(
-                f"  [{i}] {card.name} (Cost:{card.cost} P:{card.power}"
-                f"{' ' + kw if kw else ''})"
+                f"  [{i}] {card.name} (Cost:{card.cost} P:{card.power}{' ' + kw if kw else ''})"
             )
 
         lines.append(f"Your field ({len(player.field)} cards):")
@@ -990,9 +967,7 @@ class GameEngine:
             )
 
         lines.append(f"Opponent field ({len(opponent.field)} cards):")
-        lines.append(
-            f"  Leader: {opponent.leader.name} P:{opponent.leader.effective_power}"
-        )
+        lines.append(f"  Leader: {opponent.leader.name} P:{opponent.leader.effective_power}")
         for card in opponent.field:
             lines.append(
                 f"  {card.name} P:{card.effective_power} "

@@ -23,9 +23,7 @@ class OutputLimitsGuard:
     def applies_to(self) -> tuple[str, ...]:
         return ()  # Empty = applies to ALL tools
 
-    async def check_pre(
-        self, tool_name: str, arguments: JSONDict, ctx: Any
-    ) -> GuardrailResult:
+    async def check_pre(self, tool_name: str, arguments: JSONDict, ctx: Any) -> GuardrailResult:
         return GuardrailResult(passed=True)
 
     async def check_post(

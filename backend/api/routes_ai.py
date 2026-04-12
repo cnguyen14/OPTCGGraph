@@ -1,17 +1,20 @@
 """AI agent API endpoints with AG-UI SSE streaming."""
 
 import asyncio
+import logging
 
 from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import StreamingResponse
 from neo4j import AsyncDriver
 
+from backend.agent.ag_ui import stream_from_queue
+from backend.agent.runtime import OPTCGAgent
+from backend.agent.session import Session
+from backend.agent.types import DeckContext, ModelConfig
 from backend.api.models import ChatRequest
 from backend.graph.connection import get_driver
-from backend.agent.runtime import OPTCGAgent
-from backend.agent.types import DeckContext, ModelConfig
-from backend.agent.session import Session
-from backend.agent.ag_ui import stream_from_queue
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -32,9 +35,7 @@ def _build_agent(session: Session) -> OPTCGAgent:
 
     # Fallback: if primary provider has no key, try the other one
     if not api_key:
-        alt_provider = (
-            "openrouter" if provider in ("claude", "anthropic") else "anthropic"
-        )
+        alt_provider = "openrouter" if provider in ("claude", "anthropic") else "anthropic"
         api_key = get_active_api_key(alt_provider)
         if api_key:
             provider = alt_provider
@@ -56,6 +57,7 @@ def _build_deck_context(req: ChatRequest) -> DeckContext:
             leader_id=req.leader_id,
             card_ids=tuple(req.deck_card_ids),
             total_cost=len(req.deck_card_ids),
+            no_synergy_card_ids=tuple(req.no_synergy_card_ids or []),
         )
     return DeckContext(leader_id=req.leader_id)
 
@@ -114,7 +116,7 @@ async def chat(
             session.model_config = config
             await session.persist()
         except Exception:
-            pass
+            logger.exception("Failed to save agent session")
 
     async def generate():
         async for event in stream_from_queue(queue):
@@ -186,9 +188,7 @@ async def chat_sync(
         elif name == "find_synergies":
             tool_summaries.append(f"Found synergies for {inp.get('card_id', '?')}")
         elif name == "find_counters":
-            tool_summaries.append(
-                f"Found counters for {inp.get('target_card_id', '?')}"
-            )
+            tool_summaries.append(f"Found counters for {inp.get('target_card_id', '?')}")
         elif name == "query_neo4j":
             tool_summaries.append("Queried knowledge graph")
         elif name == "build_deck_shell":

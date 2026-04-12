@@ -172,13 +172,16 @@ async def _handle_suggest_card_swap(args: dict, ctx: ToolExecutionContext) -> st
     if pick < 0.1:
         reasons.append(f"low tournament pick rate ({pick:.0%})")
 
-    return json.dumps({
-        "remove_id": weakest.get("id", ""),
-        "remove_name": weakest.get("name", ""),
-        "add_id": incoming.get("id", ""),
-        "add_name": incoming.get("name", ""),
-        "reason": f"Swap recommended: {'; '.join(reasons)}",
-    }, default=str)
+    return json.dumps(
+        {
+            "remove_id": weakest.get("id", ""),
+            "remove_name": weakest.get("name", ""),
+            "add_id": incoming.get("id", ""),
+            "add_name": incoming.get("name", ""),
+            "reason": f"Swap recommended: {'; '.join(reasons)}",
+        },
+        default=str,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -194,9 +197,20 @@ BUILD_DECK_SHELL = AgentTool(
             "leader_id": {"type": "string", "description": "Leader card ID"},
             "budget_max": {"type": "number", "description": "Max total price in USD (optional)"},
             "strategy": {"type": "string", "enum": ["aggro", "midrange", "control"]},
-            "playstyle_hints": {"type": "string", "description": "Comma-separated playstyle preferences from user (e.g. 'rush,low_curve,card_advantage'). Get these from analyze_leader_playstyles results."},
-            "signature_cards": {"type": "array", "items": {"type": "string"}, "description": "Card IDs that MUST be included (signature cards from playstyle analysis)"},
-            "existing_card_ids": {"type": "array", "items": {"type": "string"}, "description": "Card IDs already in the user's deck. These will be kept and the remaining slots filled. Pass this when user asks to 'finish' or 'complete' an existing deck."},
+            "playstyle_hints": {
+                "type": "string",
+                "description": "Comma-separated playstyle preferences from user (e.g. 'rush,low_curve,card_advantage'). Get these from analyze_leader_playstyles results.",
+            },
+            "signature_cards": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Card IDs that MUST be included (signature cards from playstyle analysis)",
+            },
+            "existing_card_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Card IDs already in the user's deck. These will be kept and the remaining slots filled. Pass this when user asks to 'finish' or 'complete' an existing deck.",
+            },
         },
         "required": ["leader_id"],
     },
@@ -211,7 +225,11 @@ VALIDATE_DECK = AgentTool(
         "type": "object",
         "properties": {
             "leader_id": {"type": "string", "description": "Leader card ID"},
-            "card_ids": {"type": "array", "items": {"type": "string"}, "description": "List of 50 card IDs in the deck"},
+            "card_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of 50 card IDs in the deck",
+            },
         },
         "required": ["leader_id", "card_ids"],
     },
@@ -226,7 +244,11 @@ SUGGEST_DECK_FIXES = AgentTool(
         "type": "object",
         "properties": {
             "leader_id": {"type": "string", "description": "Leader card ID"},
-            "card_ids": {"type": "array", "items": {"type": "string"}, "description": "List of card IDs in the deck"},
+            "card_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of card IDs in the deck",
+            },
         },
         "required": ["leader_id", "card_ids"],
     },
@@ -240,7 +262,11 @@ SUGGEST_CARD_SWAP = AgentTool(
     parameters={
         "type": "object",
         "properties": {
-            "deck_card_ids": {"type": "array", "items": {"type": "string"}, "description": "Current deck card IDs"},
+            "deck_card_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Current deck card IDs",
+            },
             "incoming_card_id": {"type": "string", "description": "Card the user wants to add"},
             "leader_id": {"type": "string", "description": "Leader card ID (optional)"},
         },
@@ -250,4 +276,9 @@ SUGGEST_CARD_SWAP = AgentTool(
     category="deck",
 )
 
-DECK_TOOLS: list[AgentTool] = [BUILD_DECK_SHELL, VALIDATE_DECK, SUGGEST_DECK_FIXES, SUGGEST_CARD_SWAP]
+DECK_TOOLS: list[AgentTool] = [
+    BUILD_DECK_SHELL,
+    VALIDATE_DECK,
+    SUGGEST_DECK_FIXES,
+    SUGGEST_CARD_SWAP,
+]

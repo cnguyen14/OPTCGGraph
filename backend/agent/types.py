@@ -12,6 +12,7 @@ JSONDict = dict[str, Any]
 # Model / Provider
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class ModelConfig:
     """LLM provider and model configuration."""
@@ -27,6 +28,7 @@ class ModelConfig:
 # ---------------------------------------------------------------------------
 # Tool execution
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class ToolCall:
@@ -61,6 +63,7 @@ class ToolExecutionResult:
 # Agent run result
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class AgentRunResult:
     """Final result of an agent run."""
@@ -77,6 +80,7 @@ class AgentRunResult:
 # Deck context
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class DeckContext:
     """Current deck state passed through the agent pipeline."""
@@ -84,11 +88,13 @@ class DeckContext:
     leader_id: str | None = None
     card_ids: tuple[str, ...] = ()
     total_cost: float = 0.0
+    no_synergy_card_ids: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class AgentMessage:
@@ -132,6 +138,7 @@ class AgentMessage:
 # Skills
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class SkillConfig:
     """A skill loaded from a YAML/Markdown file."""
@@ -147,6 +154,7 @@ class SkillConfig:
 # ---------------------------------------------------------------------------
 # Guardrails
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class GuardrailResult:

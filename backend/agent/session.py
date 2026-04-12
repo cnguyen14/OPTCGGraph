@@ -1,8 +1,8 @@
 """Session memory management — Redis-persisted conversation history and deck state."""
 
 import json
-import uuid
 import logging
+import uuid
 from datetime import datetime
 
 from backend.storage.redis_client import get_redis
@@ -116,9 +116,7 @@ class Session:
                 await r.zadd(idx_key, {self.id: ts})
                 await r.expire(idx_key, SESSION_TTL_SECONDS)
         except Exception:
-            logger.warning(
-                "Failed to persist session %s to Redis", self.id, exc_info=True
-            )
+            logger.warning("Failed to persist session %s to Redis", self.id, exc_info=True)
 
     @classmethod
     async def load_from_redis(cls, session_id: str) -> "Session | None":
@@ -134,9 +132,7 @@ class Session:
             s.id = session_id
             return s
         except Exception:
-            logger.warning(
-                "Failed to load session %s from Redis", session_id, exc_info=True
-            )
+            logger.warning("Failed to load session %s from Redis", session_id, exc_info=True)
             return None
 
     @staticmethod
@@ -171,9 +167,7 @@ class Session:
                 )
             return summaries
         except Exception:
-            logger.warning(
-                "Failed to list sessions for client %s", client_id, exc_info=True
-            )
+            logger.warning("Failed to list sessions for client %s", client_id, exc_info=True)
             return []
 
     @staticmethod

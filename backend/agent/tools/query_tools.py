@@ -17,10 +17,7 @@ async def _handle_query_neo4j(args: dict, ctx: ToolExecutionContext) -> str:
 
     # Safety: block write operations (also enforced by cypher_safety guardrail)
     cypher_upper = cypher.upper().strip()
-    if any(
-        kw in cypher_upper
-        for kw in ["CREATE", "DELETE", "SET", "MERGE", "REMOVE", "DROP"]
-    ):
+    if any(kw in cypher_upper for kw in ["CREATE", "DELETE", "SET", "MERGE", "REMOVE", "DROP"]):
         return json.dumps({"error": "Write operations are not allowed from agent queries"})
 
     async with ctx.driver.session() as session:
@@ -44,11 +41,14 @@ async def _handle_get_banned_cards(args: dict, ctx: ToolExecutionContext) -> str
     from backend.graph.queries import get_banned_cards
 
     banned = await get_banned_cards(ctx.driver)
-    return json.dumps({
-        "banned_cards": banned,
-        "total": len(banned),
-        "note": "These cards are banned from official tournament play. NEVER include them in any deck.",
-    }, default=str)
+    return json.dumps(
+        {
+            "banned_cards": banned,
+            "total": len(banned),
+            "note": "These cards are banned from official tournament play. NEVER include them in any deck.",
+        },
+        default=str,
+    )
 
 
 # ---------------------------------------------------------------------------

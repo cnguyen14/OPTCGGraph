@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 # Exceptions
 # ---------------------------------------------------------------------------
 
+
 class ToolPermissionError(RuntimeError):
     """Tool blocked by permission policy."""
 
@@ -29,6 +30,7 @@ class ToolExecutionError(RuntimeError):
 # ---------------------------------------------------------------------------
 # Execution context
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class ToolExecutionContext:
@@ -48,6 +50,7 @@ ToolHandler = Callable[[JSONDict, ToolExecutionContext], Awaitable[str]]
 # ---------------------------------------------------------------------------
 # AgentTool
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class AgentTool:
@@ -107,17 +110,13 @@ class AgentTool:
             return ToolExecutionResult(name=self.name, ok=False, content=str(exc))
         except Exception as exc:
             logger.error("Tool %s error: %s", self.name, exc)
-            return ToolExecutionResult(
-                name=self.name, ok=False, content=f"Internal error: {exc}"
-            )
+            return ToolExecutionResult(name=self.name, ok=False, content=f"Internal error: {exc}")
 
         # 3. POST-guards
         if guards:
             from backend.agent.guardrails import run_guards
 
-            post = await run_guards(
-                guards, "post", self.name, arguments, result, context
-            )
+            post = await run_guards(guards, "post", self.name, arguments, result, context)
             if not post.passed:
                 if post.auto_fixed and post.fixed_data:
                     return ToolExecutionResult(
@@ -138,6 +137,7 @@ class AgentTool:
 # Dispatch helper
 # ---------------------------------------------------------------------------
 
+
 async def execute_tool(
     registry: dict[str, AgentTool],
     name: str,
@@ -148,7 +148,5 @@ async def execute_tool(
     """Look up a tool and execute it."""
     tool = registry.get(name)
     if tool is None:
-        return ToolExecutionResult(
-            name=name, ok=False, content=f"Unknown tool: {name}"
-        )
+        return ToolExecutionResult(name=name, ok=False, content=f"Unknown tool: {name}")
     return await tool.execute(arguments, context, guards)

@@ -82,6 +82,7 @@ interface Props {
   leader: Card | null;
   entries: Map<string, DeckEntry>;
   onCardSelect: (card: Card) => void;
+  onNoSynergyCards?: (cardIds: string[]) => void;
 }
 
 // Column layout helpers
@@ -94,7 +95,7 @@ function getCostColIndex(cost: number | null): number {
   return c - 1;
 }
 
-export default function DeckMap({ leader, entries, onCardSelect }: Props) {
+export default function DeckMap({ leader, entries, onCardSelect, onNoSynergyCards }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [loading, setLoading] = useState(false);
@@ -776,7 +777,13 @@ export default function DeckMap({ leader, entries, onCardSelect }: Props) {
   const connectedIds = new Set(edges.flatMap((e) => [e.source, e.target]));
   const allIds = new Set(Array.from(entries.keys()));
   if (leader) allIds.add(leader.id);
-  const disconnectedCount = Array.from(allIds).filter((id) => !connectedIds.has(id) && id !== leader?.id).length;
+  const disconnectedCards = Array.from(allIds).filter((id) => !connectedIds.has(id) && id !== leader?.id);
+  const disconnectedCount = disconnectedCards.length;
+
+  // Report no-synergy cards to parent for AI agent context
+  useEffect(() => {
+    onNoSynergyCards?.(disconnectedCards);
+  }, [disconnectedCards.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!leader && entries.size === 0) {
     return (

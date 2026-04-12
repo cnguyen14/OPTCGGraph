@@ -18,12 +18,12 @@ logger = logging.getLogger(__name__)
 async def main():
     from backend.crawlers.limitlesstcg import crawl_limitlesstcg
     from backend.crawlers.tracer import CrawlTracer
-    from backend.graph.connection import get_driver, close_driver
     from backend.graph.builder import (
+        compute_card_meta_stats,
         create_meta_indexes,
         load_tournament_data,
-        compute_card_meta_stats,
     )
+    from backend.graph.connection import close_driver, get_driver
     from backend.services.settings_service import load_persisted_settings
 
     run_id = datetime.now(timezone.utc).strftime("crawl_decks_%Y%m%d_%H%M%S")
@@ -43,9 +43,7 @@ async def main():
         tournaments=len(data["tournaments"]),
         decks=len(data["decks"]),
     )
-    logger.info(
-        f"Crawled {len(data['tournaments'])} tournaments, {len(data['decks'])} decks"
-    )
+    logger.info(f"Crawled {len(data['tournaments'])} tournaments, {len(data['decks'])} decks")
 
     # 2. Load into Neo4j
     driver = await get_driver()
@@ -57,9 +55,7 @@ async def main():
 
     tracer.log_step_start("load_tournament_data")
     logger.info("Loading tournament data into Neo4j...")
-    stats = await load_tournament_data(
-        driver, data["tournaments"], data["decks"], tracer=tracer
-    )
+    stats = await load_tournament_data(driver, data["tournaments"], data["decks"], tracer=tracer)
     tracer.log_step_finish("load_tournament_data", **stats)
     logger.info(f"Loaded: {stats}")
 
@@ -109,9 +105,7 @@ async def main():
                 f"  {r['id']} {r['name']} — pick_rate={r['pick_rate']}, "
                 f"avg_copies={r['avg_copies']}"
             )
-            top_cards.append(
-                {"id": r["id"], "name": r["name"], "pick_rate": r["pick_rate"]}
-            )
+            top_cards.append({"id": r["id"], "name": r["name"], "pick_rate": r["pick_rate"]})
 
     tracer.log_step_finish(
         "verify",

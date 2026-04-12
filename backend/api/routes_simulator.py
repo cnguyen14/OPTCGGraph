@@ -16,9 +16,9 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from backend.graph.connection import get_driver
-from backend.storage.redis_client import get_redis
 from backend.simulator.analytics import aggregate_all_simulations
 from backend.simulator.runner import SimulationRunner
+from backend.storage.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 
@@ -58,17 +58,11 @@ async def start_battle(req: BattleRequest) -> BattleResponse:
     if not (1 <= req.num_games <= 200):
         raise HTTPException(400, "num_games must be between 1 and 200")
     if req.mode not in VALID_MODES:
-        raise HTTPException(
-            400, f"mode must be one of: {', '.join(sorted(VALID_MODES))}"
-        )
+        raise HTTPException(400, f"mode must be one of: {', '.join(sorted(VALID_MODES))}")
     if req.p1_level not in VALID_P1_LEVELS:
-        raise HTTPException(
-            400, f"p1_level must be one of: {', '.join(sorted(VALID_P1_LEVELS))}"
-        )
+        raise HTTPException(400, f"p1_level must be one of: {', '.join(sorted(VALID_P1_LEVELS))}")
     if req.p2_level not in VALID_P2_LEVELS:
-        raise HTTPException(
-            400, f"p2_level must be one of: {', '.join(sorted(VALID_P2_LEVELS))}"
-        )
+        raise HTTPException(400, f"p2_level must be one of: {', '.join(sorted(VALID_P2_LEVELS))}")
     if len(req.deck1_card_ids) != 50:
         raise HTTPException(400, "deck1 must have exactly 50 cards")
     if len(req.deck2_card_ids) != 50:
@@ -83,15 +77,11 @@ async def start_battle(req: BattleRequest) -> BattleResponse:
     return BattleResponse(sim_id=sim_id)
 
 
-async def _store_sim_history(
-    sim_id: str, req: dict[str, Any], result: dict[str, Any]
-) -> None:
+async def _store_sim_history(sim_id: str, req: dict[str, Any], result: dict[str, Any]) -> None:
     """Store a simulation result summary in Redis, keyed by deck composition."""
     deck1_card_ids = req.get("deck1_card_ids", [])
     leader_id = req.get("deck1_leader_id", "")
-    deck_hash = hashlib.md5(json.dumps(sorted(deck1_card_ids)).encode()).hexdigest()[
-        :12
-    ]
+    deck_hash = hashlib.md5(json.dumps(sorted(deck1_card_ids)).encode()).hexdigest()[:12]
     redis_key = f"deck-sims:{leader_id}:{deck_hash}"
 
     entry = {
@@ -163,9 +153,7 @@ async def stream_simulation(sim_id: str) -> StreamingResponse:
                     try:
                         await _store_sim_history(sim_id, req, event["result"])
                     except Exception:
-                        logger.warning(
-                            "Failed to store sim history in Redis", exc_info=True
-                        )
+                        logger.warning("Failed to store sim history in Redis", exc_info=True)
 
                 yield f"data: {json.dumps(event)}\n\n"
 

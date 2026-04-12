@@ -5,12 +5,10 @@ import logging
 import sys
 from datetime import datetime, timezone
 
-sys.path.insert(
-    0, str(__import__("pathlib").Path(__file__).resolve().parent.parent.parent)
-)
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent.parent))
 
 from backend.crawlers.tracer import CrawlTracer
-from backend.graph.connection import get_driver, close_driver
+from backend.graph.connection import close_driver, get_driver
 from backend.graph.edges import build_all_edges
 
 logging.basicConfig(

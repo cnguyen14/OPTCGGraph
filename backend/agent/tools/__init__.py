@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from backend.agent.tools.analysis_tools import ANALYSIS_TOOLS
 from backend.agent.tools.base import (
     AgentTool,
     ToolExecutionContext,
@@ -9,7 +10,6 @@ from backend.agent.tools.base import (
     ToolPermissionError,
     execute_tool,
 )
-from backend.agent.tools.analysis_tools import ANALYSIS_TOOLS
 from backend.agent.tools.card_tools import CARD_TOOLS
 from backend.agent.tools.deck_tools import DECK_TOOLS
 from backend.agent.tools.meta_tools import META_TOOLS

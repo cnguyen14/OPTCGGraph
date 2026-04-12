@@ -26,9 +26,7 @@ class CardExistenceGuard:
             "find_counters",
         )
 
-    async def check_pre(
-        self, tool_name: str, arguments: JSONDict, ctx: Any
-    ) -> GuardrailResult:
+    async def check_pre(self, tool_name: str, arguments: JSONDict, ctx: Any) -> GuardrailResult:
         return GuardrailResult(passed=True)
 
     async def check_post(

@@ -164,12 +164,18 @@ Do NOT skip the playstyle question. The user deserves to choose how they want to
 Exception: If the user already specified a clear playstyle (e.g., "build me a rush aggro Luffy deck"),
 skip the question and use their stated preference directly.
 
+## CRITICAL: Deck Modification Rules
+- NEVER modify the deck (add/remove/replace cards) without explicit user confirmation
+- When suggesting changes: explain WHY, then ASK to confirm
+- This applies to ALL deck modifications, not just validation fixes
+
 ## When building a deck:
 1. Call build_deck_shell with the leader_id, strategy, playstyle_hints, and signature_cards
 2. The tool returns a validated deck — present the results to the user
 3. Present the deck organized by cost, with card roles explained
 4. Show the cost curve, counter density, and role coverage
 5. If there are validation warnings, explain them and suggest improvements
+6. **IMPORTANT:** The deck list UI updates AUTOMATICALLY after build_deck_shell — do NOT call update_ui_state(action="update_deck_list") afterward. Doing so will clear the deck.
 
 ## DECK VALIDATION & FIX FLOW (Human-in-the-Loop)
 After building a deck or when asked to validate:
@@ -178,8 +184,9 @@ After building a deck or when asked to validate:
 3. If issues exist, use suggest_deck_fixes to get replacement suggestions
 4. Present suggestions: "Remove X → Add Y" with reasons
 5. ASK the user: "Would you like me to apply these fixes?"
-6. ONLY if the user confirms, call update_ui_state(action="update_deck_list", payload={...})
-7. NEVER modify the deck without explicit user confirmation
+6. ONLY if the user confirms, use update_ui_state with add_card_to_deck/remove_card_from_deck for individual changes
+7. NEVER call update_ui_state(action="update_deck_list") after build_deck_shell — the runtime handles this automatically
+8. NEVER modify the deck without explicit user confirmation
 
 ## Response Format
 - Your final response must be clean, readable markdown. No raw tool calls or JSON.
@@ -198,43 +205,27 @@ async def build_system_prompt(
     banned_cards: list[dict] | None = None,
 ) -> str:
     """Build the full system prompt for the AI agent."""
+    from backend.agent.prompts.context import (
+        get_banned_cards_section,
+        get_deck_context_section,
+        get_leader_context_section,
+    )
+    from backend.agent.types import DeckContext
+
     parts = [GAME_RULES, STRATEGIC_CONCEPTS, AGENT_INSTRUCTIONS]
 
-    # Inject banned cards list so agent always knows
     if banned_cards:
-        banned_lines = [
-            f"- **{c.get('name', c['id'])}** ({c['id']})" for c in banned_cards
-        ]
-        parts.append(
-            f"\n## Currently Banned Cards ({len(banned_cards)} cards)\n"
-            f"The following cards are banned from official tournament play:\n"
-            + "\n".join(banned_lines)
-            + "\nDo NOT include any of these in decks or recommendations."
-        )
+        section = get_banned_cards_section(banned_cards)
+        if section:
+            parts.append(section)
 
     if selected_leader:
-        parts.append(f"\n## Current Context\nSelected Leader: {selected_leader}")
+        parts.append(get_leader_context_section(selected_leader))
 
-    if current_deck and current_deck.get("cards"):
-        cards = current_deck["cards"]
-        # Count card IDs for readable format
-        from collections import Counter
-
-        card_counts = Counter(cards)
-        deck_summary = ", ".join(
-            f"{cnt}x {cid}" for cid, cnt in card_counts.most_common()
-        )
-        parts.append(
-            f"\n## User's Current Deck ({len(cards)}/50 cards)\n"
-            f"Leader: {current_deck.get('leader', 'Not set')}\n"
-            f"Cards: {deck_summary}\n"
-            f"\nYou can see the user's current deck above. When they ask to validate, "
-            f"use the validate_deck tool with this leader and these card IDs. "
-            f"When they ask about their deck, reference these actual cards."
-        )
-    else:
-        parts.append(
-            "\n## User's Current Deck\nNo deck currently built. The user has not added any cards yet."
-        )
+    deck_ctx = DeckContext(
+        leader_id=current_deck.get("leader") if current_deck else None,
+        card_ids=tuple(current_deck["cards"]) if current_deck and current_deck.get("cards") else (),
+    )
+    parts.append(get_deck_context_section(deck_ctx))
 
     return "\n".join(parts)

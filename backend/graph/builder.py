@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from neo4j import AsyncDriver
 
-from backend.graph.batch import batch_write, RELATIONSHIP_CHUNK_SIZE
+from backend.graph.batch import RELATIONSHIP_CHUNK_SIZE, batch_write
 
 if TYPE_CHECKING:
     from backend.crawlers.tracer import CrawlTracer
@@ -36,8 +36,7 @@ async def create_indexes(driver: AsyncDriver) -> None:
     async with driver.session() as session:
         try:
             await session.run(
-                "CREATE FULLTEXT INDEX card_ability IF NOT EXISTS "
-                "FOR (c:Card) ON EACH [c.ability]"
+                "CREATE FULLTEXT INDEX card_ability IF NOT EXISTS FOR (c:Card) ON EACH [c.ability]"
             )
         except Exception:
             pass  # May already exist
@@ -441,9 +440,7 @@ async def load_tournament_data(
     }
 
 
-async def compute_card_meta_stats(
-    driver: AsyncDriver, tracer: CrawlTracer | None = None
-) -> int:
+async def compute_card_meta_stats(driver: AsyncDriver, tracer: CrawlTracer | None = None) -> int:
     """Compute tournament popularity stats and store on Card nodes.
 
     Sets: tournament_pick_rate, avg_copies, top_cut_rate

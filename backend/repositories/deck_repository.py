@@ -6,7 +6,6 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-
 DECK_TTL_SECONDS = 90 * 86400  # 90 days
 MAX_SAVED_DECKS = 50
 

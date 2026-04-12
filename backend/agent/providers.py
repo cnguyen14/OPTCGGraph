@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from typing import Protocol
 import logging
+from typing import Protocol
 
 import anthropic
 import httpx
@@ -32,9 +32,7 @@ class LLMResponse:
 
 
 class LLMProvider(Protocol):
-    async def chat(
-        self, system: str, messages: list[dict], tools: list[dict]
-    ) -> LLMResponse: ...
+    async def chat(self, system: str, messages: list[dict], tools: list[dict]) -> LLMResponse: ...
 
     @property
     def tier(self) -> int: ...
@@ -46,17 +44,11 @@ class LLMProvider(Protocol):
 class ClaudeProvider:
     """Direct Anthropic API — lowest latency, highest accuracy."""
 
-    def __init__(
-        self, model: str = "claude-sonnet-4-20250514", api_key: str | None = None
-    ):
-        self.client = anthropic.AsyncAnthropic(
-            api_key=api_key or get_active_api_key("claude")
-        )
+    def __init__(self, model: str = "claude-sonnet-4-20250514", api_key: str | None = None):
+        self.client = anthropic.AsyncAnthropic(api_key=api_key or get_active_api_key("claude"))
         self.model = model
 
-    async def chat(
-        self, system: str, messages: list[dict], tools: list[dict]
-    ) -> LLMResponse:
+    async def chat(self, system: str, messages: list[dict], tools: list[dict]) -> LLMResponse:
         # Convert tools to Anthropic format
         anthropic_tools = [
             {
@@ -92,9 +84,7 @@ class ClaudeProvider:
 
         return LLMResponse(
             content=content,
-            stop_reason="tool_use"
-            if response.stop_reason == "tool_use"
-            else "end_turn",
+            stop_reason="tool_use" if response.stop_reason == "tool_use" else "end_turn",
         )
 
     @property
@@ -132,9 +122,7 @@ class OpenRouterProvider:
         self.model = model
         self._tier = self._detect_tier(model)
 
-    async def chat(
-        self, system: str, messages: list[dict], tools: list[dict]
-    ) -> LLMResponse:
+    async def chat(self, system: str, messages: list[dict], tools: list[dict]) -> LLMResponse:
         openai_tools = (
             [
                 {
@@ -240,9 +228,7 @@ class OpenRouterProvider:
                                         "type": "function",
                                         "function": {
                                             "name": block["name"],
-                                            "arguments": json.dumps(
-                                                block.get("input", {})
-                                            ),
+                                            "arguments": json.dumps(block.get("input", {})),
                                         },
                                     }
                                 )
@@ -258,17 +244,15 @@ class OpenRouterProvider:
                 elif role == "user":
                     has_tool_results = False
                     for block in content:
-                        if (
-                            isinstance(block, dict)
-                            and block.get("type") == "tool_result"
-                        ):
+                        if isinstance(block, dict) and block.get("type") == "tool_result":
                             has_tool_results = True
                             raw_content = block.get("content", "")
                             result.append(
                                 {
                                     "role": "tool",
                                     "tool_call_id": block.get("tool_use_id", ""),
-                                    "content": raw_content if isinstance(raw_content, str)
+                                    "content": raw_content
+                                    if isinstance(raw_content, str)
                                     else json.dumps(raw_content, default=str),
                                 }
                             )
@@ -304,8 +288,6 @@ def get_provider(
 ) -> LLMProvider:
     """Factory to get the right LLM provider."""
     if provider_name in ("claude", "anthropic"):
-        return ClaudeProvider(
-            model=model or "claude-sonnet-4-20250514", api_key=api_key
-        )
+        return ClaudeProvider(model=model or "claude-sonnet-4-20250514", api_key=api_key)
     else:
         return OpenRouterProvider(model=model or "openai/gpt-4o", api_key=api_key)

@@ -27,14 +27,14 @@ from collections import Counter
 
 from neo4j import AsyncDriver
 
+from backend.ai.deck_validator import validate_deck
+from backend.graph.queries import get_card_by_id
 from backend.services.llm_service import (
     LLMNotAvailableError,
     has_any_llm_key,
     llm_complete,
     strip_json_fences,
 )
-from backend.graph.queries import get_card_by_id
-from backend.ai.deck_validator import validate_deck
 
 logger = logging.getLogger(__name__)
 
@@ -119,12 +119,8 @@ def _apply_playstyle_hints(template: dict, hints: str) -> dict:
         t["cost_targets"][(0, 2)] = (16, 20)
         t["type_targets"]["CHARACTER"] = (40, 44)
     if "card_advantage" in hint_set or "value" in hint_set:
-        t["role_targets"]["draw"] = max(
-            t["role_targets"].get("draw", 0), 5
-        )
-        t["role_targets"]["searcher"] = max(
-            t["role_targets"].get("searcher", 0), 5
-        )
+        t["role_targets"]["draw"] = max(t["role_targets"].get("draw", 0), 5)
+        t["role_targets"]["searcher"] = max(t["role_targets"].get("searcher", 0), 5)
     if "defensive" in hint_set or "blockers" in hint_set:
         t["role_targets"]["blockers"] = max(t["role_targets"].get("blockers", 0), 10)
     if "removal_heavy" in hint_set:
@@ -194,9 +190,7 @@ async def build_deck(
     # 2. Get candidates via parallel queries (synergy + curve scores + counter pool)
     candidates = await _get_candidates_parallel(driver, leader_id, leader_colors)
     if not candidates:
-        return {
-            "error": f"No eligible cards found for leader {leader_id} colors {leader_colors}"
-        }
+        return {"error": f"No eligible cards found for leader {leader_id} colors {leader_colors}"}
 
     logger.info(
         f"Found {len(candidates)} candidates for {leader_id} ({strategy}, hints={playstyle_hints})"
@@ -206,7 +200,9 @@ async def build_deck(
     categorized = _categorize(candidates)
 
     # 4. Build deck using strategy template
-    deck = _fill_deck(candidates, categorized, template, budget_max, signature_cards, existing_card_ids)
+    deck = _fill_deck(
+        candidates, categorized, template, budget_max, signature_cards, existing_card_ids
+    )
 
     # 5. Validate and self-correct
     report = validate_deck(leader, deck)
@@ -277,9 +273,7 @@ async def build_deck(
     }
 
 
-async def _analyze_leader_stage_usage(
-    driver: AsyncDriver, leader_id: str
-) -> dict:
+async def _analyze_leader_stage_usage(driver: AsyncDriver, leader_id: str) -> dict:
     """Query tournament decks to determine how many stage cards this leader typically uses.
 
     Returns dict with avg_stage_count and top_stages (list of {id, name, avg_copies}).
@@ -448,9 +442,7 @@ async def _get_curve_scores(
         return {record["card_id"]: 1.0 async for record in result}
 
 
-async def _get_counter_pool(
-    driver: AsyncDriver, leader_colors: set[str]
-) -> list[dict]:
+async def _get_counter_pool(driver: AsyncDriver, leader_colors: set[str]) -> list[dict]:
     """Get high-counter cards that may be missed by synergy scoring."""
     color_list = list(leader_colors)
     async with driver.session() as session:
@@ -464,7 +456,7 @@ async def _get_counter_pool(
             OPTIONAL MATCH (c)-[:HAS_KEYWORD]->(k:Keyword)
             RETURN c, collect(DISTINCT k.name) AS keywords,
                    collect(DISTINCT color.name) AS colors,
-                   (c.counter / 1000.0) AS relevance,
+                   0 AS relevance,
                    c.tournament_pick_rate AS tournament_pick_rate,
                    c.top_cut_rate AS top_cut_rate,
                    c.avg_copies AS avg_copies
@@ -583,8 +575,14 @@ def _base_card_id(card_id: str) -> str:
 
 
 def _score_card(card: dict) -> float:
-    """Score a card for selection: relevance + counter bonus + role coverage + ability value + meta stats."""
-    score = card.get("relevance", 0) * 2.0
+    """Score a card for selection: synergy-first, tournament as tiebreaker."""
+    relevance = card.get("relevance", 0)
+    score = relevance * 3.0  # Synergy dominates (was 2.0)
+
+    # Penalize cards with zero synergy connections — they don't fit the deck network
+    if relevance == 0:
+        score -= 2.0
+
     counter = card.get("counter") or 0
     if counter >= 2000:
         score += 3.0  # +2000 counters are premium defensive assets
@@ -604,11 +602,11 @@ def _score_card(card: dict) -> float:
     # Stages are persistent (stay on field every turn) — extra value over one-shot events
     if card_type == "STAGE" and ability:
         score += 2.0
-    # Tournament meta stats bonus
+    # Tournament meta stats — tiebreaker, not primary driver (weights reduced)
     pick_rate = card.get("tournament_pick_rate") or 0
     top_cut_rate = card.get("top_cut_rate") or 0
     avg_copies = card.get("avg_copies") or 0
-    score += pick_rate * 3.0 + top_cut_rate * 5.0 + avg_copies * 0.5
+    score += pick_rate * 1.0 + top_cut_rate * 1.5 + avg_copies * 0.3
     # Parallel art penalty: same gameplay but higher price — prefer base art
     if _PARALLEL_ART_RE.search(card.get("id", "")):
         score -= 0.5
@@ -634,7 +632,8 @@ def _evaluate_existing_cards(
 
         # Find better alternatives at similar cost (±1), same card type
         alternatives = [
-            c for c in candidates
+            c
+            for c in candidates
             if c["id"] not in deck_ids
             and c["id"] != card_id
             and abs((c.get("cost") or 0) - cost) <= 1
@@ -644,15 +643,17 @@ def _evaluate_existing_cards(
 
         if alternatives and _score_card(alternatives[0]) > card_score * 1.3:
             best = alternatives[0]
-            swaps.append({
-                "remove_id": card_id,
-                "remove_name": card.get("name", ""),
-                "add_id": best["id"],
-                "add_name": best.get("name", ""),
-                "reason": "Better synergy and tournament performance at similar cost",
-                "remove_score": round(card_score, 1),
-                "add_score": round(_score_card(best), 1),
-            })
+            swaps.append(
+                {
+                    "remove_id": card_id,
+                    "remove_name": card.get("name", ""),
+                    "add_id": best["id"],
+                    "add_name": best.get("name", ""),
+                    "reason": "Better synergy and tournament performance at similar cost",
+                    "remove_score": round(card_score, 1),
+                    "add_score": round(_score_card(best), 1),
+                }
+            )
 
     return swaps[:5]
 
@@ -667,8 +668,8 @@ def _fill_deck(
 ) -> list[dict]:
     """Fill a 50-card deck with type diversity, 4x core consistency, balanced curve, and counter density."""
     deck: list[dict] = []
-    deck_ids: Counter = Counter()       # Count by exact card ID
-    base_ids: Counter = Counter()       # Count by base card number (parallel art aware)
+    deck_ids: Counter = Counter()  # Count by exact card ID
+    base_ids: Counter = Counter()  # Count by base card number (parallel art aware)
     total_price = 0.0
     type_targets = template.get("type_targets", {})
 
@@ -713,11 +714,22 @@ def _fill_deck(
             if card and card.get("card_type") != "LEADER":
                 add_card(card, copies=min(qty, 4))
 
-    # === Phase -1: Lock in signature cards (use tournament avg_copies) ===
+    # === Phase -1: Lock in signature cards (only if they have synergy) ===
     if signature_cards:
         for card_id in signature_cards:
             card = candidate_map.get(card_id)
             if card and can_add(card):
+                # Only lock signature cards that actually connect to the deck's
+                # synergy network. Skip cards with 0 relevance — tournament
+                # popularity alone doesn't guarantee fit for this specific deck.
+                relevance = card.get("relevance", 0)
+                if relevance <= 0:
+                    logger.info(
+                        "Skipping signature card %s (relevance=%.1f, no synergy)",
+                        card_id,
+                        relevance,
+                    )
+                    continue
                 avg = card.get("avg_copies") or 4
                 copies = max(2, min(4, round(avg)))
                 add_card(card, copies=copies)
@@ -740,8 +752,7 @@ def _fill_deck(
         pool = [
             c
             for c in candidates
-            if cost_min <= (c.get("cost") or 0) <= cost_max
-            and c.get("card_type") == "CHARACTER"
+            if cost_min <= (c.get("cost") or 0) <= cost_max and c.get("card_type") == "CHARACTER"
         ]
         pool.sort(key=lambda c: -_score_card(c))
 
@@ -762,9 +773,7 @@ def _fill_deck(
     events_needed = max(0, event_target - type_count("EVENT"))
 
     if events_needed > 0:
-        event_pool = sorted(
-            categorized.get("events", []), key=lambda c: -_score_card(c)
-        )
+        event_pool = sorted(categorized.get("events", []), key=lambda c: -_score_card(c))
         for card in event_pool:
             if events_needed <= 0 or len(deck) >= 50:
                 break
@@ -783,9 +792,7 @@ def _fill_deck(
     stages_needed = max(0, stage_target - type_count("STAGE"))
 
     if stages_needed > 0:
-        stage_pool = sorted(
-            categorized.get("stages", []), key=lambda c: -_score_card(c)
-        )
+        stage_pool = sorted(categorized.get("stages", []), key=lambda c: -_score_card(c))
         for card in stage_pool:
             if stages_needed <= 0 or len(deck) >= 50:
                 break
@@ -801,9 +808,7 @@ def _fill_deck(
     role_targets = template["role_targets"]
     for role, target_count in role_targets.items():
         current_role = sum(
-            1
-            for c in deck
-            if set(c.get("keywords", [])) & set(ROLE_KEYWORDS.get(role, []))
+            1 for c in deck if set(c.get("keywords", [])) & set(ROLE_KEYWORDS.get(role, []))
         )
         if current_role >= target_count:
             continue
@@ -826,8 +831,7 @@ def _fill_deck(
         pool = [
             c
             for c in candidates
-            if cost_min <= (c.get("cost") or 0) <= cost_max
-            and c.get("card_type") != "LEADER"
+            if cost_min <= (c.get("cost") or 0) <= cost_max and c.get("card_type") != "LEADER"
         ]
         pool.sort(key=lambda c: (-(c.get("counter") or 0), -_score_card(c)))
         for card in pool:
@@ -1018,9 +1022,7 @@ def _build_deck_summary(leader: dict, deck: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _build_replacement_pool(
-    candidates: list[dict], deck_ids: set[str], limit: int = 30
-) -> str:
+def _build_replacement_pool(candidates: list[dict], deck_ids: set[str], limit: int = 30) -> str:
     """Build list of top candidates NOT in the deck for QC to choose from."""
     pool = [c for c in candidates if c["id"] not in deck_ids]
     # Sort by tournament performance

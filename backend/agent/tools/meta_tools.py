@@ -31,11 +31,13 @@ async def _handle_get_meta_overview(args: dict, ctx: ToolExecutionContext) -> st
         )
         archetypes = []
         async for r in arch_r:
-            archetypes.append({
-                "archetype": r["archetype"],
-                "count": r["cnt"],
-                "share": round(r["cnt"] / total_decks, 3) if total_decks else 0,
-            })
+            archetypes.append(
+                {
+                    "archetype": r["archetype"],
+                    "count": r["cnt"],
+                    "share": round(r["cnt"] / total_decks, 3) if total_decks else 0,
+                }
+            )
 
         leader_r = await session.run(
             """
@@ -45,16 +47,18 @@ async def _handle_get_meta_overview(args: dict, ctx: ToolExecutionContext) -> st
             """
         )
         leaders = [
-            {"id": r["id"], "name": r["name"], "deck_count": r["cnt"]}
-            async for r in leader_r
+            {"id": r["id"], "name": r["name"], "deck_count": r["cnt"]} async for r in leader_r
         ]
 
-    return json.dumps({
-        "total_decks": total_decks,
-        "total_tournaments": total_tournaments,
-        "top_archetypes": archetypes,
-        "top_leaders": leaders,
-    }, default=str)
+    return json.dumps(
+        {
+            "total_decks": total_decks,
+            "total_tournaments": total_tournaments,
+            "top_archetypes": archetypes,
+            "top_leaders": leaders,
+        },
+        default=str,
+    )
 
 
 async def _handle_get_leader_meta(args: dict, ctx: ToolExecutionContext) -> str:
@@ -87,15 +91,18 @@ async def _handle_get_leader_meta(args: dict, ctx: ToolExecutionContext) -> str:
         )
         popular = [dict(r) async for r in cards_r]
 
-    return json.dumps({
-        "leader_id": leader_id,
-        "leader_name": rec["leader_name"] or "",
-        "total_decks": rec["total_decks"],
-        "avg_placement": round(rec["avg_placement"], 1) if rec["avg_placement"] else None,
-        "top_cut_count": rec["top_cut_count"],
-        "top_archetypes": rec["top_archetypes"] or [],
-        "popular_cards": popular,
-    }, default=str)
+    return json.dumps(
+        {
+            "leader_id": leader_id,
+            "leader_name": rec["leader_name"] or "",
+            "total_decks": rec["total_decks"],
+            "avg_placement": round(rec["avg_placement"], 1) if rec["avg_placement"] else None,
+            "top_cut_count": rec["top_cut_count"],
+            "top_archetypes": rec["top_archetypes"] or [],
+            "popular_cards": popular,
+        },
+        default=str,
+    )
 
 
 async def _handle_compare_deck_to_meta(args: dict, ctx: ToolExecutionContext) -> str:
@@ -119,13 +126,16 @@ async def _handle_compare_deck_to_meta(args: dict, ctx: ToolExecutionContext) ->
     missing = [c for c in meta_cards if c["id"] not in user_ids]
     unusual = [cid for cid in user_ids if cid not in meta_ids]
 
-    return json.dumps({
-        "leader_id": leader_id,
-        "missing_popular_cards": missing[:15],
-        "unusual_cards_in_deck": unusual[:10],
-        "meta_overlap": len(user_ids & meta_ids),
-        "meta_total": len(meta_ids),
-    }, default=str)
+    return json.dumps(
+        {
+            "leader_id": leader_id,
+            "missing_popular_cards": missing[:15],
+            "unusual_cards_in_deck": unusual[:10],
+            "meta_overlap": len(user_ids & meta_ids),
+            "meta_total": len(meta_ids),
+        },
+        default=str,
+    )
 
 
 async def _handle_recommend_meta_cards(args: dict, ctx: ToolExecutionContext) -> str:
@@ -186,7 +196,11 @@ COMPARE_DECK_TO_META = AgentTool(
         "type": "object",
         "properties": {
             "leader_id": {"type": "string", "description": "Leader card ID"},
-            "deck_card_ids": {"type": "array", "items": {"type": "string"}, "description": "Card IDs in user's deck"},
+            "deck_card_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Card IDs in user's deck",
+            },
         },
         "required": ["leader_id", "deck_card_ids"],
     },
@@ -209,4 +223,9 @@ RECOMMEND_META_CARDS = AgentTool(
     category="meta",
 )
 
-META_TOOLS: list[AgentTool] = [GET_META_OVERVIEW, GET_LEADER_META, COMPARE_DECK_TO_META, RECOMMEND_META_CARDS]
+META_TOOLS: list[AgentTool] = [
+    GET_META_OVERVIEW,
+    GET_LEADER_META,
+    COMPARE_DECK_TO_META,
+    RECOMMEND_META_CARDS,
+]

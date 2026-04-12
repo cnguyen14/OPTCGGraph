@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from enum import Enum
 from typing import Any
 
@@ -89,7 +90,9 @@ class EffectTemplate:
 
     type: EffectType
     trigger: EffectTrigger = EffectTrigger.ON_PLAY
-    target: str = "opponent_character"  # opponent_character, own_character, opponent_leader, self, any
+    target: str = (
+        "opponent_character"  # opponent_character, own_character, opponent_leader, self, any
+    )
     condition: EffectCondition | None = None
     count: int = 1  # Number of targets
     amount: int = 0  # Numeric value (draw count, power boost amount, etc.)
@@ -188,9 +191,7 @@ class GameAction:
     action_type: ActionType
     source_id: str = ""  # instance_id of acting card
     target_id: str = ""  # instance_id of target card
-    card_ids: list[str] = dataclass_field(
-        default_factory=list
-    )  # For multi-card actions (counters)
+    card_ids: list[str] = dataclass_field(default_factory=list)  # For multi-card actions (counters)
     description: str = ""
 
     def to_dict(self) -> dict[str, Any]:

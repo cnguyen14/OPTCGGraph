@@ -12,11 +12,13 @@ from backend.agent.tools.base import AgentTool, ToolExecutionContext
 
 
 async def _handle_update_ui_state(args: dict, ctx: ToolExecutionContext) -> str:
-    return json.dumps({
-        "action": args.get("action"),
-        "payload": args.get("payload"),
-        "status": "emitted",
-    })
+    return json.dumps(
+        {
+            "action": args.get("action"),
+            "payload": args.get("payload"),
+            "status": "emitted",
+        }
+    )
 
 
 # ---------------------------------------------------------------------------

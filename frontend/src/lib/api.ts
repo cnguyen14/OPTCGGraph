@@ -1,4 +1,5 @@
 import type {
+  Card,
   CardSearchParams,
   CardSearchResponse,
   Facets,
@@ -12,10 +13,10 @@ import type {
 
 const BASE_URL = '/api';
 
-export async function fetchCard(cardId: string) {
+export async function fetchCard(cardId: string): Promise<Card> {
   const resp = await fetch(`${BASE_URL}/graph/card/${cardId}`);
   if (!resp.ok) throw new Error(`Card ${cardId} not found`);
-  return resp.json();
+  return resp.json() as Promise<Card>;
 }
 
 export async function fetchSynergies(cardId: string, maxHops = 1, color?: string) {
@@ -396,8 +397,11 @@ export async function fetchCrawlStatus(): Promise<CrawlStatus> {
 
 export type StepName = 'clean' | 'bandai' | 'prices' | 'banned' | 'tournaments' | 'index';
 
-export async function triggerStep(step: StepName): Promise<{ status: string }> {
-  const resp = await fetch(`${BASE_URL}/data/step/${step}`, { method: 'POST' });
+export async function triggerStep(step: StepName, adminToken?: string): Promise<{ status: string }> {
+  const headers: Record<string, string> = {};
+  if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
+  const resp = await fetch(`${BASE_URL}/data/step/${step}`, { method: 'POST', headers });
+  if (resp.status === 401) throw new Error('Invalid admin token');
   return resp.json();
 }
 
@@ -410,8 +414,11 @@ export async function fetchRebuildStatus(): Promise<{
   return resp.json();
 }
 
-export async function stopRebuild(): Promise<{ status: string }> {
-  const resp = await fetch(`${BASE_URL}/data/rebuild-stop`, { method: 'POST' });
+export async function stopRebuild(adminToken?: string): Promise<{ status: string }> {
+  const headers: Record<string, string> = {};
+  if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
+  const resp = await fetch(`${BASE_URL}/data/rebuild-stop`, { method: 'POST', headers });
+  if (resp.status === 401) throw new Error('Invalid admin token');
   return resp.json();
 }
 
@@ -549,8 +556,10 @@ export async function fetchProviderModels(
   provider: string,
   apiKey?: string,
 ): Promise<ProviderModelsResult> {
-  const params = new URLSearchParams();
-  if (apiKey) params.set('api_key', apiKey);
-  const resp = await fetch(`${BASE_URL}/settings/provider-models/${provider}?${params}`);
+  const resp = await fetch(`${BASE_URL}/settings/provider-models/${provider}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(apiKey ? { api_key: apiKey } : {}),
+  });
   return resp.json();
 }

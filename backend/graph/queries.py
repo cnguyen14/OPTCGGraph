@@ -234,9 +234,7 @@ async def search_cards(
 async def get_facets(driver: AsyncDriver) -> dict:
     """Get available filter values for card search."""
     async with driver.session() as session:
-        colors_result = await session.run(
-            "MATCH (c:Color) RETURN c.name AS name ORDER BY c.name"
-        )
+        colors_result = await session.run("MATCH (c:Color) RETURN c.name AS name ORDER BY c.name")
         colors = [r["name"] async for r in colors_result]
 
         types_result = await session.run(

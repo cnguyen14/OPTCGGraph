@@ -71,7 +71,10 @@ async def run_guards(
             if not check_result.passed:
                 logger.warning(
                     "Guardrail %s [%s] blocked %s: %s",
-                    guard.name, phase, tool_name, check_result.violations,
+                    guard.name,
+                    phase,
+                    tool_name,
+                    check_result.violations,
                 )
                 return check_result
         except Exception as exc:

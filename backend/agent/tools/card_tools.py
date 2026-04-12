@@ -145,9 +145,7 @@ async def _handle_get_mana_curve(args: dict, ctx: ToolExecutionContext) -> str:
             ids=card_ids,
         )
         curve = [dict(r) async for r in result]
-        return json.dumps(
-            {"curve": curve, "total": sum(e["count"] for e in curve)}, default=str
-        )
+        return json.dumps({"curve": curve, "total": sum(e["count"] for e in curve)}, default=str)
 
 
 # ---------------------------------------------------------------------------
@@ -175,9 +173,17 @@ FIND_SYNERGIES = AgentTool(
         "type": "object",
         "properties": {
             "card_id": {"type": "string"},
-            "max_hops": {"type": "integer", "default": 1, "description": "1=direct, 2=2-hop network"},
+            "max_hops": {
+                "type": "integer",
+                "default": 1,
+                "description": "1=direct, 2=2-hop network",
+            },
             "color_filter": {"type": "string", "description": "Filter by color (optional)"},
-            "include_mechanical": {"type": "boolean", "default": False, "description": "Include MECHANICAL_SYNERGY (keyword-based) edges"},
+            "include_mechanical": {
+                "type": "boolean",
+                "default": False,
+                "description": "Include MECHANICAL_SYNERGY (keyword-based) edges",
+            },
         },
         "required": ["card_id"],
     },
@@ -206,8 +212,14 @@ SEARCH_CARDS = AgentTool(
     parameters={
         "type": "object",
         "properties": {
-            "color": {"type": "string", "description": "Card color: Red, Green, Blue, Purple, Black, Yellow"},
-            "card_type": {"type": "string", "description": "Card type: LEADER, CHARACTER, EVENT, STAGE"},
+            "color": {
+                "type": "string",
+                "description": "Card color: Red, Green, Blue, Purple, Black, Yellow",
+            },
+            "card_type": {
+                "type": "string",
+                "description": "Card type: LEADER, CHARACTER, EVENT, STAGE",
+            },
             "family": {"type": "string", "description": "Family/tribe name, e.g. 'Straw Hat Crew'"},
             "keyword": {"type": "string", "description": "Keyword ability, e.g. 'Rush', 'Blocker'"},
             "name": {"type": "string", "description": "Card name (partial match)"},
@@ -224,7 +236,11 @@ GET_MANA_CURVE = AgentTool(
     parameters={
         "type": "object",
         "properties": {
-            "card_ids": {"type": "array", "items": {"type": "string"}, "description": "List of card IDs"},
+            "card_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of card IDs",
+            },
         },
         "required": ["card_ids"],
     },
@@ -232,4 +248,10 @@ GET_MANA_CURVE = AgentTool(
     category="card",
 )
 
-CARD_TOOLS: list[AgentTool] = [GET_CARD, SEARCH_CARDS, FIND_SYNERGIES, FIND_COUNTERS, GET_MANA_CURVE]
+CARD_TOOLS: list[AgentTool] = [
+    GET_CARD,
+    SEARCH_CARDS,
+    FIND_SYNERGIES,
+    FIND_COUNTERS,
+    GET_MANA_CURVE,
+]

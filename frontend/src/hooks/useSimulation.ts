@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { SimulationProgress, SimulationResult } from '../types';
 import { startBattle } from '../lib/api';
 
@@ -62,6 +62,10 @@ export function useSimulation() {
   });
 
   const eventSourceRef = useRef<EventSource | null>(null);
+
+  useEffect(() => {
+    return () => { eventSourceRef.current?.close(); };
+  }, []);
 
   const startSimulation = useCallback(
     async (

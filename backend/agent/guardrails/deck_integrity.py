@@ -20,9 +20,7 @@ class DeckIntegrityGuard:
     def applies_to(self) -> tuple[str, ...]:
         return ("build_deck_shell", "suggest_deck_fixes", "suggest_card_swap")
 
-    async def check_pre(
-        self, tool_name: str, arguments: JSONDict, ctx: Any
-    ) -> GuardrailResult:
+    async def check_pre(self, tool_name: str, arguments: JSONDict, ctx: Any) -> GuardrailResult:
         return GuardrailResult(passed=True)
 
     async def check_post(

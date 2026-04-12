@@ -101,7 +101,9 @@ def _compute_mulligan_analysis(games: list[dict[str, Any]]) -> dict[str, Any]:
         recommendation = "High mulligan rate (>50%) — deck may lack early-game consistency. Consider more low-cost cards."
     if p1_mulligan_games and p1_keep_games:
         if mulligan_win_rate < keep_win_rate - 0.15:
-            recommendation += " Mulliganing hurts win rate significantly — improve opening hand quality."
+            recommendation += (
+                " Mulliganing hurts win rate significantly — improve opening hand quality."
+            )
 
     return {
         "mulligan_rate": round(mulligan_rate, 3),
@@ -133,15 +135,11 @@ def _compute_decision_stats(decisions: list[dict[str, Any]]) -> dict[str, Any]:
         action = d.get("action", "unknown")
         action_counts[action] += 1
 
-    action_distribution = {
-        k: round(v / total_decisions, 4) for k, v in action_counts.items()
-    }
+    action_distribution = {k: round(v / total_decisions, 4) for k, v in action_counts.items()}
 
     # Leader attack percentage (attacks targeting leader)
     attacks = [d for d in decisions if d.get("action") == "attack"]
-    leader_attacks = sum(
-        1 for a in attacks if a.get("desc") and "leader" in a["desc"].lower()
-    )
+    leader_attacks = sum(1 for a in attacks if a.get("desc") and "leader" in a["desc"].lower())
     leader_attack_pct = round(leader_attacks / len(attacks), 4) if attacks else 0.0
 
     # DON to leader percentage
@@ -151,9 +149,7 @@ def _compute_decision_stats(decisions: list[dict[str, Any]]) -> dict[str, Any]:
         for da in don_attachments
         if da.get("desc") and ("Yamato" in da["desc"] or "Mihawk" in da["desc"])
     )
-    don_to_leader_pct = (
-        round(don_to_leader / len(don_attachments), 4) if don_attachments else 0.0
-    )
+    don_to_leader_pct = round(don_to_leader / len(don_attachments), 4) if don_attachments else 0.0
 
     # Losing attack percentage (attacker power < target power)
     power_pattern = re.compile(r"\((\d+)\s*vs\s*(\d+)\)")
@@ -169,9 +165,7 @@ def _compute_decision_stats(decisions: list[dict[str, Any]]) -> dict[str, Any]:
             if attacker_power < target_power:
                 losing_attacks += 1
 
-    losing_attack_pct = (
-        round(losing_attacks / attacks_with_power, 4) if attacks_with_power else 0.0
-    )
+    losing_attack_pct = round(losing_attacks / attacks_with_power, 4) if attacks_with_power else 0.0
 
     # Play before attack percentage (per turn)
     # Group decisions by (game_idx, turn)
@@ -188,12 +182,8 @@ def _compute_decision_stats(decisions: list[dict[str, Any]]) -> dict[str, Any]:
         has_attack = "attack" in actions_in_turn
         if has_play and has_attack:
             turns_with_both += 1
-            first_play = next(
-                i for i, a in enumerate(actions_in_turn) if a == "play_card"
-            )
-            first_attack = next(
-                i for i, a in enumerate(actions_in_turn) if a == "attack"
-            )
+            first_play = next(i for i, a in enumerate(actions_in_turn) if a == "play_card")
+            first_attack = next(i for i, a in enumerate(actions_in_turn) if a == "attack")
             if first_play < first_attack:
                 play_before_attack_count += 1
 
@@ -348,11 +338,7 @@ def _compute_per_card_detail(
                 "avg_turn_played": avg_turn,
                 "in_winning_games": in_winning,
                 "in_losing_games": in_losing,
-                "win_pct": (
-                    round(in_winning / total_appearances, 4)
-                    if total_appearances
-                    else 0.0
-                ),
+                "win_pct": (round(in_winning / total_appearances, 4) if total_appearances else 0.0),
             }
         )
 
@@ -370,9 +356,15 @@ def _compute_draw_accuracy(
     Helps identify dead draws (high P but low play) and lucky draws (low P but high play).
     """
     if not draw_prob_data or not games:
-        logger.debug("Skipping draw accuracy: draw_prob=%s, games=%d", bool(draw_prob_data), len(games))
+        logger.debug(
+            "Skipping draw accuracy: draw_prob=%s, games=%d", bool(draw_prob_data), len(games)
+        )
         return []
-    logger.info("Computing draw accuracy: %d games, draw_prob keys=%s", len(games), list(draw_prob_data.keys())[:5])
+    logger.info(
+        "Computing draw accuracy: %d games, draw_prob keys=%s",
+        len(games),
+        list(draw_prob_data.keys())[:5],
+    )
 
     # Use p1 draw probability data (primary deck under analysis)
     per_card = draw_prob_data.get("p1", draw_prob_data).get("per_card", [])
@@ -400,16 +392,18 @@ def _compute_draw_accuracy(
         actual_play_rate = actual_plays.get(card_id, 0) / num_games
         delta = actual_draw_rate - predicted_p
 
-        results.append({
-            "card_id": card_id,
-            "name": pc.get("name", ""),
-            "copies": pc.get("copies", 0),
-            "predicted_p": round(predicted_p, 3),
-            "actual_draw_rate": round(actual_draw_rate, 3),
-            "actual_play_rate": round(actual_play_rate, 3),
-            "delta": round(delta, 3),
-            "dead_draw": actual_draw_rate > 0.3 and actual_play_rate < 0.15,
-        })
+        results.append(
+            {
+                "card_id": card_id,
+                "name": pc.get("name", ""),
+                "copies": pc.get("copies", 0),
+                "predicted_p": round(predicted_p, 3),
+                "actual_draw_rate": round(actual_draw_rate, 3),
+                "actual_play_rate": round(actual_play_rate, 3),
+                "delta": round(delta, 3),
+                "dead_draw": actual_draw_rate > 0.3 and actual_play_rate < 0.15,
+            }
+        )
 
     return sorted(results, key=lambda x: x["delta"])
 
@@ -591,9 +585,7 @@ def aggregate_deck_health(sim_folders: list[str]) -> dict[str, Any]:
     logger.info("Aggregating deck health from %d simulation folders", len(sim_folders))
     all_games: list[dict[str, Any]] = []
     all_decisions: list[dict[str, Any]] = []
-    matchup_results: dict[str, dict[str, int]] = defaultdict(
-        lambda: {"wins": 0, "total": 0}
-    )
+    matchup_results: dict[str, dict[str, int]] = defaultdict(lambda: {"wins": 0, "total": 0})
 
     for folder in sim_folders:
         # Handle both absolute paths and folder names
@@ -649,7 +641,9 @@ def aggregate_deck_health(sim_folders: list[str]) -> dict[str, Any]:
     card_names: dict[str, str] = {}
     for folder in sim_folders:
         candidate = Path(folder)
-        meta_path = (candidate if candidate.is_absolute() else SIMULATIONS_DIR / Path(folder).name) / "metadata.json"
+        meta_path = (
+            candidate if candidate.is_absolute() else SIMULATIONS_DIR / Path(folder).name
+        ) / "metadata.json"
         if meta_path.exists():
             try:
                 m = json.loads(meta_path.read_text())
@@ -685,23 +679,21 @@ def aggregate_deck_health(sim_folders: list[str]) -> dict[str, Any]:
         appeared = stats["games_appeared"]
         play_rate = round(appeared / total_games, 4) if total_games else 0.0
         win_corr = round(stats["wins"] / appeared, 4) if appeared else 0.0
-        card_health.append({
-            "card_id": card_id,
-            "card_name": card_names.get(card_id, card_id),
-            "times_played": stats["times_played"],
-            "play_rate": play_rate,
-            "win_correlation": win_corr,
-            "games_appeared": appeared,
-        })
+        card_health.append(
+            {
+                "card_id": card_id,
+                "card_name": card_names.get(card_id, card_id),
+                "times_played": stats["times_played"],
+                "play_rate": play_rate,
+                "win_correlation": win_corr,
+                "games_appeared": appeared,
+            }
+        )
     card_health.sort(key=lambda x: x["times_played"], reverse=True)
 
     # --- Co-occurrence synergy pairs (in winning games) ---
     # Filter to cards with >10% play rate
-    frequent_cards = {
-        c["card_id"]
-        for c in card_health
-        if c["play_rate"] > 0.1
-    }
+    frequent_cards = {c["card_id"] for c in card_health if c["play_rate"] > 0.1}
     pair_wins: dict[tuple[str, str], int] = defaultdict(int)
     pair_total: dict[tuple[str, str], int] = defaultdict(int)
     for card_set, is_win in game_card_sets:
@@ -720,25 +712,29 @@ def aggregate_deck_health(sim_folders: list[str]) -> dict[str, Any]:
             continue
         pair_win_rate = pair_wins[pair] / total if total else 0.0
         lift = pair_win_rate / overall_win_rate if overall_win_rate > 0 else 1.0
-        synergy_pairs.append({
-            "card_a": pair[0],
-            "card_a_name": card_names.get(pair[0], pair[0]),
-            "card_b": pair[1],
-            "card_b_name": card_names.get(pair[1], pair[1]),
-            "co_occurrence_rate": round(total / total_games, 4),
-            "win_lift": round(lift, 4),
-        })
+        synergy_pairs.append(
+            {
+                "card_a": pair[0],
+                "card_a_name": card_names.get(pair[0], pair[0]),
+                "card_b": pair[1],
+                "card_b_name": card_names.get(pair[1], pair[1]),
+                "co_occurrence_rate": round(total / total_games, 4),
+                "win_lift": round(lift, 4),
+            }
+        )
     synergy_pairs.sort(key=lambda x: x["win_lift"], reverse=True)
     synergy_pairs = synergy_pairs[:10]
 
     # --- Matchup spread ---
     matchup_spread: list[dict[str, Any]] = []
     for opponent, mr in matchup_results.items():
-        matchup_spread.append({
-            "opponent": opponent,
-            "win_rate": round(mr["wins"] / mr["total"], 4) if mr["total"] else 0.0,
-            "num_games": mr["total"],
-        })
+        matchup_spread.append(
+            {
+                "opponent": opponent,
+                "win_rate": round(mr["wins"] / mr["total"], 4) if mr["total"] else 0.0,
+                "num_games": mr["total"],
+            }
+        )
     matchup_spread.sort(key=lambda x: x["num_games"], reverse=True)
 
     # --- Aggregated action patterns ---
@@ -764,9 +760,14 @@ def aggregate_deck_health(sim_folders: list[str]) -> dict[str, Any]:
     logger.info(
         "Deck health aggregated: %d games, %d wins (%.0f%%), %d card stats, "
         "%d synergy pairs, %d matchups, draw_accuracy=%d cards, mulligan=%s",
-        total_games, total_wins, overall_win_rate * 100,
-        len(card_health), len(synergy_pairs), len(matchup_spread),
-        len(draw_accuracy), bool(mulligan_analysis),
+        total_games,
+        total_wins,
+        overall_win_rate * 100,
+        len(card_health),
+        len(synergy_pairs),
+        len(matchup_spread),
+        len(draw_accuracy),
+        bool(mulligan_analysis),
     )
 
     result = {

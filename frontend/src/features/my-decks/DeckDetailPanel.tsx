@@ -1353,7 +1353,7 @@ function SimHistoryTab({
 // Tab 3: Improve
 // ---------------------------------------------------------------------------
 
-function ImproveTab({ deckId, deckName, leaderId, cardIds, healthData, onHealthReportChange, onDeckChanged }: {
+function ImproveTab({ deckId, deckName, leaderId, cardIds, healthData, onHealthReportChange, onDeckChanged: _onDeckChanged }: {
   deckId: string;
   deckName: string;
   leaderId: string;
@@ -1680,9 +1680,9 @@ function ImproveTab({ deckId, deckName, leaderId, cardIds, healthData, onHealthR
                         )}
                         <p className="text-[9px] text-emerald-300 font-medium truncate">{c.name}</p>
                         <div className="flex justify-center gap-1.5 mt-0.5">
-                          {c.cost > 0 && <span className="text-[8px] text-gray-500">{c.cost}c</span>}
-                          {c.power > 0 && <span className="text-[8px] text-gray-500">{c.power}P</span>}
-                          {c.synergy_count > 0 && <span className="text-[8px] text-amber-500">{c.synergy_count} syn</span>}
+                          {(c.cost ?? 0) > 0 && <span className="text-[8px] text-gray-500">{c.cost}c</span>}
+                          {(c.power ?? 0) > 0 && <span className="text-[8px] text-gray-500">{c.power}P</span>}
+                          {(c.synergy_count ?? 0) > 0 && <span className="text-[8px] text-amber-500">{c.synergy_count} syn</span>}
                         </div>
                         {swap.remove_id && !appliedSwaps.has(swap.remove_id) && (
                           <span className="text-[8px] text-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity mt-1 block font-semibold">

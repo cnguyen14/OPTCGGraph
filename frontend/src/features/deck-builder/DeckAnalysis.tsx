@@ -101,7 +101,7 @@ function parseNotes(raw: string): { summary: string; sections: ParsedSection[] }
       const lower = headerText.toLowerCase();
       if (lower.includes('strategy') || lower.includes('how your leader')) {
         currentSection = { type: 'strategy', title: headerText, content: '', icon: '\u{1F3AF}', accent: 'blue' };
-      } else if (lower.includes('decklist') || lower.includes('deck list') || lower.includes('cost tier') || lower.includes('card breakdown') || lower.includes('card list')) {
+      } else if (lower.includes('decklist') || lower.includes('deck list') || lower.includes('cost tier') || lower.includes('card breakdown') || lower.includes('card list') || /^\d[\d\-–\s]*cost/i.test(lower) || /cost\s*\(.*cards?\)/i.test(lower)) {
         currentSection = { type: 'decklist', title: headerText, content: '', icon: '\u{1F4CB}', accent: 'purple' };
       } else if (lower.includes('validation') || lower.includes('legal')) {
         currentSection = { type: 'validation', title: headerText, content: '', icon: '\u2705', accent: 'green' };
@@ -365,7 +365,56 @@ export default function DeckAnalysis({ notes, onHighlightCards }: Props) {
             );
           }
 
-          // Default section
+          // Default section — also detect card lines for clickable rendering
+          const defaultParsed = parseCardLines(section.content);
+          const hasCards = defaultParsed.cards.length > 0;
+
+          // If section has card lines, render as decklist-style
+          if (hasCards) {
+            return (
+              <div key={idx} className={`rounded-lg border ${isActive ? 'border-purple-500/60 shadow-[0_0_12px_rgba(168,85,247,0.15)]' : colors.border} ${colors.bg} overflow-hidden transition-all`}>
+                <div className={`flex items-center gap-2 px-3 py-2 transition-all ${isActive ? 'bg-purple-900/20' : ''}`}>
+                  <button
+                    onClick={() => {
+                      handleSectionHighlight(idx, defaultParsed.cards);
+                      if (collapsed.has(idx)) toggleSection(idx);
+                    }}
+                    className={`flex items-center gap-2 flex-1 text-left ${colors.headerHover} rounded px-1 -mx-1 py-0.5 transition-all cursor-pointer`}
+                  >
+                    <span className="text-sm">{section.icon}</span>
+                    <span className={`text-xs font-semibold ${colors.text}`}>{section.title}</span>
+                    <span className={`text-[10px] rounded-full px-1.5 py-0.5 ${isActive ? 'bg-purple-600 text-white' : colors.badge}`}>
+                      {defaultParsed.cards.length} cards
+                    </span>
+                  </button>
+                  <button onClick={() => toggleSection(idx)} className="p-1 rounded hover:bg-gray-700/50 transition-colors shrink-0">
+                    <svg className={`w-3 h-3 text-gray-500 transition-transform ${isCollapsed ? '' : 'rotate-180'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                </div>
+                {!isCollapsed && (
+                  <div className="px-3 pb-2">
+                    {defaultParsed.groups.map((group, gi) => (
+                      <div key={gi} className={gi > 0 ? 'mt-2' : ''}>
+                        {group.header && <h6 className="text-[11px] font-medium text-purple-400 mt-1 mb-1">{group.header}</h6>}
+                        {group.other.map((line, oi) => <div key={`o${oi}`}>{renderMarkdownLine(line)}</div>)}
+                        {group.cards.map((card, ci) => (
+                          <div key={`c${ci}`} className="flex items-center gap-2 py-1 px-1.5 -mx-1.5 rounded cursor-pointer hover:bg-purple-900/30 transition-colors" onClick={() => onHighlightCards?.([card.id])}>
+                            <span className="text-[10px] font-bold text-white bg-purple-800/60 rounded w-5 h-5 flex items-center justify-center shrink-0">{card.qty}</span>
+                            <span className="text-[11px] text-gray-200 truncate">{card.name}</span>
+                            <span className="text-[9px] text-gray-600 shrink-0">{card.id}</span>
+                            {card.desc && <span className="text-[9px] text-purple-400/70 truncate ml-auto">{card.desc}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
           return (
             <div key={idx} className={`rounded-lg border ${colors.border} ${colors.bg} overflow-hidden`}>
               <button

@@ -49,6 +49,7 @@ class PlaystyleProfile:
 @dataclass
 class _DeckFeatures:
     """Feature vector for a single tournament deck."""
+
     deck_id: str
     card_ids: list[str]
     avg_cost: float = 0.0
@@ -134,9 +135,7 @@ _PLAYSTYLE_META: dict[str, dict] = {
 }
 
 
-async def analyze_leader_playstyles(
-    driver: AsyncDriver, leader_id: str
-) -> list[PlaystyleProfile]:
+async def analyze_leader_playstyles(driver: AsyncDriver, leader_id: str) -> list[PlaystyleProfile]:
     """Analyze tournament decks to find distinct playstyles for a leader.
 
     Returns a list of PlaystyleProfile sorted by deck_count descending.
@@ -172,22 +171,22 @@ async def analyze_leader_playstyles(
             elif avg_p <= 16:
                 hint = f"Avg placement: {avg_p:.0f}"
 
-        profiles.append(PlaystyleProfile(
-            name=label,
-            description=meta.get("description", ""),
-            base_strategy=meta.get("base_strategy", "midrange"),
-            deck_count=len(decks),
-            win_rate_hint=hint,
-            signature_cards=sig_cards,
-            template_overrides=meta.get("template_overrides", {}),
-        ))
+        profiles.append(
+            PlaystyleProfile(
+                name=label,
+                description=meta.get("description", ""),
+                base_strategy=meta.get("base_strategy", "midrange"),
+                deck_count=len(decks),
+                win_rate_hint=hint,
+                signature_cards=sig_cards,
+                template_overrides=meta.get("template_overrides", {}),
+            )
+        )
 
     return profiles
 
 
-async def _load_deck_features(
-    driver: AsyncDriver, leader_id: str
-) -> list[_DeckFeatures]:
+async def _load_deck_features(driver: AsyncDriver, leader_id: str) -> list[_DeckFeatures]:
     """Load all tournament decks for a leader and compute feature vectors."""
     async with driver.session() as session:
         result = await session.run(
