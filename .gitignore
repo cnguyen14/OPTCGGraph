@@ -49,3 +49,9 @@ data/simulations/
 .claude/worktrees/
 .gitnexus
 data/card_images/
+
+# Runtime data artifacts (backups, logs, simulations, card images)
+data/
+
+# Screenshots & test artifacts
+*.png
